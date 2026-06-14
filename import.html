@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lintel OS · Rate Library Import</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  :root{--paper:#FAF8F4;--paper-2:#F2EEE6;--ink:#1C1A17;--ink-soft:#5B5750;--line:#E4DED3;
+    --line-2:#D6CEBF;--brass:#B07D3C;--brass-deep:#8C621F;--green:#4F7A56;--clay:#B5503C}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 24px}
+  .mark{font-family:'Bricolage Grotesque';font-weight:700;font-size:12px;letter-spacing:.26em;text-transform:uppercase;color:var(--brass-deep)}
+  h1{font-family:'Bricolage Grotesque';font-weight:600;font-size:30px;letter-spacing:-.02em;margin:10px 0 4px}
+  .sub{color:var(--ink-soft);margin-bottom:28px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px;margin-bottom:18px}
+  .step{font-family:'IBM Plex Mono';font-size:11px;letter-spacing:.08em;color:var(--brass-deep);text-transform:uppercase}
+  .panel h2{font-family:'Bricolage Grotesque';font-weight:600;font-size:18px;margin:6px 0 14px}
+  button{font-family:inherit;cursor:pointer}
+  .primary{background:var(--brass);color:#fff;border:none;padding:11px 18px;border-radius:9px;font-weight:600}
+  .primary:hover{background:var(--brass-deep)} .primary:disabled{opacity:.4;cursor:not-allowed}
+  .ghost{border:1px solid var(--line-2);background:none;padding:10px 16px;border-radius:9px;font-weight:500;color:var(--ink)}
+  .gbtn{display:inline-flex;gap:9px;align-items:center;background:var(--ink);color:var(--paper);border:none;padding:12px 18px;border-radius:9px;font-weight:600}
+  input[type=file]{font-size:13px}
+  select{padding:8px 10px;border:1px solid var(--line-2);border-radius:7px;background:#fff;font-family:inherit}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);padding:8px 10px;border-bottom:1px solid var(--line)}
+  td{padding:8px 10px;border-bottom:1px solid var(--line)}
+  .num{font-family:'IBM Plex Mono';text-align:right}
+  .map-grid{display:grid;grid-template-columns:140px 1fr;gap:10px 14px;align-items:center;margin-top:6px}
+  .map-grid .lbl{font-size:12px;color:var(--ink-soft)}
+  .req::after{content:" *";color:var(--clay)}
+  .log{font-family:'IBM Plex Mono';font-size:12px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px;padding:14px;white-space:pre-wrap;max-height:260px;overflow:auto;margin-top:14px}
+  .ok{color:var(--green)} .err{color:var(--clay)}
+  .muted{color:var(--ink-soft);font-size:12.5px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  code{font-family:'IBM Plex Mono';background:var(--paper-2);padding:1px 5px;border-radius:4px;font-size:12.5px}
+  .hide{display:none}
+  .banner{background:#FBEFE0;border:1px solid #EAD3B0;color:#7a5a1f;padding:10px 14px;border-radius:9px;font-size:12.5px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="mark">Lintel Space Atelier</div>
+  <h1>Rate Library Import</h1>
+  <div class="sub">Bulk-load your MRC rate library into <code>rate_library</code>. Admin only.</div>
+
+  <!-- STEP 1 — sign in -->
+  <div class="panel" id="authPanel">
+    <div class="step">Step 1 · Authenticate</div>
+    <h2>Sign in as an admin</h2>
+    <div id="cfgWarn" class="banner hide">⚠ Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> at the top of this file's script first.</div>
+    <div id="loginForm">
+      <input id="emailIn" type="email" placeholder="you@lintelspace.com"
+        style="padding:11px 13px;border:1px solid var(--line-2);border-radius:9px;background:#fff;font-size:14px;width:280px;max-width:100%;margin-right:8px">
+      <button class="gbtn" id="emailBtn" style="vertical-align:top">Email me a login link</button>
+    </div>
+    <div id="sentMsg" class="muted hide" style="margin-top:6px">✉️ Link sent to <b id="sentTo"></b>. Open it in this same browser to return signed in.</div>
+    <div id="whoami" class="muted hide" style="margin-top:12px"></div>
+  </div>
+
+  <!-- STEP 2 — pick file -->
+  <div class="panel hide" id="filePanel">
+    <div class="step">Step 2 · Choose CSV</div>
+    <h2>Select your rate library file</h2>
+    <div class="muted" style="margin-bottom:10px">Expected columns (any order): <code>category</code>, <code>description</code>, <code>uom</code>, <code>rate</code> — plus optional <code>item_code</code>, <code>cost_rate</code>. You'll map them next.</div>
+    <input type="file" id="file" accept=".csv,text/csv">
+  </div>
+
+  <!-- STEP 3 — map columns -->
+  <div class="panel hide" id="mapPanel">
+    <div class="step">Step 3 · Map columns</div>
+    <h2>Match your columns to the rate library</h2>
+    <div class="map-grid" id="mapGrid"></div>
+    <div class="row" style="margin-top:18px">
+      <label class="muted"><input type="checkbox" id="wipe"> Replace existing library (delete all rows first)</label>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="ghost" id="previewBtn">Preview first 5 rows</button>
+      <button class="primary" id="importBtn">Import all rows</button>
+    </div>
+    <div id="preview"></div>
+    <div class="log hide" id="log"></div>
+  </div>
+
+  <p class="muted">When done, the new rates appear in the BOQ "Add from rate library" dropdown in the main app. <a href="index.html">← back to Lintel OS</a></p>
+</div>
+
+<script>
+/* ===== CONFIG — same keys as index.html ===== */
+const SUPABASE_URL = "https://cxgxmqspvpuizvwfbnjq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4Z3htcXNwdnB1aXp2d2ZibmpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDEwMDUsImV4cCI6MjA5Njk3NzAwNX0.cPbcB9m-WSAC2e8nOD_vdp2mrAeDaisk4-nET5eo8lE";
+const ALLOWED_DOMAIN = "lintelspace.com";
+/* ============================================ */
+
+const $ = s => document.querySelector(s);
+const cfgOk = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 20;
+let sb=null, rows=[], headers=[];
+
+const TARGETS = [
+  {key:"category",    label:"Category",    req:true},
+  {key:"description", label:"Description", req:true},
+  {key:"uom",         label:"UoM",         req:true},
+  {key:"rate",        label:"Rate (selling)", req:true},
+  {key:"item_code",   label:"Item code",   req:false},
+  {key:"cost_rate",   label:"Cost rate",   req:false},
+];
+
+if(!cfgOk){ $("#cfgWarn").classList.remove("hide"); }
+else {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const sendLink = async () => {
+    const email = ($("#emailIn").value||"").trim().toLowerCase();
+    if(!email.endsWith("@"+ALLOWED_DOMAIN)) return alert("Please use your @"+ALLOWED_DOMAIN+" email.");
+    $("#emailBtn").disabled=true; $("#emailBtn").textContent="Sending…";
+    const {error} = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href.split("#")[0] }});
+    $("#emailBtn").disabled=false; $("#emailBtn").textContent="Email me a login link";
+    if(error) return alert(error.message);
+    $("#sentTo").textContent=email; $("#loginForm").classList.add("hide"); $("#sentMsg").classList.remove("hide");
+  };
+  $("#emailBtn").onclick = sendLink;
+  $("#emailIn").addEventListener("keydown", e=>{ if(e.key==="Enter") sendLink(); });
+  sb.auth.getSession().then(({data})=> data.session && afterLogin(data.session));
+  sb.auth.onAuthStateChange((_e,s)=> s && afterLogin(s));
+}
+
+async function afterLogin(session){
+  const email = session.user.email||"";
+  if(!email.endsWith("@"+ALLOWED_DOMAIN)){ await sb.auth.signOut(); alert("Restricted to @"+ALLOWED_DOMAIN); return location.reload(); }
+  const {data:prof} = await sb.from("profiles").select("role,full_name").eq("id",session.user.id).single();
+  const role = prof?.role||"site_engineer";
+  $("#loginForm").classList.add("hide"); $("#sentMsg").classList.add("hide");
+  const w=$("#whoami"); w.classList.remove("hide");
+  if(role!=="admin"){ w.innerHTML=`Signed in as <b>${email}</b> — but importing needs the <b>admin</b> role. Ask an admin, or run <code>update profiles set role='admin' where email='${email}'</code> in Supabase.`; w.classList.add("err"); return; }
+  w.innerHTML=`Signed in as <b>${email}</b> · role: admin ✓`; w.classList.add("ok");
+  $("#filePanel").classList.remove("hide");
+}
+
+$("#file") && ($("#file").onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  Papa.parse(f, {header:true, skipEmptyLines:true, complete: res => {
+    rows = res.data; headers = res.meta.fields||[];
+    buildMap(); $("#mapPanel").classList.remove("hide");
+  }});
+});
+
+function guess(target){
+  const h = headers.find(x => x.toLowerCase().replace(/[^a-z]/g,"") === target.replace(/[^a-z]/g,""))
+        || headers.find(x => x.toLowerCase().includes(target.split("_")[0]));
+  return h||"";
+}
+function buildMap(){
+  const g = $("#mapGrid"); g.innerHTML="";
+  TARGETS.forEach(t=>{
+    const lbl=document.createElement("div"); lbl.className="lbl"+(t.req?" req":""); lbl.textContent=t.label;
+    const sel=document.createElement("select"); sel.id="map_"+t.key;
+    sel.innerHTML=`<option value="">— none —</option>`+headers.map(h=>`<option ${guess(t.key)===h?"selected":""}>${h}</option>`).join("");
+    g.appendChild(lbl); g.appendChild(sel);
+  });
+}
+function mapped(){
+  return rows.map(r=>{
+    const o={};
+    TARGETS.forEach(t=>{ const col=$("#map_"+t.key).value; if(col) o[t.key]=r[col]; });
+    o.rate = Number(String(o.rate||"0").replace(/[^0-9.]/g,""))||0;
+    o.cost_rate = Number(String(o.cost_rate||"0").replace(/[^0-9.]/g,""))||0;
+    o.uom = (o.uom||"nos").trim();
+    o.is_active = true;
+    return o;
+  }).filter(o=>o.category && o.description);
+}
+
+$("#previewBtn") && ($("#previewBtn").onclick = ()=>{
+  const data=mapped().slice(0,5);
+  $("#preview").innerHTML = `<table><thead><tr><th>Category</th><th>Description</th><th>UoM</th><th class="num">Rate</th><th class="num">Cost</th></tr></thead><tbody>`+
+    data.map(d=>`<tr><td>${d.category}</td><td>${d.description}</td><td>${d.uom}</td><td class="num">${d.rate}</td><td class="num">${d.cost_rate}</td></tr>`).join("")+
+    `</tbody></table><div class="muted" style="margin-top:8px">${mapped().length} valid rows ready.</div>`;
+});
+
+$("#importBtn") && ($("#importBtn").onclick = async ()=>{
+  const data=mapped();
+  if(!data.length) return alert("No valid rows — check your column mapping (category + description required).");
+  const log=$("#log"); log.classList.remove("hide"); log.textContent="";
+  const w=t=>{log.textContent+=t+"\n";log.scrollTop=log.scrollHeight;};
+  $("#importBtn").disabled=true;
+  try{
+    if($("#wipe").checked){ w("Deleting existing rate_library rows…"); 
+      const {error}=await sb.from("rate_library").delete().neq("id",-1); if(error) throw error; w("✓ cleared"); }
+    const chunk=200; let done=0;
+    for(let i=0;i<data.length;i+=chunk){
+      const slice=data.slice(i,i+chunk);
+      const {error}=await sb.from("rate_library").insert(slice);
+      if(error) throw error;
+      done+=slice.length; w(`Inserted ${done}/${data.length}…`);
+    }
+    w("✓ Done. "+done+" rates loaded. Open the app → BOQ → Add from rate library.");
+  }catch(e){ w("✗ "+(e.message||e)); }
+  $("#importBtn").disabled=false;
+});
+</script>
+</body>
+</html>

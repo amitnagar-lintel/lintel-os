@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lintel OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  /* ---- Lintel OS · drafting-sheet design system -------------------- */
+  :root{
+    --paper:#FAF8F4; --paper-2:#F2EEE6; --ink:#1C1A17; --ink-soft:#5B5750;
+    --line:#E4DED3; --line-2:#D6CEBF; --brass:#B07D3C; --brass-deep:#8C621F;
+    --slate:#5B6670; --green:#4F7A56; --clay:#B5503C; --blue:#3A6EA5;
+    --new:#8C8174; --contacted:#3A6EA5; --qualified:#7A5BA8;
+    --quoted:#B07D3C; --won:#4F7A56; --lost:#B5503C;
+    --radius:10px; --shadow:0 1px 2px rgba(28,26,23,.06),0 8px 24px rgba(28,26,23,.05);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--paper);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .display{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.01em}
+  button{font-family:inherit;cursor:pointer}
+  input,select,textarea{font-family:inherit;font-size:14px}
+  a{color:var(--brass-deep)}
+
+  /* ---- login ------------------------------------------------------- */
+  #login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(120% 90% at 50% -10%,#fff 0%,var(--paper) 55%)}
+  .login-card{width:min(420px,90vw);text-align:center;padding:48px 40px}
+  .mark{font-family:'Bricolage Grotesque';font-weight:700;font-size:13px;letter-spacing:.28em;
+    text-transform:uppercase;color:var(--brass-deep)}
+  .login-card h1{font-family:'Bricolage Grotesque';font-weight:600;font-size:34px;margin:18px 0 6px;letter-spacing:-.02em}
+  .login-card p{color:var(--ink-soft);margin:0 0 30px}
+  .gbtn{display:inline-flex;gap:10px;align-items:center;justify-content:center;width:100%;
+    padding:13px 18px;background:var(--ink);color:var(--paper);border:none;border-radius:var(--radius);
+    font-weight:600;font-size:15px;transition:transform .12s ease,opacity .12s}
+  .gbtn:hover{transform:translateY(-1px)}
+  .login-note{margin-top:18px;font-size:12px;color:var(--ink-soft)}
+  .rule{height:1px;background:var(--line);margin:30px 0}
+  .blueprint-line{position:absolute;left:0;right:0;height:1px;background:var(--line);opacity:.6}
+
+  /* ---- shell ------------------------------------------------------- */
+  #app{display:none;min-height:100%;flex-direction:column}
+  header.top{display:flex;align-items:center;gap:24px;padding:0 26px;height:62px;
+    border-bottom:1px solid var(--line);background:rgba(250,248,244,.85);backdrop-filter:blur(8px);
+    position:sticky;top:0;z-index:20}
+  .brand{font-family:'Bricolage Grotesque';font-weight:700;letter-spacing:.2em;font-size:14px;text-transform:uppercase}
+  .brand span{color:var(--brass-deep)}
+  nav.tabs{display:flex;gap:4px;margin-left:8px}
+  nav.tabs button{border:none;background:none;padding:8px 14px;border-radius:8px;font-weight:600;
+    color:var(--ink-soft);font-size:13.5px}
+  nav.tabs button.active{background:var(--paper-2);color:var(--ink)}
+  .spacer{flex:1}
+  .who{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-soft)}
+  .role-chip{font-family:'IBM Plex Mono';font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    padding:3px 8px;border:1px solid var(--line-2);border-radius:20px;color:var(--slate)}
+  .ghost{border:1px solid var(--line-2);background:none;padding:7px 13px;border-radius:8px;color:var(--ink);font-weight:500}
+  .ghost:hover{background:var(--paper-2)}
+  main{flex:1;padding:26px;max-width:1320px;width:100%;margin:0 auto}
+  .view-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;gap:16px;flex-wrap:wrap}
+  .view-head h2{font-family:'Bricolage Grotesque';font-weight:600;font-size:26px;margin:0;letter-spacing:-.02em}
+  .view-head .sub{color:var(--ink-soft);font-size:13px;margin-top:3px}
+  .primary{background:var(--brass);color:#fff;border:none;padding:10px 16px;border-radius:9px;font-weight:600;box-shadow:var(--shadow)}
+  .primary:hover{background:var(--brass-deep)}
+  .primary:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ---- kanban ------------------------------------------------------ */
+  .board{display:grid;grid-template-columns:repeat(6,minmax(180px,1fr));gap:14px;align-items:start;overflow-x:auto;padding-bottom:8px}
+  .col{background:var(--paper-2);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
+  .col-h{display:flex;align-items:center;gap:7px;padding:4px 6px 10px;font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .col-count{margin-left:auto;font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(28,26,23,.03);cursor:pointer;transition:border-color .12s,transform .12s}
+  .card:hover{border-color:var(--brass);transform:translateY(-1px)}
+  .card .nm{font-weight:600;font-size:13.5px}
+  .card .meta{color:var(--ink-soft);font-size:12px;margin-top:3px}
+  .card .row2{display:flex;align-items:center;gap:8px;margin-top:9px}
+  .bant{font-family:'IBM Plex Mono';font-size:11px;padding:2px 6px;border-radius:5px;background:var(--paper-2);color:var(--slate)}
+  .bant.hi{background:#E7F0E8;color:var(--green)} .bant.lo{background:#F6E7E3;color:var(--clay)}
+  .val{margin-left:auto;font-family:'IBM Plex Mono';font-size:12px;font-weight:500}
+
+  /* ---- tables ------------------------------------------------------ */
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  td{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13.5px}
+  tr:last-child td{border-bottom:none}
+  tr.clickable:hover td{background:var(--paper-2);cursor:pointer}
+  .num{font-family:'IBM Plex Mono';text-align:right;font-variant-numeric:tabular-nums}
+  .pill{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600}
+  .pill.active{background:#E7F0E8;color:var(--green)} .pill.draft{background:var(--paper-2);color:var(--slate)}
+  .pill.approved{background:#E7F0E8;color:var(--green)} .pill.sent{background:#E8EEF6;color:var(--blue)}
+
+  /* ---- BOQ sheet (signature surface) ------------------------------ */
+  .boq-wrap{display:grid;grid-template-columns:240px 1fr;gap:18px}
+  .boq-side{border:1px solid var(--line);border-radius:12px;background:#fff;padding:6px;height:fit-content}
+  .boq-side .si{padding:10px 12px;border-radius:8px;font-size:13px;cursor:pointer;display:flex;gap:8px;align-items:baseline}
+  .boq-side .si:hover{background:var(--paper-2)}
+  .boq-side .si.active{background:var(--ink);color:var(--paper)}
+  .boq-side .si .v{font-family:'IBM Plex Mono';font-size:11px;opacity:.7}
+  .sheet{border:1px solid var(--line-2);border-radius:12px;background:#fff;overflow:hidden}
+  .sheet-top{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:2px solid var(--ink)}
+  .sheet-top .t{font-family:'Bricolage Grotesque';font-weight:600;font-size:17px}
+  .sheet-top .tot{text-align:right}
+  .sheet-top .tot .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft)}
+  .sheet-top .tot .amt{font-family:'IBM Plex Mono';font-size:22px;font-weight:500}
+  .boq-row td{vertical-align:middle}
+  .boq-cat{font-family:'IBM Plex Mono';font-size:11px;color:var(--brass-deep);text-transform:uppercase;letter-spacing:.04em}
+  .cellinput{width:100%;border:1px solid transparent;background:none;padding:6px 8px;border-radius:6px}
+  .cellinput:hover{border-color:var(--line)} .cellinput:focus{border-color:var(--brass);outline:none;background:#fff}
+  .cellinput.num{text-align:right}
+  .iconbtn{border:none;background:none;color:var(--ink-soft);font-size:15px;padding:4px 8px;border-radius:6px}
+  .iconbtn:hover{background:#F6E7E3;color:var(--clay)}
+  .addbar{display:flex;gap:8px;padding:12px 18px;border-top:1px solid var(--line);background:var(--paper-2);flex-wrap:wrap}
+
+  /* ---- modal ------------------------------------------------------- */
+  .scrim{position:fixed;inset:0;background:rgba(28,26,23,.4);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .scrim.open{display:flex}
+  .modal{background:var(--paper);border-radius:16px;width:min(560px,96vw);max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(28,26,23,.3)}
+  .modal-h{padding:20px 24px;border-bottom:1px solid var(--line);font-family:'Bricolage Grotesque';font-weight:600;font-size:18px}
+  .modal-b{padding:22px 24px;display:grid;gap:14px}
+  .modal-f{padding:16px 24px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+  .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);margin-bottom:5px;font-weight:600}
+  .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;background:#fff}
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--brass);outline:none}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+  .empty{text-align:center;padding:70px 20px;color:var(--ink-soft)}
+  .empty .display{font-size:20px;color:var(--ink);margin-bottom:6px}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:11px 18px;border-radius:10px;font-size:13px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s,transform .2s;z-index:80}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .banner{background:#FBEFE0;border:1px solid #EAD3B0;color:#7a5a1f;padding:10px 14px;border-radius:9px;font-size:12.5px;margin-bottom:18px}
+  @media(max-width:880px){.board{grid-template-columns:repeat(6,210px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<section id="login">
+  <div class="blueprint-line" style="top:18%"></div>
+  <div class="blueprint-line" style="top:82%"></div>
+  <div class="login-card">
+    <div class="mark">Lintel Space Atelier</div>
+    <h1 class="display">Lintel&nbsp;OS</h1>
+    <p>Leads, quantities and projects — one studio system.</p>
+    <div id="loginForm">
+      <input id="emailIn" type="email" placeholder="you@lintelspace.com" autocomplete="email"
+        style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;margin-bottom:10px;text-align:center">
+      <button class="gbtn" id="emailBtn">Email me a login link</button>
+      <div class="login-note">We'll send a one-tap sign-in link to your <b>@lintelspace.com</b> inbox.</div>
+    </div>
+    <div id="sentMsg" style="display:none">
+      <div style="font-size:34px;margin-bottom:6px">✉️</div>
+      <div class="display" style="font-family:'Bricolage Grotesque';font-size:20px;margin-bottom:6px">Check your inbox</div>
+      <p style="margin:0">We sent a sign-in link to <b id="sentTo"></b>. Open it in <b>this same browser</b> to come back signed in.</p>
+      <button class="ghost" id="resendBtn" style="margin-top:16px">Use a different email</button>
+    </div>
+    <div class="rule"></div>
+    <div class="login-note" id="cfgWarn" style="display:none;color:var(--clay)">
+      ⚠ Supabase keys not set — open this file and fill <code>SUPABASE_URL</code> / <code>SUPABASE_ANON_KEY</code> at the top of the script.
+    </div>
+  </div>
+</section>
+
+<!-- ===================== APP SHELL ===================== -->
+<div id="app">
+  <header class="top">
+    <div class="brand">LINTEL<span>OS</span></div>
+    <nav class="tabs">
+      <button data-view="leads" class="active">Leads</button>
+      <button data-view="boq">BOQ</button>
+      <button data-view="projects">Projects</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="who">
+      <span id="userName"></span>
+      <span class="role-chip" id="userRole">—</span>
+      <button class="ghost" id="logoutBtn">Sign out</button>
+    </div>
+  </header>
+  <main id="main"></main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   CONFIG — fill these two from Supabase → Project Settings → API
+   ===================================================================== */
+const SUPABASE_URL  = "https://cxgxmqspvpuizvwfbnjq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4Z3htcXNwdnB1aXp2d2ZibmpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDEwMDUsImV4cCI6MjA5Njk3NzAwNX0.cPbcB9m-WSAC2e8nOD_vdp2mrAeDaisk4-nET5eo8lE";
+const ALLOWED_DOMAIN = "lintelspace.com";
+/* ===================================================================== */
+
+const cfgOk = SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 20;
+let sb = null, me = null, myRole = "site_engineer";
+const $ = s => document.querySelector(s);
+const fmt = n => "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0});
+const canWrite = () => myRole === "admin" || myRole === "pm";
+
+const STAGES = [
+  ["new","New","--new"],["contacted","Contacted","--contacted"],
+  ["qualified","Qualified","--qualified"],["quoted","Quoted","--quoted"],
+  ["won","Won","--won"],["lost","Lost","--lost"]
+];
+
+/* ---------- boot ---------- */
+if (!cfgOk) { $("#cfgWarn").style.display="block"; }
+else {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const sendLink = async () => {
+    const email = ($("#emailIn").value||"").trim().toLowerCase();
+    if (!email.endsWith("@"+ALLOWED_DOMAIN)) return alert("Please use your @"+ALLOWED_DOMAIN+" email address.");
+    $("#emailBtn").disabled = true; $("#emailBtn").textContent = "Sending…";
+    const { error } = await sb.auth.signInWithOtp({
+      email, options:{ emailRedirectTo: location.href.split("#")[0] }
+    });
+    $("#emailBtn").disabled = false; $("#emailBtn").textContent = "Email me a login link";
+    if (error) return alert(error.message);
+    $("#sentTo").textContent = email;
+    $("#loginForm").style.display = "none";
+    $("#sentMsg").style.display = "block";
+  };
+  $("#emailBtn").onclick = sendLink;
+  $("#emailIn").addEventListener("keydown", e => { if (e.key === "Enter") sendLink(); });
+  $("#resendBtn").onclick = () => { $("#sentMsg").style.display="none"; $("#loginForm").style.display="block"; };
+  $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+  sb.auth.onAuthStateChange((_e,session)=> session ? enter(session) : null);
+  sb.auth.getSession().then(({data})=> data.session && enter(data.session));
+}
+
+async function enter(session){
+  const email = session.user.email || "";
+  if (!email.endsWith("@"+ALLOWED_DOMAIN)) {
+    await sb.auth.signOut();
+    alert("Lintel OS is restricted to @"+ALLOWED_DOMAIN+" accounts.");
+    return location.reload();
+  }
+  me = session.user;
+  // fetch role from profile
+  const { data:prof } = await sb.from("profiles").select("role,full_name").eq("id",me.id).single();
+  myRole = prof?.role || "site_engineer";
+  $("#login").style.display="none";
+  $("#app").style.display="flex";
+  $("#userName").textContent = prof?.full_name || email.split("@")[0];
+  $("#userRole").textContent = myRole.replace("_"," ");
+  document.querySelectorAll("nav.tabs button").forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active"); render(b.dataset.view); };
+  });
+  render("leads");
+}
+
+/* ---------- toast + modal ---------- */
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200);}
+function closeModal(){$("#scrim").classList.remove("open");$("#scrim").innerHTML="";}
+function openModal(html){$("#scrim").innerHTML=`<div class="modal">${html}</div>`;$("#scrim").classList.add("open");
+  $("#scrim").onclick=e=>{if(e.target===$("#scrim"))closeModal();};}
+
+/* ===================== ROUTER ===================== */
+function render(view){
+  if(view==="leads") return renderLeads();
+  if(view==="boq")   return renderBOQ();
+  if(view==="projects") return renderProjects();
+}
+
+/* ===================== LEADS ===================== */
+async function renderLeads(){
+  const m=$("#main");
+  m.innerHTML=`<div class="view-head"><div>
+      <h2 class="display">Leads</h2><div class="sub">Pipeline · North Bangalore focus</div></div>
+      ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
+    </div>
+    ${canWrite()?"":`<div class="banner">You're signed in as <b>site engineer</b> — pipeline is read-only for your role.</div>`}
+    <div class="board" id="board">Loading…</div>`;
+  if(canWrite()) $("#addLead").onclick=()=>leadForm();
+  const {data:leads,error}=await sb.from("leads").select("*").order("updated_at",{ascending:false});
+  if(error){$("#board").innerHTML=`<div class="empty">${error.message}</div>`;return;}
+  const board=$("#board");board.innerHTML="";
+  STAGES.forEach(([key,label,cssvar])=>{
+    const items=(leads||[]).filter(l=>l.stage===key);
+    const col=document.createElement("div");col.className="col";
+    col.innerHTML=`<div class="col-h"><span class="dot" style="background:var(${cssvar})"></span>${label}
+      <span class="col-count">${items.length}</span></div>`;
+    items.forEach(l=>{
+      const c=document.createElement("div");c.className="card";
+      const bantCls=l.bant_score>=60?"hi":l.bant_score<35?"lo":"";
+      c.innerHTML=`<div class="nm">${esc(l.name)}</div>
+        <div class="meta">${esc(l.locality||l.city||"")} · ${esc(l.property_type||"—")}</div>
+        <div class="row2"><span class="bant ${bantCls}">BANT ${l.bant_score||0}</span>
+        <span class="val">${l.expected_value?fmt(l.expected_value):""}</span></div>`;
+      c.onclick=()=>leadDetail(l);
+      col.appendChild(c);
+    });
+    board.appendChild(col);
+  });
+}
+
+function leadForm(lead){
+  const l=lead||{};
+  openModal(`
+    <div class="modal-h">${lead?"Edit lead":"New lead"}</div>
+    <div class="modal-b">
+      <div class="field"><label>Client name</label><input id="f_name" value="${esc(l.name||"")}"></div>
+      <div class="grid2">
+        <div class="field"><label>Phone</label><input id="f_phone" value="${esc(l.phone||"")}"></div>
+        <div class="field"><label>Email</label><input id="f_email" value="${esc(l.email||"")}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Locality</label><input id="f_loc" value="${esc(l.locality||"")}" placeholder="Hebbal, Yelahanka…"></div>
+        <div class="field"><label>Property type</label>
+          <select id="f_ptype">${opts(["Apartment","Villa","Independent house","Office","Retail"],l.property_type)}</select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Source</label>
+          <select id="f_src">${opts(["Referral","Instagram","Google Business","Walk-in","Website","Other"],l.source)}</select></div>
+        <div class="field"><label>Budget band</label>
+          <select id="f_budget">${opts(["<15L","15–30L","30–60L","60L+"],l.budget_band)}</select></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Expected value (₹)</label><input id="f_val" type="number" value="${l.expected_value||""}"></div>
+        <div class="field"><label>BANT score (0–100)</label><input id="f_bant" type="number" min="0" max="100" value="${l.bant_score||0}"></div>
+      </div>
+      <div class="field"><label>Stage</label>
+        <select id="f_stage">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
+      <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(l.notes||"")}</textarea></div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="saveLead">${lead?"Save changes":"Create lead"}</button>
+    </div>`);
+  $("#saveLead").onclick=async()=>{
+    const row={ name:$("#f_name").value.trim(), phone:$("#f_phone").value.trim(),
+      email:$("#f_email").value.trim(), locality:$("#f_loc").value.trim(),
+      property_type:$("#f_ptype").value, source:$("#f_src").value, budget_band:$("#f_budget").value,
+      expected_value:Number($("#f_val").value||0), bant_score:Number($("#f_bant").value||0),
+      stage:$("#f_stage").value, notes:$("#f_notes").value.trim(), updated_at:new Date().toISOString() };
+    if(!row.name) return toast("Client name is required");
+    let res;
+    if(lead) res=await sb.from("leads").update(row).eq("id",lead.id);
+    else { row.owner_id=me.id; res=await sb.from("leads").insert(row); }
+    if(res.error) return toast(res.error.message);
+    closeModal(); toast(lead?"Lead updated":"Lead created"); renderLeads();
+  };
+}
+
+function leadDetail(l){
+  openModal(`
+    <div class="modal-h">${esc(l.name)}</div>
+    <div class="modal-b">
+      <div class="grid2">
+        <div><div class="field"><label>Phone</label><div>${esc(l.phone||"—")}</div></div></div>
+        <div><div class="field"><label>Locality</label><div>${esc(l.locality||"—")}</div></div></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Property</label><div>${esc(l.property_type||"—")}</div></div>
+        <div class="field"><label>Budget</label><div>${esc(l.budget_band||"—")}</div></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Expected value</label><div class="mono">${l.expected_value?fmt(l.expected_value):"—"}</div></div>
+        <div class="field"><label>BANT</label><div class="mono">${l.bant_score||0}/100</div></div>
+      </div>
+      ${l.notes?`<div class="field"><label>Notes</label><div>${esc(l.notes)}</div></div>`:""}
+    </div>
+    <div class="modal-f">
+      ${canWrite()?`<button class="ghost" id="dEdit">Edit</button>`:""}
+      ${canWrite()&&l.stage!=="won"?`<button class="ghost" id="dBoq">Build BOQ</button>`:""}
+      ${canWrite()?`<button class="primary" id="dConv">Convert to project →</button>`:`<button class="ghost" onclick="closeModal()">Close</button>`}
+    </div>`);
+  if(canWrite()){
+    $("#dEdit").onclick=()=>{closeModal();leadForm(l);};
+    if($("#dBoq")) $("#dBoq").onclick=async()=>{closeModal();await newBoqFor({lead_id:l.id,title:l.name});};
+    $("#dConv").onclick=()=>convertLead(l);
+  }
+}
+
+async function convertLead(l){
+  // grab latest BOQ total for this lead (if any) as contract value
+  const {data:bv}=await sb.from("boq_versions").select("id,total").eq("lead_id",l.id).order("version",{ascending:false}).limit(1);
+  const total=bv&&bv[0]?bv[0].total:0;
+  const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
+  const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
+  const {data:proj,error}=await sb.from("projects").insert({
+    code, name:l.name, client_name:l.name, client_phone:l.phone, property_type:l.property_type,
+    site_address:l.locality, lead_id:l.id, contract_value:total, pm_id:me.id, status:"active"
+  }).select().single();
+  if(error) return toast(error.message);
+  // link the BOQ to the project too, and mark lead won
+  if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
+  await sb.from("leads").update({stage:"won",updated_at:new Date().toISOString()}).eq("id",l.id);
+  closeModal(); toast(`Project ${code} created`); render("projects");
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+}
+
+/* ===================== BOQ ===================== */
+let activeBoq=null, rateLib=[];
+async function renderBOQ(){
+  const m=$("#main");
+  m.innerHTML=`<div class="view-head"><div><h2 class="display">Bill of Quantities</h2>
+    <div class="sub">Versioned quantity sheets linked to leads & projects</div></div>
+    ${canWrite()?`<button class="primary" id="newBoq">+ New BOQ</button>`:""}</div>
+    <div class="boq-wrap"><div class="boq-side" id="boqList">Loading…</div><div id="boqSheet"></div></div>`;
+  if(canWrite()) $("#newBoq").onclick=()=>newBoqFor({});
+  if(!rateLib.length){const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");rateLib=data||[];}
+  const {data:versions}=await sb.from("boq_versions").select("*, leads(name), projects(code,name)").order("created_at",{ascending:false});
+  const list=$("#boqList");
+  if(!versions||!versions.length){list.innerHTML=`<div style="padding:18px;color:var(--ink-soft);font-size:13px">No BOQs yet.</div>`;
+    $("#boqSheet").innerHTML=emptyState("No BOQ selected","Create one, or build a BOQ from a lead.");return;}
+  list.innerHTML="";
+  versions.forEach(v=>{
+    const who=v.projects?`${v.projects.code}`:(v.leads?v.leads.name:"Untitled");
+    const d=document.createElement("div");d.className="si"+(activeBoq===v.id?" active":"");
+    d.innerHTML=`<span style="flex:1">${esc(v.title||who)}</span><span class="v">v${v.version}</span>`;
+    d.onclick=()=>{activeBoq=v.id;renderBOQ();};
+    list.appendChild(d);
+  });
+  if(!activeBoq) activeBoq=versions[0].id;
+  loadSheet(activeBoq);
+}
+
+async function newBoqFor(seed){
+  // version number per lead/project
+  let q=sb.from("boq_versions").select("version").order("version",{ascending:false}).limit(1);
+  if(seed.lead_id) q=q.eq("lead_id",seed.lead_id);
+  const {data:prev}=await q;
+  const version=(prev&&prev[0]?prev[0].version:0)+1;
+  const {data,error}=await sb.from("boq_versions").insert({
+    lead_id:seed.lead_id||null, project_id:seed.project_id||null,
+    title:seed.title||"New BOQ", version, status:"draft", created_by:me.id
+  }).select().single();
+  if(error) return toast(error.message);
+  activeBoq=data.id; toast("BOQ created");
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="boq"));
+  renderBOQ();
+}
+
+async function loadSheet(id){
+  const sheet=$("#boqSheet");
+  const {data:v}=await sb.from("boq_versions").select("*").eq("id",id).single();
+  const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",id).order("sort_order");
+  const total=(items||[]).reduce((s,i)=>s+Number(i.amount||0),0);
+  sheet.innerHTML=`<div class="sheet">
+    <div class="sheet-top"><div class="t">${esc(v.title||"BOQ")} <span class="pill ${v.status}">${v.status}</span></div>
+      <div class="tot"><div class="lbl">Sheet total</div><div class="amt">${fmt(total)}</div></div></div>
+    <table><thead><tr><th style="width:120px">Category</th><th>Description</th><th>Room</th>
+      <th style="width:70px">UoM</th><th style="width:80px" class="num">Qty</th>
+      <th style="width:100px" class="num">Rate</th><th style="width:120px" class="num">Amount</th>${canWrite()?"<th style='width:40px'></th>":""}</tr></thead>
+      <tbody id="boqBody"></tbody></table>
+    ${canWrite()?`<div class="addbar">
+      <select id="pickItem" style="flex:1;min-width:200px;padding:9px;border:1px solid var(--line-2);border-radius:8px">
+        <option value="">+ Add from rate library…</option>
+        ${rateLib.map(r=>`<option value="${r.id}">${esc(r.category)} · ${esc(r.description)} (${fmt(r.rate)}/${r.uom})</option>`).join("")}
+      </select>
+      <button class="ghost" id="addBlank">+ Blank row</button>
+    </div>`:""}</div>`;
+  const body=$("#boqBody");
+  (items||[]).forEach(it=>body.appendChild(boqRow(it)));
+  if(!(items||[]).length) body.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--ink-soft);padding:30px">Empty sheet — add line items below.</td></tr>`;
+  if(canWrite()){
+    $("#addBlank").onclick=()=>addItem(id,{description:"New item",uom:"nos",qty:1,rate:0});
+    $("#pickItem").onchange=e=>{const r=rateLib.find(x=>x.id==e.target.value);if(r)
+      addItem(id,{category:r.category,item_code:r.item_code,description:r.description,uom:r.uom,qty:1,rate:r.rate,cost_rate:r.cost_rate});};
+  }
+}
+
+function boqRow(it){
+  const tr=document.createElement("tr");tr.className="boq-row";
+  const ro=!canWrite();
+  tr.innerHTML=`
+    <td><span class="boq-cat">${esc(it.category||"—")}</span></td>
+    <td>${ro?esc(it.description):`<input class="cellinput" value="${esc(it.description)}" data-f="description">`}</td>
+    <td>${ro?esc(it.room_tag||""):`<input class="cellinput" value="${esc(it.room_tag||"")}" data-f="room_tag" placeholder="—">`}</td>
+    <td>${ro?esc(it.uom):`<input class="cellinput" value="${esc(it.uom)}" data-f="uom">`}</td>
+    <td class="num">${ro?it.qty:`<input class="cellinput num" type="number" value="${it.qty}" data-f="qty">`}</td>
+    <td class="num">${ro?fmt(it.rate):`<input class="cellinput num" type="number" value="${it.rate}" data-f="rate">`}</td>
+    <td class="num" data-amt>${fmt(it.amount)}</td>
+    ${canWrite()?`<td><button class="iconbtn" title="Delete">✕</button></td>`:""}`;
+  if(!ro){
+    tr.querySelectorAll(".cellinput").forEach(inp=>{
+      inp.onchange=async()=>{
+        const f=inp.dataset.f; const val=(f==="qty"||f==="rate")?Number(inp.value||0):inp.value;
+        const {error}=await sb.from("boq_items").update({[f]:val}).eq("id",it.id);
+        if(error)return toast(error.message);
+        it[f]=val; it.amount=Number(it.qty)*Number(it.rate);
+        tr.querySelector("[data-amt]").textContent=fmt(it.amount);
+        refreshBoqTotal();
+      };
+    });
+    tr.querySelector(".iconbtn").onclick=async()=>{
+      if(!confirm("Delete this line?"))return;
+      await sb.from("boq_items").delete().eq("id",it.id); loadSheet(activeBoq);
+    };
+  }
+  return tr;
+}
+async function addItem(boqId,base){
+  const {error}=await sb.from("boq_items").insert({boq_version_id:boqId,sort_order:Date.now()%100000,...base});
+  if(error)return toast(error.message);
+  loadSheet(boqId);
+}
+async function refreshBoqTotal(){
+  const {data}=await sb.from("boq_versions").select("total").eq("id",activeBoq).single();
+  const amt=document.querySelector(".sheet-top .amt"); if(amt&&data) amt.textContent=fmt(data.total);
+}
+
+/* ===================== PROJECTS ===================== */
+async function renderProjects(){
+  const m=$("#main");
+  m.innerHTML=`<div class="view-head"><div><h2 class="display">Projects</h2>
+    <div class="sub">Converted from won leads · BOQ carried over</div></div></div><div id="projWrap">Loading…</div>`;
+  const {data:projects,error}=await sb.from("projects").select("*").order("created_at",{ascending:false});
+  if(error){$("#projWrap").innerHTML=error.message;return;}
+  if(!projects||!projects.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
+  $("#projWrap").innerHTML=`<table><thead><tr><th>Code</th><th>Project</th><th>Type</th>
+    <th>Status</th><th class="num">Contract value</th></tr></thead><tbody>
+    ${projects.map(p=>`<tr class="clickable"><td class="mono">${esc(p.code||"—")}</td>
+      <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc(p.site_address||"")}</div></td>
+      <td>${esc(p.property_type||"—")}</td>
+      <td><span class="pill ${p.status}">${p.status}</span></td>
+      <td class="num">${fmt(p.contract_value)}</td></tr>`).join("")}
+    </tbody></table>`;
+}
+
+/* ---------- helpers ---------- */
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function opts(arr,sel){return `<option value="">—</option>`+arr.map(o=>`<option ${o===sel?"selected":""}>${o}</option>`).join("");}
+function emptyState(t,s){return `<div class="empty"><div class="display">${t}</div><div>${s}</div></div>`;}
+</script>
+</body>
+</html>
