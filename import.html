@@ -57,10 +57,11 @@
     <div id="cfgWarn" class="banner hide">⚠ Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> at the top of this file's script first.</div>
     <div id="loginForm">
       <input id="emailIn" type="email" placeholder="you@lintelspace.com"
-        style="padding:11px 13px;border:1px solid var(--line-2);border-radius:9px;background:#fff;font-size:14px;width:280px;max-width:100%;margin-right:8px">
-      <button class="gbtn" id="emailBtn" style="vertical-align:top">Email me a login link</button>
+        style="padding:11px 13px;border:1px solid var(--line-2);border-radius:9px;background:#fff;font-size:14px;width:240px;max-width:100%;margin:0 8px 8px 0">
+      <input id="passIn" type="password" placeholder="Password"
+        style="padding:11px 13px;border:1px solid var(--line-2);border-radius:9px;background:#fff;font-size:14px;width:200px;max-width:100%;margin:0 8px 8px 0">
+      <button class="gbtn" id="signinBtn" style="vertical-align:top">Sign in</button>
     </div>
-    <div id="sentMsg" class="muted hide" style="margin-top:6px">✉️ Link sent to <b id="sentTo"></b>. Open it in this same browser to return signed in.</div>
     <div id="whoami" class="muted hide" style="margin-top:12px"></div>
   </div>
 
@@ -114,17 +115,18 @@ const TARGETS = [
 if(!cfgOk){ $("#cfgWarn").classList.remove("hide"); }
 else {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const sendLink = async () => {
+  const signIn = async () => {
     const email = ($("#emailIn").value||"").trim().toLowerCase();
+    const password = $("#passIn").value;
     if(!email.endsWith("@"+ALLOWED_DOMAIN)) return alert("Please use your @"+ALLOWED_DOMAIN+" email.");
-    $("#emailBtn").disabled=true; $("#emailBtn").textContent="Sending…";
-    const {error} = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href.split("#")[0] }});
-    $("#emailBtn").disabled=false; $("#emailBtn").textContent="Email me a login link";
+    if(!password) return alert("Please enter your password.");
+    $("#signinBtn").disabled=true; $("#signinBtn").textContent="Signing in…";
+    const {error} = await sb.auth.signInWithPassword({ email, password });
+    $("#signinBtn").disabled=false; $("#signinBtn").textContent="Sign in";
     if(error) return alert(error.message);
-    $("#sentTo").textContent=email; $("#loginForm").classList.add("hide"); $("#sentMsg").classList.remove("hide");
   };
-  $("#emailBtn").onclick = sendLink;
-  $("#emailIn").addEventListener("keydown", e=>{ if(e.key==="Enter") sendLink(); });
+  $("#signinBtn").onclick = signIn;
+  $("#passIn").addEventListener("keydown", e=>{ if(e.key==="Enter") signIn(); });
   sb.auth.getSession().then(({data})=> data.session && afterLogin(data.session));
   sb.auth.onAuthStateChange((_e,s)=> s && afterLogin(s));
 }
@@ -134,7 +136,7 @@ async function afterLogin(session){
   if(!email.endsWith("@"+ALLOWED_DOMAIN)){ await sb.auth.signOut(); alert("Restricted to @"+ALLOWED_DOMAIN); return location.reload(); }
   const {data:prof} = await sb.from("profiles").select("role,full_name").eq("id",session.user.id).single();
   const role = prof?.role||"site_engineer";
-  $("#loginForm").classList.add("hide"); $("#sentMsg").classList.add("hide");
+  $("#loginForm").classList.add("hide");
   const w=$("#whoami"); w.classList.remove("hide");
   if(role!=="admin"){ w.innerHTML=`Signed in as <b>${email}</b> — but importing needs the <b>admin</b> role. Ask an admin, or run <code>update profiles set role='admin' where email='${email}'</code> in Supabase.`; w.classList.add("err"); return; }
   w.innerHTML=`Signed in as <b>${email}</b> · role: admin ✓`; w.classList.add("ok");

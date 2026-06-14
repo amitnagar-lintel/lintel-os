@@ -149,14 +149,10 @@
     <div id="loginForm">
       <input id="emailIn" type="email" placeholder="you@lintelspace.com" autocomplete="email"
         style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;margin-bottom:10px;text-align:center">
-      <button class="gbtn" id="emailBtn">Email me a login link</button>
-      <div class="login-note">We'll send a one-tap sign-in link to your <b>@lintelspace.com</b> inbox.</div>
-    </div>
-    <div id="sentMsg" style="display:none">
-      <div style="font-size:34px;margin-bottom:6px">✉️</div>
-      <div class="display" style="font-family:'Bricolage Grotesque';font-size:20px;margin-bottom:6px">Check your inbox</div>
-      <p style="margin:0">We sent a sign-in link to <b id="sentTo"></b>. Open it in <b>this same browser</b> to come back signed in.</p>
-      <button class="ghost" id="resendBtn" style="margin-top:16px">Use a different email</button>
+      <input id="passIn" type="password" placeholder="Password" autocomplete="current-password"
+        style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;margin-bottom:10px;text-align:center">
+      <button class="gbtn" id="signinBtn">Sign in</button>
+      <div class="login-note">Restricted to <b>@lintelspace.com</b> accounts.</div>
     </div>
     <div class="rule"></div>
     <div class="login-note" id="cfgWarn" style="display:none;color:var(--clay)">
@@ -212,22 +208,18 @@ const STAGES = [
 if (!cfgOk) { $("#cfgWarn").style.display="block"; }
 else {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const sendLink = async () => {
+  const signIn = async () => {
     const email = ($("#emailIn").value||"").trim().toLowerCase();
+    const password = $("#passIn").value;
     if (!email.endsWith("@"+ALLOWED_DOMAIN)) return alert("Please use your @"+ALLOWED_DOMAIN+" email address.");
-    $("#emailBtn").disabled = true; $("#emailBtn").textContent = "Sending…";
-    const { error } = await sb.auth.signInWithOtp({
-      email, options:{ emailRedirectTo: location.href.split("#")[0] }
-    });
-    $("#emailBtn").disabled = false; $("#emailBtn").textContent = "Email me a login link";
+    if (!password) return alert("Please enter your password.");
+    $("#signinBtn").disabled = true; $("#signinBtn").textContent = "Signing in…";
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    $("#signinBtn").disabled = false; $("#signinBtn").textContent = "Sign in";
     if (error) return alert(error.message);
-    $("#sentTo").textContent = email;
-    $("#loginForm").style.display = "none";
-    $("#sentMsg").style.display = "block";
   };
-  $("#emailBtn").onclick = sendLink;
-  $("#emailIn").addEventListener("keydown", e => { if (e.key === "Enter") sendLink(); });
-  $("#resendBtn").onclick = () => { $("#sentMsg").style.display="none"; $("#loginForm").style.display="block"; };
+  $("#signinBtn").onclick = signIn;
+  $("#passIn").addEventListener("keydown", e => { if (e.key === "Enter") signIn(); });
   $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   sb.auth.onAuthStateChange((_e,session)=> session ? enter(session) : null);
   sb.auth.getSession().then(({data})=> data.session && enter(data.session));
