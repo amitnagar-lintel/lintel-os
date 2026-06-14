@@ -163,6 +163,23 @@
   .tl-type{font-size:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;color:var(--brass-deep);min-width:62px}
   .tl-text{flex:1} .tl-when{font-size:11px;color:var(--ink-soft)}
   .overdue{color:var(--clay);font-weight:600} .today{color:var(--brass-deep);font-weight:600}
+  /* ---- project workspace ---- */
+  .pw-top{display:flex;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .pw-title{display:flex;align-items:center;gap:10px}
+  .pw-title h2{margin:0;font-size:24px}
+  .pw-code{font-size:12px;color:var(--brass-deep);background:var(--paper-2);padding:3px 8px;border-radius:6px}
+  .pw-val{margin-left:auto;font-size:18px;font-weight:500}
+  .pw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  .pw-tabs button{border:none;background:none;padding:10px 16px;font-weight:600;font-size:13.5px;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .pw-tabs button.active{color:var(--ink);border-bottom-color:var(--brass)}
+  .pw-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:14px}
+  .upbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .upbar input[type=file]{font-size:13px}
+  .upbar input,.upbar select{padding:9px 11px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:13px}
+  .uphint{font-size:12px;color:var(--ink-soft);margin-bottom:8px}
+  .linkbtn{border:none;background:none;color:var(--brass-deep);font-weight:600;cursor:pointer;font-size:13px;padding:0}
+  .linkbtn:hover{text-decoration:underline}
+  .linkbtn.del{color:var(--clay)}
   @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
 </style>
 </head>
@@ -199,6 +216,7 @@
       <button data-view="leads" class="active">Leads</button>
       <button data-view="boq">BOQ</button>
       <button data-view="projects">Projects</button>
+      <button data-view="team" id="navTeam" style="display:none">Lintel Team</button>
     </nav>
     <div class="spacer"></div>
     <div class="who">
@@ -306,6 +324,7 @@ async function enter(session){
   $("#app").style.display="flex";
   $("#userName").textContent = prof?.full_name || email.split("@")[0];
   $("#userRole").textContent = myRole.replace("_"," ");
+  if(myRole==="admin") $("#navTeam").style.display="";
   document.querySelectorAll("nav.tabs button").forEach(b=>{
     b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
       b.classList.add("active"); render(b.dataset.view); };
@@ -324,6 +343,7 @@ function render(view){
   if(view==="leads") return renderLeads();
   if(view==="boq")   return renderBOQ();
   if(view==="projects") return renderProjects();
+  if(view==="team") return renderTeam();
 }
 
 /* ===================== LEADS (full CRM) ===================== */
@@ -331,11 +351,11 @@ let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false };
 
 async function ensureStaff(){
   if(STAFF.length) return;
-  const {data}=await sb.from("profiles").select("id,full_name,email,role").eq("is_active",true).order("full_name");
-  STAFF=data||[];
+  const {data:dir}=await sb.from("team_directory").select("*").eq("is_active",true).order("full_name");
+  STAFF=(dir||[]).map(d=>({ id:d.id, full_name:d.full_name, email:d.email, role:d.app_role, designation:d.designation, phone:d.phone }));
 }
-function staffName(id){ const s=STAFF.find(x=>x.id===id); return s?(s.full_name||s.email):""; }
-function staffOpts(sel){ return `<option value="" ${!sel?"selected":""}>— unassigned —</option>`+STAFF.map(s=>`<option value="${s.id}" ${s.id===sel?"selected":""}>${esc(s.full_name||s.email)}</option>`).join(""); }
+function staffName(id){ const s=STAFF.find(x=>String(x.id)===String(id)); return s?(s.full_name||s.email):""; }
+function staffOpts(sel){ return `<option value="" ${!sel?"selected":""}>— unassigned —</option>`+STAFF.map(s=>`<option value="${s.id}" ${String(s.id)===String(sel)?"selected":""}>${esc(s.full_name||s.email)}${s.designation?" · "+esc(s.designation):""}</option>`).join(""); }
 function initials(n){ return (n||"?").split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function dueClass(d){ if(!d) return ""; const t=todayISO(); return d<t?"overdue":d===t?"today":""; }
@@ -372,7 +392,7 @@ async function drawBoard(){
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.source && l.source!==f.source) return false;
-    if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id,l.owner_id].includes(f.owner)) return false;
+    if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
@@ -464,8 +484,10 @@ function leadForm(lead){
       project_type:$("#f_ptype").value, source:$("#f_src").value,
       expected_value:Number($("#f_val").value||0), next_follow_up:$("#f_fu").value||null,
       stage:$("#f_stage").value, notes:$("#f_notes").value.trim(), tags:[...picked],
-      consultant_id:$("#f_consultant_id").value||null, designer_id:$("#f_designer_id").value||null,
-      pm_id:$("#f_pm_id").value||null, presales_id:$("#f_presales_id").value||null,
+      consultant_id:$("#f_consultant_id").value?Number($("#f_consultant_id").value):null,
+      designer_id:$("#f_designer_id").value?Number($("#f_designer_id").value):null,
+      pm_id:$("#f_pm_id").value?Number($("#f_pm_id").value):null,
+      presales_id:$("#f_presales_id").value?Number($("#f_presales_id").value):null,
       updated_at:new Date().toISOString() };
     Object.keys(QUAL).forEach(k=>row[k]=$("#f_"+k).value||null);
     row.bant_score=bantFromQual(row);
@@ -664,21 +686,271 @@ async function refreshBoqTotal(){
 }
 
 /* ===================== PROJECTS ===================== */
+let activeProject=null, projectTab="client";
 async function renderProjects(){
+  if(activeProject) return renderProjectWorkspace(activeProject);
   const m=$("#main");
   m.innerHTML=`<div class="view-head"><div><h2 class="display">Projects</h2>
-    <div class="sub">Converted from won leads · BOQ carried over</div></div></div><div id="projWrap">Loading…</div>`;
+    <div class="sub">Converted from won leads · click a project to open its workspace</div></div></div><div id="projWrap">Loading…</div>`;
   const {data:projects,error}=await sb.from("projects").select("*").order("created_at",{ascending:false});
-  if(error){$("#projWrap").innerHTML=error.message;return;}
+  if(error){$("#projWrap").innerHTML=esc(error.message);return;}
   if(!projects||!projects.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
   $("#projWrap").innerHTML=`<table><thead><tr><th>Code</th><th>Project</th><th>Type</th>
     <th>Status</th><th class="num">Contract value</th></tr></thead><tbody>
-    ${projects.map(p=>`<tr class="clickable"><td class="mono">${esc(p.code||"—")}</td>
+    ${projects.map(p=>`<tr class="clickable" data-id="${p.id}"><td class="mono">${esc(p.code||"—")}</td>
       <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc(p.site_address||"")}</div></td>
       <td>${esc(p.property_type||"—")}</td>
       <td><span class="pill ${p.status}">${p.status}</span></td>
       <td class="num">${fmt(p.contract_value)}</td></tr>`).join("")}
     </tbody></table>`;
+  $("#projWrap").querySelectorAll("tr[data-id]").forEach(tr=>{
+    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="client"; renderProjectWorkspace(activeProject); };
+  });
+}
+
+const PROJ_TABS=[["client","Client Details"],["boq","Project BOQ"],["design","Project Design"],["documents","Project Documents"],["team","Project Team"]];
+
+async function renderProjectWorkspace(pid){
+  await ensureStaff();
+  const m=$("#main");
+  const {data:p,error}=await sb.from("projects").select("*").eq("id",pid).single();
+  if(error||!p){ activeProject=null; return renderProjects(); }
+  m.innerHTML=`
+    <div class="pw-top">
+      <button class="ghost" id="pwBack">← All projects</button>
+      <div class="pw-title"><span class="mono pw-code">${esc(p.code||"")}</span>
+        <h2 class="display">${esc(p.name)}</h2>
+        <span class="pill ${p.status}">${p.status}</span></div>
+      <div class="pw-val mono">${fmt(p.contract_value)}</div>
+    </div>
+    <nav class="pw-tabs" id="pwTabs">
+      ${PROJ_TABS.map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
+    </nav>
+    <div id="pwBody">Loading…</div>`;
+  $("#pwBack").onclick=()=>{ activeProject=null; renderProjects(); };
+  $("#pwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    projectTab=b.dataset.t;
+    $("#pwTabs").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
+    drawProjectTab(p);
+  });
+  drawProjectTab(p);
+}
+
+async function drawProjectTab(p){
+  const body=$("#pwBody"); if(!body) return;
+  if(projectTab==="client")     return pwClient(p,body);
+  if(projectTab==="boq")        return pwBoq(p,body);
+  if(projectTab==="design")     return pwFiles(p,body,"design");
+  if(projectTab==="documents")  return pwFiles(p,body,"document");
+  if(projectTab==="team")       return pwTeam(p,body);
+}
+
+/* ---- Client Details ---- */
+function pwClient(p,body){
+  const ro=!canWrite();
+  body.innerHTML=`<div class="pw-card">
+    <div class="grid2">
+      <div class="field"><label>Client name</label>${ro?`<div>${esc(p.client_name||p.name||"—")}</div>`:`<input id="pc_name" value="${esc(p.client_name||p.name||"")}">`}</div>
+      <div class="field"><label>Phone</label>${ro?`<div>${esc(p.client_phone||"—")}</div>`:`<input id="pc_phone" value="${esc(p.client_phone||"")}">`}</div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Email</label>${ro?`<div>${esc(p.client_email||"—")}</div>`:`<input id="pc_email" value="${esc(p.client_email||"")}">`}</div>
+      <div class="field"><label>Project type</label>${ro?`<div>${esc(p.property_type||"—")}</div>`:`<select id="pc_ptype">${opts(PROJECT_TYPES,p.property_type)}</select>`}</div>
+    </div>
+    <div class="field"><label>Site address</label>${ro?`<div>${esc(p.site_address||"—")}</div>`:`<input id="pc_site" value="${esc(p.site_address||"")}">`}</div>
+    <div class="grid2">
+      <div class="field"><label>Start date</label>${ro?`<div>${p.start_date||"—"}</div>`:`<input id="pc_start" type="date" value="${p.start_date||""}">`}</div>
+      <div class="field"><label>Target end</label>${ro?`<div>${p.target_end||"—"}</div>`:`<input id="pc_end" type="date" value="${p.target_end||""}">`}</div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Contract value (₹)</label>${ro?`<div class="mono">${fmt(p.contract_value)}</div>`:`<input id="pc_val" type="number" value="${p.contract_value||0}">`}</div>
+      <div class="field"><label>Status</label>${ro?`<div>${p.status}</div>`:`<select id="pc_status">${opts(["active","on_hold","completed","cancelled"],p.status)}</select>`}</div>
+    </div>
+    <div class="field"><label>Notes</label>${ro?`<div>${esc(p.notes||"—")}</div>`:`<textarea id="pc_notes" rows="2">${esc(p.notes||"")}</textarea>`}</div>
+    ${ro?"":`<div style="margin-top:14px"><button class="primary" id="pcSave">Save changes</button></div>`}
+  </div>`;
+  if(!ro) $("#pcSave").onclick=async()=>{
+    const row={ client_name:$("#pc_name").value.trim(), client_phone:$("#pc_phone").value.trim(),
+      client_email:$("#pc_email").value.trim(), property_type:$("#pc_ptype").value,
+      site_address:$("#pc_site").value.trim(), start_date:$("#pc_start").value||null,
+      target_end:$("#pc_end").value||null, contract_value:Number($("#pc_val").value||0),
+      status:$("#pc_status").value, notes:$("#pc_notes").value.trim() };
+    const {error}=await sb.from("projects").update(row).eq("id",p.id);
+    if(error) return toast(error.message);
+    toast("Saved"); Object.assign(p,row);
+  };
+}
+
+/* ---- Project BOQ (reuse engine) ---- */
+async function pwBoq(p,body){
+  const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false});
+  if(!versions||!versions.length){
+    body.innerHTML=`<div class="pw-card">${emptyState("No BOQ on this project yet","The lead's BOQ carries over on conversion. You can also start one here.")}
+      ${canWrite()?`<div style="text-align:center"><button class="primary" id="pwNewBoq">+ New project BOQ</button></div>`:""}</div>`;
+    if(canWrite()) $("#pwNewBoq").onclick=async()=>{ await newBoqFor({project_id:p.id,title:p.name}); activeProject=null; document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="boq")); };
+    return;
+  }
+  activeBoq=versions[0].id;
+  body.innerHTML=`<div id="boqSheet"></div>`;
+  if(!rateLib.length){const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");rateLib=data||[];}
+  loadSheet(activeBoq);
+}
+
+/* ---- Files (Design / Documents) ---- */
+async function pwFiles(p,body,kind){
+  const label=kind==="design"?"Design":"Document";
+  const {data:files}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false});
+  body.innerHTML=`<div class="pw-card">
+    ${canWrite()?`<div class="upbar">
+      <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg"':''}>
+      <input id="pf_title" placeholder="Title (optional)">
+      <input id="pf_ver" placeholder="V1" style="width:70px">
+      <button class="primary" id="pf_up">Upload</button>
+    </div><div class="uphint" id="pf_hint"></div>`:""}
+    <div id="pf_list">${renderFileList(files||[],kind)}</div>
+  </div>`;
+  if(canWrite()){
+    $("#pf_up").onclick=()=>uploadProjectFile(p,kind);
+    bindFileDownloads();
+  } else bindFileDownloads();
+}
+function renderFileList(files,kind){
+  if(!files.length) return emptyState(`No ${kind} files yet`,canWrite()?"Upload using the bar above.":"Nothing uploaded yet.");
+  return `<table><thead><tr><th>File</th><th>Version</th><th>Type</th><th>Uploaded</th><th></th></tr></thead><tbody>
+    ${files.map(f=>`<tr><td><b>${esc(f.title||f.storage_path.split("/").pop())}</b></td>
+      <td class="mono">${esc(f.version||"—")}</td><td>${esc(f.file_type||"—")}</td>
+      <td>${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
+      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${canWrite()?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
+  </tbody></table>`;
+}
+function bindFileDownloads(){
+  document.querySelectorAll("[data-dl]").forEach(b=>b.onclick=async()=>{
+    const {data,error}=await sb.storage.from("project-files").createSignedUrl(b.dataset.dl,3600);
+    if(error) return toast(error.message);
+    window.open(data.signedUrl,"_blank");
+  });
+  document.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete this file?")) return;
+    await sb.storage.from("project-files").remove([b.dataset.path]);
+    await sb.from("project_files").delete().eq("id",b.dataset.del);
+    drawProjectTab({id:activeProject});
+    // reload current tab
+    const {data:p}=await sb.from("projects").select("*").eq("id",activeProject).single();
+    if(p) drawProjectTab(p);
+  });
+}
+async function uploadProjectFile(p,kind){
+  const fileInput=$("#pf_file"); const file=fileInput.files[0];
+  if(!file) return toast("Choose a file first");
+  const hint=$("#pf_hint"); hint.textContent="Uploading…";
+  const ext=(file.name.split(".").pop()||"").toLowerCase();
+  const path=`${p.id}/${kind}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+  const {error:upErr}=await sb.storage.from("project-files").upload(path,file);
+  if(upErr){ hint.textContent=""; return toast(upErr.message); }
+  const {error}=await sb.from("project_files").insert({
+    project_id:p.id, kind, title:$("#pf_title").value.trim()||file.name,
+    version:$("#pf_ver").value.trim()||null, storage_path:path,
+    file_type:ext, size_bytes:file.size, uploaded_by:me.id
+  });
+  if(error){ hint.textContent=""; return toast(error.message); }
+  toast("Uploaded"); pwFiles(p,$("#pwBody"),kind);
+}
+
+/* ---- Project Team ---- */
+async function pwTeam(p,body){
+  const {data:members}=await sb.from("project_members").select("*").eq("project_id",p.id);
+  body.innerHTML=`<div class="pw-card">
+    <div class="sec-label" style="border:none;padding-top:0">Assigned team</div>
+    ${canWrite()?`<div class="upbar">
+      <select id="pt_user">${STAFF.map(s=>`<option value="${s.id}">${esc(s.full_name||s.email)}${s.designation?" · "+esc(s.designation):""}</option>`).join("")}</select>
+      <select id="pt_role">${opts(["Project Manager","Designer","Consultant","Site Engineer","Presales"])}</select>
+      <button class="primary" id="pt_add">Assign</button>
+    </div>`:""}
+    <div id="pt_list">${
+      (members&&members.length)? `<table><thead><tr><th>Member</th><th>Role on project</th>${canWrite()?"<th></th>":""}</tr></thead><tbody>
+        ${members.map(mm=>`<tr><td><span class="av" style="margin-right:8px">${initials(staffName(mm.member_id))}</span><b>${esc(staffName(mm.member_id))}</b></td>
+          <td>${esc(mm.role_on_job||"—")}</td>${canWrite()?`<td><button class="linkbtn del" data-rm="${mm.member_id}">Remove</button></td>`:""}</tr>`).join("")}
+      </tbody></table>` : emptyState("No team assigned yet",canWrite()?"Assign your staff above.":"")
+    }</div>
+  </div>`;
+  if(canWrite()){
+    $("#pt_add").onclick=async()=>{
+      const mid=Number($("#pt_user").value), role=$("#pt_role").value;
+      if(!mid) return toast("Add team members in the Lintel Team tab first");
+      const {error}=await sb.from("project_members").upsert({project_id:p.id,member_id:mid,role_on_job:role});
+      if(error) return toast(error.message);
+      toast("Assigned"); pwTeam(p,body);
+    };
+    body.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{
+      await sb.from("project_members").delete().eq("project_id",p.id).eq("member_id",Number(b.dataset.rm));
+      pwTeam(p,body);
+    });
+  }
+}
+
+/* ===================== LINTEL TEAM (admin) ===================== */
+const DESIGNATIONS=["Admin","Project Manager","Design Consultant","Interior Designer","Site Engineer","Presales Executive","Accounts","Procurement"];
+async function renderTeam(){
+  if(myRole!=="admin"){ $("#main").innerHTML=emptyState("Admins only","The Lintel Team directory is restricted to admins."); return; }
+  const m=$("#main");
+  m.innerHTML=`<div class="view-head"><div><h2 class="display">Lintel Team</h2>
+    <div class="sub">Staff directory · appears in assignment dropdowns everywhere</div></div>
+    <button class="primary" id="addMember">+ Add member</button></div>
+    <div class="banner">Adding someone here lists them across the app. To let them <b>log in</b>, also create their account in Supabase (Authentication → Users) — see the note below.</div>
+    <div id="teamWrap">Loading…</div>`;
+  $("#addMember").onclick=()=>memberForm();
+  await loadTeamList();
+}
+async function loadTeamList(){
+  const {data:rows,error}=await sb.from("team_directory").select("*").order("full_name");
+  const w=$("#teamWrap"); if(!w) return;
+  if(error){w.innerHTML=esc(error.message);return;}
+  if(!rows||!rows.length){w.innerHTML=emptyState("No team members yet","Add your first with the button above.");return;}
+  w.innerHTML=`<table><thead><tr><th>Name</th><th>Designation</th><th>Email</th><th>Phone</th><th>Login</th><th></th></tr></thead><tbody>
+    ${rows.map(r=>`<tr>
+      <td><span class="av" style="margin-right:8px">${initials(r.full_name)}</span><b>${esc(r.full_name)}</b></td>
+      <td>${esc(r.designation||"—")}</td><td>${esc(r.email||"—")}</td><td>${esc(r.phone||"—")}</td>
+      <td>${r.linked_user_id?`<span class="pill approved">can log in</span>`:`<span class="pill draft">directory only</span>`}</td>
+      <td><button class="linkbtn" data-edit="${r.id}">Edit</button> · <button class="linkbtn del" data-del="${r.id}">Remove</button></td>
+    </tr>`).join("")}
+  </tbody></table>`;
+  w.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{const r=rows.find(x=>x.id==b.dataset.edit);memberForm(r);});
+  w.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Remove this member from the directory?")) return;
+    await sb.from("team_directory").delete().eq("id",b.dataset.del);
+    STAFF=[]; toast("Removed"); loadTeamList();
+  });
+}
+function memberForm(mem){
+  const r=mem||{};
+  openModal(`
+    <div class="modal-h">${mem?"Edit member":"Add team member"}</div>
+    <div class="modal-b">
+      <div class="field"><label>Full name</label><input id="tm_name" value="${esc(r.full_name||"")}"></div>
+      <div class="grid2">
+        <div class="field"><label>Email</label><input id="tm_email" value="${esc(r.email||"")}"></div>
+        <div class="field"><label>Phone</label><input id="tm_phone" value="${esc(r.phone||"")}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Designation</label><select id="tm_desig">${opts(DESIGNATIONS,r.designation)}</select></div>
+        <div class="field"><label>App role (if they log in)</label><select id="tm_role">${opts(["admin","pm","site_engineer"],r.app_role)}</select></div>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="tmSave">${mem?"Save":"Add member"}</button>
+    </div>`);
+  $("#tmSave").onclick=async()=>{
+    const row={ full_name:$("#tm_name").value.trim(), email:$("#tm_email").value.trim()||null,
+      phone:$("#tm_phone").value.trim()||null, designation:$("#tm_desig").value||null,
+      app_role:$("#tm_role").value||"site_engineer" };
+    if(!row.full_name) return toast("Name is required");
+    let res;
+    if(mem) res=await sb.from("team_directory").update(row).eq("id",mem.id);
+    else res=await sb.from("team_directory").insert(row);
+    if(res.error) return toast(res.error.message);
+    STAFF=[]; closeModal(); toast(mem?"Saved":"Member added"); loadTeamList();
+  };
 }
 
 /* ---------- helpers ---------- */
