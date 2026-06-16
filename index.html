@@ -229,7 +229,31 @@
     *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
     @page{margin:8mm;size:A4 portrait}
   }
-  @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow{grid-template-columns:1fr 1fr}}
+  /* ---- overview / timeline ---- */
+  .ov-grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+  .ov-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+  .ov-prog{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-soft)}
+  .ov-bar{width:120px;height:6px;background:var(--paper-2);border-radius:4px;overflow:hidden}
+  .ov-bar div{height:100%;background:var(--brass);border-radius:4px}
+  .timeline2{display:flex;flex-direction:column}
+  .tl2{display:flex;gap:14px;padding-bottom:18px;position:relative}
+  .tl2:not(:last-child)::before{content:"";position:absolute;left:14px;top:30px;bottom:0;width:2px;background:var(--line)}
+  .tl2.done:not(:last-child)::before{background:var(--brass)}
+  .tl2-dot{width:30px;height:30px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;z-index:1;background:var(--paper-2);color:var(--ink-soft);border:2px solid var(--line)}
+  .tl2.done .tl2-dot{background:var(--brass);color:#fff;border-color:var(--brass)}
+  .tl2.prog .tl2-dot{background:#fff;color:var(--brass-deep);border-color:var(--brass)}
+  .tl2-body{flex:1;padding-top:2px}
+  .tl2-top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+  .tl2-name{font-weight:600;font-size:14px}
+  .tl2-stat{font-size:11px;text-transform:capitalize;color:var(--ink-soft)}
+  .tl2-sel{padding:5px 8px;border:1px solid var(--line-2);border-radius:6px;font-size:12px;background:#fff}
+  .tl2-meta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-soft);margin-top:4px}
+  .tl2-date{padding:4px 6px;border:1px solid var(--line-2);border-radius:6px;font-size:11px;background:var(--paper)}
+  .ov-side{display:flex;flex-direction:column;gap:16px}
+  .ov-stat{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .ov-stat:last-child{border-bottom:none}
+  .ov-links{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+  @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -248,6 +272,7 @@
       <input id="passIn" type="password" placeholder="Password" autocomplete="current-password"
         style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;margin-bottom:10px;text-align:center">
       <button class="gbtn" id="signinBtn">Sign in</button>
+      <div id="loginErr" style="display:none;color:var(--clay);font-size:13px;margin-top:10px;padding:8px 12px;background:#F6E7E3;border-radius:8px"></div>
       <div class="login-note">Restricted to <b>@lintelspace.com</b> accounts.</div>
     </div>
     <div class="rule"></div>
@@ -346,44 +371,60 @@ function bantFromQual(l){
 if (!cfgOk) { $("#cfgWarn").style.display="block"; }
 else {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const showErr = (m) => { const e=$("#loginErr"); if(e){ e.style.display="block"; e.textContent=m; } };
+  const resetBtn = () => { const b=$("#signinBtn"); if(b){ b.disabled=false; b.textContent="Sign in"; } };
+  let entered = false;
   const signIn = async () => {
     const email = ($("#emailIn").value||"").trim().toLowerCase();
     const password = $("#passIn").value;
-    if (!email.endsWith("@"+ALLOWED_DOMAIN)) return alert("Please use your @"+ALLOWED_DOMAIN+" email address.");
-    if (!password) return alert("Please enter your password.");
+    $("#loginErr") && ($("#loginErr").style.display="none");
+    if (!email.endsWith("@"+ALLOWED_DOMAIN)) return showErr("Please use your @"+ALLOWED_DOMAIN+" email address.");
+    if (!password) return showErr("Please enter your password.");
     $("#signinBtn").disabled = true; $("#signinBtn").textContent = "Signing in…";
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    $("#signinBtn").disabled = false; $("#signinBtn").textContent = "Sign in";
-    if (error) return alert(error.message);
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { resetBtn(); return showErr(error.message); }
+      if (data && data.session) { resetBtn(); enter(data.session); }
+      else { resetBtn(); showErr("Signed in but no session returned. Try again."); }
+    } catch (e) {
+      resetBtn(); showErr("Login failed: " + (e && e.message ? e.message : "unknown error"));
+    }
   };
   $("#signinBtn").onclick = signIn;
   $("#passIn").addEventListener("keydown", e => { if (e.key === "Enter") signIn(); });
   $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   sb.auth.onAuthStateChange((_e,session)=> session ? enter(session) : null);
-  sb.auth.getSession().then(({data})=> data.session && enter(data.session));
+  sb.auth.getSession().then(({data})=> data.session && enter(data.session)).catch(()=>{});
 }
 
 async function enter(session){
-  const email = session.user.email || "";
-  if (!email.endsWith("@"+ALLOWED_DOMAIN)) {
-    await sb.auth.signOut();
-    alert("Lintel OS is restricted to @"+ALLOWED_DOMAIN+" accounts.");
-    return location.reload();
+  if (window.__entered) return; window.__entered = true;
+  try {
+    const email = session.user.email || "";
+    if (!email.endsWith("@"+ALLOWED_DOMAIN)) {
+      await sb.auth.signOut();
+      alert("Lintel OS is restricted to @"+ALLOWED_DOMAIN+" accounts.");
+      return location.reload();
+    }
+    me = session.user;
+    let prof = null;
+    try { const r = await sb.from("profiles").select("role,full_name").eq("id",me.id).single(); prof = r.data; } catch(e){}
+    myRole = prof?.role || "site_engineer";
+    $("#login").style.display="none";
+    $("#app").style.display="flex";
+    $("#userName").textContent = prof?.full_name || email.split("@")[0];
+    $("#userRole").textContent = myRole.replace("_"," ");
+    if(myRole==="admin") $("#navTeam").style.display="";
+    document.querySelectorAll("nav.tabs button").forEach(b=>{
+      b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
+        b.classList.add("active"); render(b.dataset.view); };
+    });
+    render("leads");
+  } catch(e) {
+    window.__entered = false;
+    const el=$("#loginErr"); if(el){ el.style.display="block"; el.textContent="Could not load workspace: "+(e&&e.message?e.message:"unknown")+". Refresh and try again."; }
+    const b=$("#signinBtn"); if(b){ b.disabled=false; b.textContent="Sign in"; }
   }
-  me = session.user;
-  // fetch role from profile
-  const { data:prof } = await sb.from("profiles").select("role,full_name").eq("id",me.id).single();
-  myRole = prof?.role || "site_engineer";
-  $("#login").style.display="none";
-  $("#app").style.display="flex";
-  $("#userName").textContent = prof?.full_name || email.split("@")[0];
-  $("#userRole").textContent = myRole.replace("_"," ");
-  if(myRole==="admin") $("#navTeam").style.display="";
-  document.querySelectorAll("nav.tabs button").forEach(b=>{
-    b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
-      b.classList.add("active"); render(b.dataset.view); };
-  });
-  render("leads");
 }
 
 /* ---------- toast + modal ---------- */
@@ -737,7 +778,7 @@ async function refreshBoqTotal(){
 }
 
 /* ===================== PROJECTS ===================== */
-let activeProject=null, projectTab="client";
+let activeProject=null, projectTab="overview";
 async function renderProjects(){
   if(activeProject) return renderProjectWorkspace(activeProject);
   const m=$("#main");
@@ -755,11 +796,11 @@ async function renderProjects(){
       <td class="num">${fmt(p.contract_value)}</td></tr>`).join("")}
     </tbody></table>`;
   $("#projWrap").querySelectorAll("tr[data-id]").forEach(tr=>{
-    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="client"; renderProjectWorkspace(activeProject); };
+    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; renderProjectWorkspace(activeProject); };
   });
 }
 
-const PROJ_TABS=[["client","Client Details"],["boq","Project BOQ"],["design","Project Design"],["documents","Project Documents"],["team","Project Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["design","Project Design"],["documents","Project Documents"],["team","Project Team"]];
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
@@ -789,11 +830,102 @@ async function renderProjectWorkspace(pid){
 
 async function drawProjectTab(p){
   const body=$("#pwBody"); if(!body) return;
+  if(projectTab==="overview")   return pwOverview(p,body);
   if(projectTab==="client")     return pwClient(p,body);
   if(projectTab==="boq")        return pwBoq(p,body);
   if(projectTab==="design")     return pwFiles(p,body,"design");
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
+}
+
+/* ---- Overview (timeline) ---- */
+const STAGE_FLOW=["Briefing","Design","Proposal/BOQ","Production","Installation","Handover"];
+async function pwOverview(p,body){
+  await ensureStaff();
+  const {data:ms}=await sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx");
+  let stones=ms||[];
+  // self-heal: if a project has no milestones yet, seed them client-side
+  if(!stones.length){
+    const seed=STAGE_FLOW.map((s,i)=>({project_id:p.id,stage:s,sort_idx:i,status:"todo"}));
+    const {data:ins}=await sb.from("project_milestones").insert(seed).select();
+    stones=ins||seed;
+  }
+  const doneCount=stones.filter(s=>s.status==="done").length;
+  const pct=Math.round(doneCount/stones.length*100);
+  const curr=stones.find(s=>s.status==="in_progress")||stones.find(s=>s.status==="todo")||stones[stones.length-1];
+  const team=[["Consultant",p.consultant_id],["Designer",p.designer_id],["PM",p.pm_id]].filter(x=>x[1]).map(x=>`${x[0]}: <b>${esc(staffName(x[1]))}</b>`).join(" · ")||"—";
+  const ro=!canWrite();
+  body.innerHTML=`
+    <div class="ov-grid">
+      <div class="ov-main">
+        <div class="pw-card">
+          <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Project timeline</div>
+            <div class="ov-prog"><div class="ov-bar"><div style="width:${pct}%"></div></div><span>${pct}% · ${doneCount}/${stones.length} stages</span></div></div>
+          <div class="timeline2">
+            ${stones.map(s=>{
+              const cls=s.status==="done"?"done":s.status==="in_progress"?"prog":"todo";
+              const ic=s.status==="done"?"✓":s.status==="in_progress"?"◐":"○";
+              return `<div class="tl2 ${cls}">
+                <div class="tl2-dot">${ic}</div>
+                <div class="tl2-body">
+                  <div class="tl2-top"><span class="tl2-name">${esc(s.stage)}</span>
+                    ${ro?`<span class="tl2-stat">${s.status.replace("_"," ")}</span>`:`<select data-ms="${s.id}" class="tl2-sel">
+                      <option value="todo" ${s.status==="todo"?"selected":""}>To-do</option>
+                      <option value="in_progress" ${s.status==="in_progress"?"selected":""}>In progress</option>
+                      <option value="done" ${s.status==="done"?"selected":""}>Done</option></select>`}
+                  </div>
+                  <div class="tl2-meta">
+                    ${s.done_date?`Completed ${s.done_date}`:s.target_date?`Target ${s.target_date}`:`<span style="color:var(--ink-soft)">No date set</span>`}
+                    ${ro?"":`<input type="date" class="tl2-date" data-msd="${s.id}" value="${s.target_date||''}" title="Target date">`}
+                  </div>
+                </div></div>`;
+            }).join("")}
+          </div>
+        </div>
+      </div>
+      <div class="ov-side">
+        <div class="pw-card">
+          <div class="sec-label" style="border:none;padding:0">Snapshot</div>
+          <div class="ov-stat"><span>Stage</span><b>${esc(curr?curr.stage:"—")}</b></div>
+          <div class="ov-stat"><span>Status</span><b>${esc(p.status||"active")}</b></div>
+          <div class="ov-stat"><span>Contract value</span><b class="mono">${fmt(p.contract_value)}</b></div>
+          <div class="ov-stat"><span>Code</span><b class="mono">${esc(p.code||"—")}</b></div>
+        </div>
+        <div class="pw-card">
+          <div class="sec-label" style="border:none;padding:0">Team</div>
+          <div style="font-size:13px;line-height:1.9">${team}</div>
+          <button class="ghost" id="ovTeam" style="margin-top:10px">Manage team →</button>
+        </div>
+        <div class="pw-card">
+          <div class="sec-label" style="border:none;padding:0">Quick links</div>
+          <div class="ov-links">
+            <button class="linkbtn" data-go="boq">Open Project BOQ →</button>
+            <button class="linkbtn" data-go="design">Design files →</button>
+            <button class="linkbtn" data-go="documents">Documents →</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  // wire quick links + team
+  body.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ projectTab=b.dataset.go; renderProjectWorkspace(p.id); });
+  if($("#ovTeam")) $("#ovTeam").onclick=()=>{ projectTab="team"; renderProjectWorkspace(p.id); };
+  if(!ro){
+    body.querySelectorAll(".tl2-sel").forEach(sel=>sel.onchange=async()=>{
+      const status=sel.value, id=sel.dataset.ms;
+      const patch={status,updated_at:new Date().toISOString()};
+      if(status==="done") patch.done_date=new Date().toISOString().slice(0,10);
+      await sb.from("project_milestones").update(patch).eq("id",id);
+      // set project.current_stage to the first non-done stage
+      const fresh=(await sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx")).data||[];
+      const cur=fresh.find(s=>s.status!=="done"); 
+      await sb.from("projects").update({current_stage:cur?cur.stage:"Handover"}).eq("id",p.id);
+      pwOverview(p,body);
+    });
+    body.querySelectorAll(".tl2-date").forEach(inp=>inp.onchange=async()=>{
+      await sb.from("project_milestones").update({target_date:inp.value||null}).eq("id",inp.dataset.msd);
+      toast("Date saved");
+    });
+  }
 }
 
 /* ---- Client Details ---- */
