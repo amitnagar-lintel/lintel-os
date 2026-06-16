@@ -267,6 +267,11 @@
     <h1 class="brand-serif">Lintel&nbsp;OS</h1>
     <p>Leads, quantities and projects — one studio system.</p>
     <div id="loginForm">
+      <button id="googleBtn" style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 01-1.8 2.72v2.26h2.92c1.71-1.57 2.68-3.89 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 009 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 010-3.44V4.95H.96a9 9 0 000 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.47.9 11.43 0 9 0A9 9 0 00.96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+        Continue with Google
+      </button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:var(--ink-soft);font-size:12px"><div style="flex:1;height:1px;background:var(--line)"></div>or use email<div style="flex:1;height:1px;background:var(--line)"></div></div>
       <input id="emailIn" type="email" placeholder="you@lintelspace.com" autocomplete="email"
         style="width:100%;padding:13px 14px;border:1px solid var(--line-2);border-radius:10px;background:#fff;font-size:15px;margin-bottom:10px;text-align:center">
       <input id="passIn" type="password" placeholder="Password" autocomplete="current-password"
@@ -392,6 +397,20 @@ else {
   };
   $("#signinBtn").onclick = signIn;
   $("#passIn").addEventListener("keydown", e => { if (e.key === "Enter") signIn(); });
+  const gBtn = $("#googleBtn");
+  if (gBtn) gBtn.onclick = async () => {
+    gBtn.disabled = true;
+    try {
+      const { error } = await sb.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: location.href.split("#")[0].split("?")[0],
+          queryParams: { hd: ALLOWED_DOMAIN, prompt: "select_account" }
+        }
+      });
+      if (error) { gBtn.disabled=false; showErr(error.message); }
+    } catch(e) { gBtn.disabled=false; showErr("Google sign-in failed: "+(e&&e.message?e.message:"unknown")); }
+  };
   $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   sb.auth.onAuthStateChange((_e,session)=> session ? enter(session) : null);
   sb.auth.getSession().then(({data})=> data.session && enter(data.session)).catch(()=>{});
@@ -779,11 +798,56 @@ async function refreshBoqTotal(){
 
 /* ===================== PROJECTS ===================== */
 let activeProject=null, projectTab="overview";
+function newProjectForm(){
+  openModal(`
+    <div class="modal-h">Create a New project</div>
+    <div class="modal-b">
+      <div class="field"><label>Project / Client name</label><input id="np_name" placeholder="e.g. Rajesh — 3BHK Whitefield"></div>
+      <div class="grid2">
+        <div class="field"><label>Client phone</label><input id="np_phone"></div>
+        <div class="field"><label>Client email</label><input id="np_email"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Project type</label><select id="np_ptype">${opts(PROJECT_TYPES)}</select></div>
+        <div class="field"><label>Status</label><select id="np_status">${opts(["active","on_hold","completed","cancelled"])}</select></div>
+      </div>
+      <div class="field"><label>Site address</label><input id="np_site"></div>
+      <div class="grid2">
+        <div class="field"><label>Contract value (₹)</label><input id="np_val" type="number" placeholder="0"></div>
+        <div class="field"><label>Project manager</label><select id="np_pm">${staffOpts()}</select></div>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="np_save">Create project →</button>
+    </div>`);
+  $("#np_save").onclick=async()=>{
+    const name=$("#np_name").value.trim();
+    if(!name) return toast("Project name is required");
+    const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
+    const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
+    const pmDir=$("#np_pm").value?Number($("#np_pm").value):null;
+    const {data:proj,error}=await sb.from("projects").insert({
+      code, name, client_name:name, client_phone:$("#np_phone").value.trim()||null,
+      client_email:$("#np_email").value.trim()||null, property_type:$("#np_ptype").value,
+      site_address:$("#np_site").value.trim()||null, contract_value:Number($("#np_val").value||0),
+      status:$("#np_status").value, current_stage:"Briefing"
+    }).select().single();
+    if(error) return toast(error.message);
+    // seed the 6 standard milestones
+    await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
+    closeModal(); toast(`Project ${code} created`);
+    activeProject=proj.id; projectTab="overview"; renderProjectWorkspace(proj.id);
+  };
+}
+
 async function renderProjects(){
   if(activeProject) return renderProjectWorkspace(activeProject);
   const m=$("#main");
   m.innerHTML=`<div class="view-head"><div><h2 class="display">Projects</h2>
-    <div class="sub">Converted from won leads · click a project to open its workspace</div></div></div><div id="projWrap">Loading…</div>`;
+    <div class="sub">Click a project to open its workspace</div></div>
+    ${canWrite()?`<button class="primary" id="newProjBtn">+ Create a New project</button>`:""}</div><div id="projWrap">Loading…</div>`;
+  if(canWrite()) $("#newProjBtn").onclick=()=>newProjectForm();
   const {data:projects,error}=await sb.from("projects").select("*").order("created_at",{ascending:false});
   if(error){$("#projWrap").innerHTML=esc(error.message);return;}
   if(!projects||!projects.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
