@@ -253,7 +253,14 @@
   .ov-stat{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
   .ov-stat:last-child{border-bottom:none}
   .ov-links{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
-  @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
+  /* ---- payments / wallet ---- */
+  .wallet{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .wcell{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .wcell .wl{font-size:10px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px}
+  .wcell .wv{font-size:22px;font-weight:600}
+  .wcell.wgood{background:#EDF3EE;border-color:#BcdCc2} .wcell.wgood .wv{color:var(--green)}
+  .wcell.wdue{background:#FBF0EC;border-color:#E3B9AD} .wcell.wdue .wv{color:var(--clay)}
+  @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow,.wallet{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -864,7 +871,7 @@ async function renderProjects(){
   });
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["design","Project Design"],["documents","Project Documents"],["team","Project Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["design","Project Design"],["documents","Project Documents"],["team","Project Team"]];
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
@@ -897,6 +904,7 @@ async function drawProjectTab(p){
   if(projectTab==="overview")   return pwOverview(p,body);
   if(projectTab==="client")     return pwClient(p,body);
   if(projectTab==="boq")        return pwBoq(p,body);
+  if(projectTab==="payments")   return pwPayments(p,body);
   if(projectTab==="design")     return pwFiles(p,body,"design");
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
@@ -990,6 +998,126 @@ async function pwOverview(p,body){
       toast("Date saved");
     });
   }
+}
+
+/* ---- Payments / Client Wallet ---- */
+async function pwPayments(p,body){
+  const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
+  const list=pays||[];
+  const received=list.reduce((s,r)=>s+Number(r.amount||0),0);
+  const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
+  const balance=invoiced-received;
+  const pctPaid=invoiced?Math.round(received/invoiced*100):0;
+  const ro=!canWrite();
+  body.innerHTML=`
+    <div class="wallet">
+      <div class="wcell"><div class="wl">Invoiced</div><div class="wv mono">${fmt(invoiced)}</div></div>
+      <div class="wcell wgood"><div class="wl">Received</div><div class="wv mono">${fmt(received)}</div></div>
+      <div class="wcell ${balance>0?'wdue':''}"><div class="wl">Balance due</div><div class="wv mono">${fmt(balance)}</div></div>
+      <div class="wcell"><div class="wl">Paid</div><div class="wv">${pctPaid}%</div><div class="ov-bar" style="margin-top:8px"><div style="width:${Math.min(100,pctPaid)}%"></div></div></div>
+    </div>
+
+    <div class="pw-card">
+      <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Payment ledger</div>
+        <div style="display:flex;gap:8px">
+          <button class="ghost" id="payShare">Share payment details</button>
+          ${ro?'':`<button class="ghost" id="payInv">Set invoiced amount</button><button class="primary" id="payAdd">+ Record payment</button>`}
+        </div></div>
+      ${list.length?`<table><thead><tr><th>Date</th><th>Stage</th><th>Mode</th><th>Reference</th><th class="num">Amount</th>${ro?'':'<th></th>'}</tr></thead><tbody>
+        ${list.map(r=>`<tr><td>${r.paid_on}</td><td>${esc(r.stage||'—')}</td><td>${esc(r.mode||'—')}</td><td class="mono">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td>${ro?'':`<td><button class="linkbtn del" data-pid="${r.id}">Delete</button></td>`}</tr>`).join("")}
+      </tbody></table>`:emptyState("No payments recorded yet",ro?"":"Record the first receipt with + Record payment.")}
+    </div>`;
+
+  // share payment details -> prefilled email
+  $("#payShare").onclick=()=>sharePaymentDetails(p,balance);
+
+  if(!ro){
+    $("#payAdd").onclick=()=>paymentForm(p);
+    $("#payInv").onclick=()=>invoicedForm(p);
+    body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
+      if(!confirm("Delete this payment entry?")) return;
+      await sb.from("project_payments").delete().eq("id",b.dataset.pid);
+      pwPayments(p,body);
+    });
+  }
+}
+
+function paymentForm(p){
+  openModal(`
+    <div class="modal-h">Record payment</div>
+    <div class="modal-b">
+      <div class="grid2">
+        <div class="field"><label>Amount (₹)</label><input id="pay_amt" type="number" placeholder="0"></div>
+        <div class="field"><label>Date</label><input id="pay_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Stage</label><select id="pay_stage">${opts(["Booking","Production","Balance","Custom"])}</select></div>
+        <div class="field"><label>Mode</label><select id="pay_mode">${opts(["UPI","Bank Transfer","Cheque","Cash","Card"])}</select></div>
+      </div>
+      <div class="field"><label>Reference (txn / cheque no.)</label><input id="pay_ref"></div>
+      <div class="field"><label>Note</label><input id="pay_note"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="pay_save">Record</button></div>`);
+  $("#pay_save").onclick=async()=>{
+    const amt=Number($("#pay_amt").value||0);
+    if(!amt) return toast("Enter an amount");
+    const {error}=await sb.from("project_payments").insert({
+      project_id:p.id, amount:amt, paid_on:$("#pay_date").value||new Date().toISOString().slice(0,10),
+      stage:$("#pay_stage").value, mode:$("#pay_mode").value, reference:$("#pay_ref").value.trim()||null,
+      note:$("#pay_note").value.trim()||null, recorded_by:me.id
+    });
+    if(error) return toast(error.message);
+    closeModal(); toast("Payment recorded"); pwPayments(p,$("#pwBody"));
+  };
+}
+
+function invoicedForm(p){
+  openModal(`
+    <div class="modal-h">Set invoiced amount</div>
+    <div class="modal-b">
+      <div class="field"><label>Total invoiced to client (₹)</label><input id="inv_amt" type="number" value="${Number(p.invoiced_total)||Number(p.contract_value)||0}"></div>
+      <div style="font-size:12px;color:var(--ink-soft)">Defaults to the contract value. Set this if you invoice a different amount.</div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="inv_save">Save</button></div>`);
+  $("#inv_save").onclick=async()=>{
+    const v=Number($("#inv_amt").value||0);
+    const {error}=await sb.from("projects").update({invoiced_total:v}).eq("id",p.id);
+    if(error) return toast(error.message);
+    p.invoiced_total=v; closeModal(); toast("Invoiced amount set"); pwPayments(p,$("#pwBody"));
+  };
+}
+
+function sharePaymentDetails(p, balance){
+  const upi="Lintels234@idfcbank";
+  const subject=`Payment details — ${p.name} (${p.code||'Lintel Space Atelier'})`;
+  const body=
+`Dear ${p.client_name||'Client'},
+
+Please find below the payment details for your project${p.code?` (${p.code})`:''} with Lintel Space Atelier.
+
+${balance>0?`Amount due: ₹${Math.round(balance).toLocaleString('en-IN')}\n\n`:''}— UPI —
+UPI ID: ${upi}
+(Pay via any UPI app — Google Pay / PhonePe / Paytm)
+
+— Bank Transfer —
+Account Name: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED
+Bank: IDFC FIRST Bank
+Account No.: 10218270193
+IFSC: IDFB0080156
+Branch: Jayanagar, Bengaluru
+
+Please add your name and project as the payment reference, and share the transaction reference once paid.
+
+Warm regards,
+${me?.email?me.email.split('@')[0]:'Lintel Space Atelier'}
+Lintel Space Atelier
++91 9916558777 · www.lintelspace.com`;
+  const to=p.client_email||"";
+  const mailto=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  // open prefilled email
+  window.location.href=mailto;
+  // also offer copy fallback
+  toast("Opening your email app…");
 }
 
 /* ---- Client Details ---- */
