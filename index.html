@@ -149,6 +149,16 @@
   .chip:hover{border-color:var(--brass);color:var(--brass-deep)}
   .chip.clear{color:var(--clay);border-color:#E3B9AD}
   .due-badge{display:none;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:var(--clay);color:#fff;border-radius:10px;font-size:11px;font-weight:700;margin-left:2px}
+  .lead-quickbar{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--paper-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+  .stage-pill{display:inline-block;padding:4px 12px;background:var(--navy);color:#fff;border-radius:20px;font-size:12px;font-weight:600}
+  .nm{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .card-wa{border:1px solid #25D366;background:#EAFBF0;color:#0a7a3a;border-radius:6px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;flex:none;line-height:1.4}
+  .card-wa:hover{background:#25D366;color:#fff}
+  .wa-menu{position:absolute;z-index:200;background:#fff;border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.18);width:240px;padding:6px;overflow:hidden}
+  .wa-menu-h{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.5px;padding:6px 10px 4px}
+  .wa-menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 10px;border-radius:7px;font-size:13px;cursor:pointer;color:var(--ink)}
+  .wa-menu-item:hover{background:#EAFBF0;color:#0a7a3a}
+  .wa-menu-item.edit{border-top:1px solid var(--line);margin-top:4px;color:var(--ink-soft)}
   .lf-due{font-size:13px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;cursor:pointer}
   .board{grid-template-columns:repeat(7,minmax(170px,1fr))}
   .col-val{font-size:11px;color:var(--ink-soft);padding:0 6px 8px}
@@ -482,6 +492,53 @@ function waLeadMsg(l){
   const first=(l.name||"there").trim().split(/\s+/)[0];
   return `Hi ${first}, this is ${(me&&me.email?me.email.split("@")[0]:"Lintel Space Atelier")} from Lintel Space Atelier — Where Luxury Meets Functionality. Thank you for your interest in interior design for your ${esc(l.property_type||"home")}. I'd love to understand your requirements and share how we can help. When would be a good time for a quick call?`;
 }
+// template library for the lead-card WhatsApp menu
+function waTemplates(l){
+  const f=(l.name||"there").trim().split(/\s+/)[0];
+  const me_name=(me&&me.email?me.email.split("@")[0]:"Lintel Space Atelier");
+  const pt=l.property_type||"home";
+  return [
+    ["Intro / first touch", waLeadMsg(l)],
+    ["Follow-up reminder", `Hi ${f}, just following up on your interior design enquiry for your ${pt} with Lintel Space Atelier. Are you still looking to take this forward? Happy to share ideas and a quote whenever you're ready.`],
+    ["Meeting confirmation", `Hi ${f}, confirming our meeting to discuss your ${pt} interiors. Please let me know the date and time that suits you, and our design consultant from Lintel Space Atelier will be there. Looking forward to it!`],
+    ["Couldn't reach you", `Hi ${f}, I tried reaching you regarding your interior design enquiry with Lintel Space Atelier but couldn't connect. Do let me know a convenient time to call you back. Thank you!`],
+    ["Share details / profile", `Hi ${f}, as discussed, here are the details about Lintel Space Atelier — a premium interior design & build studio. 13+ years, 100+ homes delivered. Website: www.lintelspace.com · Instagram: @lintel_space_atelier. I'll share a tailored proposal for your ${pt} shortly.`],
+  ];
+}
+function waMenu(l, anchorEl){
+  // remove any open menu
+  const old=document.getElementById("waMenu"); if(old) old.remove();
+  const m=document.createElement("div"); m.id="waMenu"; m.className="wa-menu";
+  m.innerHTML=`<div class="wa-menu-h">WhatsApp ${esc((l.name||"").split(" ")[0])}</div>`+
+    waTemplates(l).map((t,i)=>`<button class="wa-menu-item" data-i="${i}">${esc(t[0])}</button>`).join("")+
+    `<button class="wa-menu-item edit" data-i="edit">✎ Custom message…</button>`;
+  document.body.appendChild(m);
+  const r=anchorEl.getBoundingClientRect();
+  m.style.top=(window.scrollY+r.bottom+4)+"px";
+  m.style.left=Math.min(window.scrollX+r.left, window.scrollX+window.innerWidth-250)+"px";
+  const tpls=waTemplates(l);
+  m.querySelectorAll(".wa-menu-item").forEach(b=>b.onclick=(e)=>{
+    e.stopPropagation();
+    const i=b.dataset.i;
+    if(i==="edit"){ m.remove(); waCustomDialog(l); return; }
+    waOpen(l.phone, tpls[Number(i)][1]);
+    if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Sent: "+tpls[Number(i)][0],by_user:me.id});
+    m.remove();
+  });
+  // close on outside click
+  setTimeout(()=>document.addEventListener("click",function close(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener("click",close);} }),0);
+}
+function waCustomDialog(l){
+  openModal(`
+    <div class="modal-h">WhatsApp ${esc(l.name||"")}</div>
+    <div class="modal-b">
+      <div class="field"><label>To</label><div>${esc(l.name||"")} · +${waNumber(l.phone)}</div></div>
+      <div class="field"><label>Message</label><textarea id="wa_text" rows="6" style="width:100%">${esc(waLeadMsg(l))}</textarea></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="wa_send">Open in WhatsApp →</button></div>`);
+  $("#wa_send").onclick=()=>{ waOpen(l.phone,$("#wa_text").value); closeModal();
+    if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id}); };
+}
 function closeModal(){$("#scrim").classList.remove("open");$("#scrim").innerHTML="";}
 function openModal(html){$("#scrim").innerHTML=`<div class="modal">${html}</div>`;$("#scrim").classList.add("open");
   $("#scrim").onclick=e=>{if(e.target===$("#scrim"))closeModal();};}
@@ -562,7 +619,7 @@ async function drawBoard(){
       const sCls=score>=60?"hi":score<35?"lo":"";
       const dc=dueClass(l.next_follow_up);
       const c=document.createElement("div");c.className="card";
-      c.innerHTML=`<div class="nm">${esc(l.name)}</div>
+      c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
         <div class="meta">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div>
         ${(l.tags&&l.tags.length)?`<div class="tagrow">${l.tags.slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>
@@ -570,6 +627,8 @@ async function drawBoard(){
         <span class="val">${l.expected_value?fmt(l.expected_value):""}</span></div>
         ${(l.pm_id||l.consultant_id)?`<div class="avrow">${[l.consultant_id,l.designer_id,l.pm_id].filter(Boolean).map(id=>`<span class="av" title="${esc(staffName(id))}">${initials(staffName(id))}</span>`).join("")}</div>`:""}`;
       c.onclick=()=>leadDetail(l);
+      const waBtn=c.querySelector(".card-wa");
+      if(waBtn) waBtn.onclick=(e)=>{ e.stopPropagation(); waMenu(l, waBtn); };
       col.appendChild(c);
     });
     board.appendChild(col);
@@ -601,8 +660,8 @@ function leadForm(lead){
         <div class="field"><label>Budget (₹)</label><input id="f_val" type="number" value="${l.expected_value||""}"></div>
         <div class="field"><label>Next follow-up</label><input id="f_fu" type="date" value="${l.next_follow_up||""}"></div>
       </div>
-      <div class="field"><label>Stage</label>
-        <select id="f_stage">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
+      ${lead?`<div class="field"><label>Stage</label>
+        <select id="f_stage">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>`:`<div class="field"><label>Stage</label><div style="font-size:13px;color:var(--ink-soft)">New leads start at <b>New Enquiry</b> — presales qualifies and advances from there.</div></div>`}
 
       <div class="sec-label">Team</div>
       <div class="grid2">
@@ -635,7 +694,7 @@ function leadForm(lead){
       current_address:$("#f_caddr").value.trim(), site_address:$("#f_saddr").value.trim(),
       project_type:$("#f_ptype").value, source:$("#f_src").value,
       expected_value:Number($("#f_val").value||0), next_follow_up:$("#f_fu").value||null,
-      stage:$("#f_stage").value, notes:$("#f_notes").value.trim(), tags:[...picked],
+      stage:lead?$("#f_stage").value:"new", notes:$("#f_notes").value.trim(), tags:[...picked],
       consultant_id:$("#f_consultant_id").value?Number($("#f_consultant_id").value):null,
       designer_id:$("#f_designer_id").value?Number($("#f_designer_id").value):null,
       pm_id:$("#f_pm_id").value?Number($("#f_pm_id").value):null,
@@ -663,6 +722,12 @@ async function leadDetail(l){
   openModal(`
     <div class="modal-h">${esc(l.name)} <span class="bant ${score>=60?"hi":score<35?"lo":""}" style="margin-left:8px">${score}</span></div>
     <div class="modal-b">
+      ${canWrite()?`<div class="lead-quickbar">
+        <div class="field"><label>Stage</label>
+          <select id="ld_stage" class="lf-sel" style="width:100%">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
+        <div class="field"><label>Design consultant</label>
+          <select id="ld_consultant" class="lf-sel" style="width:100%">${staffOpts(l.consultant_id)}</select></div>
+      </div>`:`<div class="field"><label>Stage</label><div><span class="stage-pill">${esc((STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1])}</span></div></div>`}
       <div class="grid2">
         <div class="field"><label>Phone</label><div>${esc(l.phone||"—")}${l.phone?` · <button class="linkbtn" id="waLead">WhatsApp</button> · <button class="linkbtn" id="waLeadEdit">edit msg</button>`:""}</div></div>
         <div class="field"><label>Email</label><div>${esc(l.email||"—")}</div></div>
@@ -738,6 +803,23 @@ async function leadDetail(l){
     };
   }
   if(canWrite()){
+    $("#dEdit").onclick=()=>{closeModal();leadForm(l);};
+    const sd=$("#ld_stage");
+    if(sd) sd.onchange=async()=>{
+      const newStage=sd.value, oldLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1], newLabel=(STAGES.find(s=>s[0]===newStage)||["",newStage])[1];
+      const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
+      if(error){ sd.value=l.stage; return toast(error.message); }
+      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Stage: ${oldLabel} → ${newLabel}`,by_user:me.id});
+      l.stage=newStage; toast("Stage updated"); leadDetail(l);
+    };
+    const cd=$("#ld_consultant");
+    if(cd) cd.onchange=async()=>{
+      const cid=cd.value?Number(cd.value):null;
+      const {error}=await sb.from("leads").update({consultant_id:cid,updated_at:new Date().toISOString()}).eq("id",l.id);
+      if(error) return toast(error.message);
+      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:cid?("Design consultant assigned: "+staffName(cid)):"Design consultant unassigned",by_user:me.id});
+      l.consultant_id=cid; toast("Consultant updated"); leadDetail(l);
+    };
     $("#dConv").onclick=()=>convertLead(l);
     $("#act_add").onclick=async()=>{
       const text=$("#act_text").value.trim(); if(!text) return;
