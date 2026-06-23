@@ -217,6 +217,37 @@
   .gsub button{border:none;background:none;padding:8px 18px;border-radius:8px;font-weight:600;font-size:13px;color:var(--ink-soft);cursor:pointer}
   .gsub button.on{background:var(--navy);color:#fff}
   .gact{display:flex;gap:8px}
+  /* ---- design studio ---- */
+  .ds-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .ds-row .field{margin:0}
+  .ds-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+  .ds-task{display:flex;align-items:center;gap:12px;padding:11px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+  .ds-task .ds-ph{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--brass-deep);font-weight:700;width:78px;flex:none}
+  .ds-task .ds-tt{font-weight:600;font-size:14px;flex:1}
+  .ds-task .ds-meta{font-size:12px;color:var(--ink-soft);display:flex;gap:10px;align-items:center}
+  .ds-stat{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+  .ds-stat.todo{background:var(--paper-2);color:var(--ink-soft)}
+  .ds-stat.in_progress{background:#FFF6E5;color:#A9791E}
+  .ds-stat.done{background:#EDF3EE;color:var(--green)}
+  .ds-meet{display:flex;align-items:center;gap:14px;padding:14px 16px;background:#fff;border:1px solid var(--line);border-radius:11px;margin-bottom:10px}
+  .ds-meet .dm-date{text-align:center;flex:none;width:58px}
+  .ds-meet .dm-date .d{font-size:22px;font-weight:700;line-height:1} .ds-meet .dm-date .mo{font-size:11px;text-transform:uppercase;color:var(--ink-soft)}
+  .ds-meet .dm-main{flex:1;min-width:0}
+  .ds-meet .dm-t{font-weight:600;font-size:14px}
+  .ds-meet .dm-sub{font-size:12px;color:var(--ink-soft);margin-top:2px}
+  .ds-meet .dm-act{display:flex;gap:7px;flex-wrap:wrap}
+  .mom-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+  .mom-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+  .mom-h .mt{font-weight:600;font-size:15px}
+  .mom-h .mw{font-size:11px;color:var(--ink-soft)}
+  .mom-sum{font-size:13.5px;line-height:1.55;white-space:pre-wrap;margin-bottom:12px}
+  .act-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:13px}
+  .act-item.done{opacity:.6}
+  .act-item .ai-txt{flex:1} .act-item.done .ai-txt{text-decoration:line-through}
+  .act-item .ai-due{font-size:11px;padding:3px 8px;border-radius:6px;background:var(--paper-2);color:var(--ink-soft)}
+  .act-item .ai-due.over{background:#FBEFEA;color:var(--clay)}
+  .mom-action-edit{display:grid;grid-template-columns:1fr 150px 130px auto;gap:8px;align-items:center;margin-bottom:7px}
+  @media(max-width:880px){.mom-action-edit{grid-template-columns:1fr}}
   .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .addgrid{display:grid;grid-template-columns:130px 150px 1fr 60px 60px 70px 60px auto;gap:8px;align-items:end}
   .addgrid .field label{font-size:10px}
@@ -1265,7 +1296,7 @@ async function drawProjectTab(p){
   if(projectTab==="boq")        return pwBoq(p,body);
   if(projectTab==="payments")   return pwPayments(p,body);
   if(projectTab==="orders")     return pwOrders(p,body);
-  if(projectTab==="design")     return pwFiles(p,body,"design");
+  if(projectTab==="design")     return pwDesign(p,body);
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
 }
@@ -1679,6 +1710,278 @@ function pwClient(p,body){
 
 
 /* ---- Files (Design / Documents) ---- */
+/* ===================== PROJECT DESIGN STUDIO ===================== */
+let designSub = "timeline";
+const DESIGN_PHASES = ["Concept","Moodboard","2D Layout","3D Views","Materials","Final Drawings"];
+
+async function pwDesign(p,body){
+  await ensureStaff();
+  body.innerHTML=`
+  <div class="gbar">
+    <div class="gsub">
+      <button data-ds="timeline" class="${designSub==='timeline'?'on':''}">Design Timeline</button>
+      <button data-ds="meetings" class="${designSub==='meetings'?'on':''}">Meetings</button>
+      <button data-ds="mom" class="${designSub==='mom'?'on':''}">MoM</button>
+      <button data-ds="files" class="${designSub==='files'?'on':''}">Files</button>
+    </div>
+  </div>
+  <div id="dsBody">Loading…</div>`;
+  document.querySelectorAll(".gsub [data-ds]").forEach(b=>b.onclick=()=>{ designSub=b.dataset.ds; pwDesign(p,body); });
+  const dsBody=$("#dsBody");
+  if(designSub==="timeline") return dsTimeline(p,dsBody);
+  if(designSub==="meetings") return dsMeetings(p,dsBody);
+  if(designSub==="mom")      return dsMoM(p,dsBody);
+  if(designSub==="files")    return pwFiles(p,dsBody,"design");
+}
+
+/* ---- Design Timeline ---- */
+async function dsTimeline(p,body){
+  const w=canWrite();
+  const {data:tasks}=await sb.from("design_tasks").select("*").eq("project_id",p.id).order("sort_idx").order("target_date",{ascending:true,nullsFirst:false});
+  body.innerHTML=`
+  ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Add a design task</h3>
+    <div class="ds-row">
+      <div class="field"><label>Phase</label><select id="dt_phase">${DESIGN_PHASES.map(x=>`<option>${x}</option>`).join("")}</select></div>
+      <div class="field" style="flex:1;min-width:200px"><label>Task</label><input id="dt_title" placeholder="e.g. Living room moodboard"></div>
+      <div class="field"><label>Owner</label><select id="dt_owner">${staffOpts()}</select></div>
+      <div class="field"><label>Target date</label><input type="date" id="dt_target"></div>
+      <button class="primary" id="dt_add">Add</button>
+    </div></div>`:""}
+  <div id="dt_list">${tasksHtml(tasks||[],w)}</div>`;
+  if(w){
+    $("#dt_add").onclick=async()=>{
+      const title=$("#dt_title").value.trim(); if(!title) return toast("Task name needed");
+      const {error}=await sb.from("design_tasks").insert({
+        project_id:p.id, title, phase:$("#dt_phase").value,
+        assignee_id:$("#dt_owner").value?Number($("#dt_owner").value):null,
+        target_date:$("#dt_target").value||null, sort_idx:(tasks||[]).length });
+      if(error) return toast(error.message);
+      toast("Task added"); dsTimeline(p,body);
+    };
+  }
+  body.querySelectorAll("[data-ts]").forEach(s=>s.onchange=async()=>{
+    await sb.from("design_tasks").update({status:s.value}).eq("id",s.dataset.ts);
+    dsTimeline(p,body);
+  });
+  body.querySelectorAll("[data-tdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Remove this task?")) return;
+    await sb.from("design_tasks").delete().eq("id",b.dataset.tdel); dsTimeline(p,body);
+  });
+}
+function tasksHtml(tasks,w){
+  if(!tasks.length) return emptyState("No design tasks yet", w?"Add the first phase above to build the design schedule.":"Nothing scheduled yet.");
+  return tasks.map(t=>{
+    const due=t.target_date, over=due&&due<todayISO()&&t.status!=="done";
+    return `<div class="ds-task">
+      <span class="ds-ph">${esc(t.phase||"—")}</span>
+      <span class="ds-tt">${esc(t.title)}</span>
+      <span class="ds-meta">
+        ${t.assignee_id?`<span class="av" title="${esc(staffName(t.assignee_id))}">${initials(staffName(t.assignee_id))}</span>`:""}
+        ${due?`<span class="${over?"overdue":""}">📅 ${due}</span>`:""}
+      </span>
+      ${w?`<select class="ds-stat ${t.status}" data-ts="${t.id}" style="border:none">
+          <option value="todo" ${t.status==="todo"?"selected":""}>To-do</option>
+          <option value="in_progress" ${t.status==="in_progress"?"selected":""}>In progress</option>
+          <option value="done" ${t.status==="done"?"selected":""}>Done</option>
+        </select>
+        <button class="linkbtn del" data-tdel="${t.id}">✕</button>`
+       :`<span class="ds-stat ${t.status}">${t.status.replace("_"," ")}</span>`}
+    </div>`;
+  }).join("");
+}
+
+/* ---- Meetings (with Google Calendar + Meet) ---- */
+async function dsMeetings(p,body){
+  const w=canWrite();
+  const {data:meets}=await sb.from("design_meetings").select("*").eq("project_id",p.id).order("scheduled_at",{ascending:false});
+  body.innerHTML=`
+  ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Schedule a client design meeting</h3>
+    <div class="grid2">
+      <div class="field"><label>Title</label><input id="dm_title" placeholder="e.g. 3D design review" value="Design review"></div>
+      <div class="field"><label>Client email (guest)</label><input id="dm_email" placeholder="client@email.com" value="${esc(p.client_email||"")}"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Date & time</label><input type="datetime-local" id="dm_when"></div>
+      <div class="field"><label>Duration (min)</label><input type="number" id="dm_dur" value="30" min="15" step="15"></div>
+    </div>
+    <div class="field"><label>Agenda</label><textarea id="dm_agenda" rows="2" placeholder="What will be discussed"></textarea></div>
+    <button class="primary" id="dm_add">Save meeting</button>
+  </div>`:""}
+  <div id="dm_list">${meetsHtml(meets||[],w)}</div>`;
+  if(w){
+    $("#dm_add").onclick=async()=>{
+      const title=$("#dm_title").value.trim(); const when=$("#dm_when").value;
+      if(!title||!when) return toast("Title and date/time needed");
+      const {error}=await sb.from("design_meetings").insert({
+        project_id:p.id, title, scheduled_at:new Date(when).toISOString(),
+        duration_min:Number($("#dm_dur").value)||30, client_email:$("#dm_email").value.trim()||null,
+        agenda:$("#dm_agenda").value.trim()||null });
+      if(error) return toast(error.message);
+      toast("Meeting saved"); dsMeetings(p,body);
+    };
+  }
+  bindMeetActions(p,body);
+}
+function meetsHtml(meets,w){
+  if(!meets.length) return emptyState("No meetings yet", w?"Schedule the first client design review above.":"Nothing scheduled yet.");
+  return meets.map(mt=>{
+    const dt=mt.scheduled_at?new Date(mt.scheduled_at):null;
+    const day=dt?dt.toLocaleDateString("en-IN",{day:"2-digit"}):"–";
+    const mo=dt?dt.toLocaleDateString("en-IN",{month:"short"}):"";
+    const time=dt?dt.toLocaleString("en-IN",{hour:"2-digit",minute:"2-digit",weekday:"short"}):"";
+    return `<div class="ds-meet">
+      <div class="dm-date"><div class="d">${day}</div><div class="mo">${mo}</div></div>
+      <div class="dm-main">
+        <div class="dm-t">${esc(mt.title)} ${mt.status==="done"?'<span class="ds-stat done">done</span>':mt.status==="cancelled"?'<span class="ds-stat todo">cancelled</span>':""}</div>
+        <div class="dm-sub">${time}${mt.duration_min?" · "+mt.duration_min+" min":""}${mt.client_email?" · "+esc(mt.client_email):""}</div>
+        ${mt.agenda?`<div class="dm-sub">📋 ${esc(mt.agenda)}</div>`:""}
+      </div>
+      <div class="dm-act">
+        ${mt.meet_link?`<a class="wa-btn alt" href="${esc(mt.meet_link)}" target="_blank" style="text-decoration:none">▶ Join Meet</a>`:""}
+        <button class="ghost" data-gcal="${mt.id}">📅 Calendar + Meet</button>
+        ${w?`<button class="ghost" data-mlink="${mt.id}">${mt.meet_link?"Edit link":"+ Meet link"}</button>
+            <button class="primary" data-mom="${mt.id}" data-momtitle="${esc(mt.title)}">Write MoM</button>
+            <button class="linkbtn del" data-mdel="${mt.id}">✕</button>`:""}
+      </div>
+    </div>`;
+  }).join("");
+}
+function gcalUrl(mt){
+  const start=mt.scheduled_at?new Date(mt.scheduled_at):new Date();
+  const end=new Date(start.getTime()+(mt.duration_min||30)*60000);
+  const fmtG=d=>d.toISOString().replace(/[-:]/g,"").split(".")[0]+"Z";
+  const params=new URLSearchParams({
+    action:"TEMPLATE", text:mt.title||"Design meeting",
+    dates:`${fmtG(start)}/${fmtG(end)}`,
+    details:(mt.agenda||"")+"\n\nScheduled via Lintel OS. Click 'Add Google Meet video conferencing' before saving.",
+    add:mt.client_email||""
+  });
+  return "https://calendar.google.com/calendar/render?"+params.toString();
+}
+function bindMeetActions(p,body){
+  body.querySelectorAll("[data-gcal]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.gcal).single();
+    if(mt) window.open(gcalUrl(mt),"_blank");
+  });
+  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Remove this meeting?")) return;
+    await sb.from("design_meetings").delete().eq("id",b.dataset.mdel); dsMeetings(p,body);
+  });
+  body.querySelectorAll("[data-mlink]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mlink).single();
+    openModal(`<div class="modal-h">Google Meet link</div>
+      <div class="modal-b">
+        <div class="banner">Open <b>📅 Calendar + Meet</b>, add Google Meet to the event and save, then paste the Meet link here so everyone gets a join button.</div>
+        <div class="field"><label>Meet link</label><input id="ml_in" placeholder="https://meet.google.com/abc-defg-hij" value="${esc(mt?.meet_link||"")}"></div>
+      </div>
+      <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="ml_save">Save link</button></div>`);
+    $("#ml_save").onclick=async()=>{
+      await sb.from("design_meetings").update({meet_link:$("#ml_in").value.trim()||null}).eq("id",b.dataset.mlink);
+      closeModal(); toast("Meet link saved"); dsMeetings(p,body);
+    };
+  });
+  body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>momForm(p,{meeting_id:Number(b.dataset.mom),title:"MoM · "+b.dataset.momtitle},body));
+}
+
+/* ---- Minutes of Meeting ---- */
+async function dsMoM(p,body){
+  const w=canWrite();
+  const {data:moms}=await sb.from("design_moms").select("*").eq("project_id",p.id).order("created_at",{ascending:false});
+  const {data:meets}=await sb.from("design_meetings").select("id,title").eq("project_id",p.id);
+  const {data:actions}=await sb.from("mom_actions").select("*").eq("project_id",p.id);
+  const meetName=id=>{const m=(meets||[]).find(x=>x.id===id);return m?m.title:"";};
+  body.innerHTML=`
+  ${w?`<div style="margin-bottom:14px"><button class="primary" id="mom_new">+ New MoM</button></div>`:""}
+  <div id="mom_list">${(moms||[]).map(m=>{
+    const acts=(actions||[]).filter(a=>a.mom_id===m.id);
+    return `<div class="mom-card">
+      <div class="mom-h">
+        <div><div class="mt">${esc(m.title||"Minutes of meeting")}</div>
+          ${m.meeting_id?`<div class="mw">↳ ${esc(meetName(m.meeting_id))}</div>`:""}</div>
+        <div class="mw">${new Date(m.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"})}
+          ${w?` · <button class="linkbtn" data-momedit="${m.id}">edit</button> · <button class="linkbtn del" data-momdel="${m.id}">✕</button>`:""}</div>
+      </div>
+      ${m.summary?`<div class="mom-sum">${esc(m.summary)}</div>`:""}
+      <div class="sec-label" style="font-size:11px">Action items</div>
+      ${acts.length?acts.map(a=>{
+        const over=a.deadline&&a.deadline<todayISO()&&a.status!=="done";
+        return `<div class="act-item ${a.status==="done"?"done":""}">
+          ${w?`<input type="checkbox" data-actdone="${a.id}" ${a.status==="done"?"checked":""}>`:""}
+          <span class="ai-txt">${esc(a.item)}</span>
+          ${a.assignee_id?`<span class="av" title="${esc(staffName(a.assignee_id))}">${initials(staffName(a.assignee_id))}</span>`:""}
+          ${a.deadline?`<span class="ai-due ${over?"over":""}">${a.deadline}</span>`:""}
+        </div>`;}).join("")
+       :`<div style="color:var(--ink-soft);font-size:12px">No action items.</div>`}
+    </div>`;
+  }).join("")||emptyState("No minutes yet", w?"Record minutes after a meeting, or start a standalone MoM.":"Nothing recorded yet.")}</div>`;
+  if(w){
+    $("#mom_new").onclick=()=>momForm(p,{},body);
+    body.querySelectorAll("[data-momdel]").forEach(b=>b.onclick=async()=>{
+      if(!confirm("Delete this MoM and its action items?")) return;
+      await sb.from("design_moms").delete().eq("id",b.dataset.momdel); dsMoM(p,body);
+    });
+    body.querySelectorAll("[data-momedit]").forEach(b=>b.onclick=async()=>{
+      const {data:m}=await sb.from("design_moms").select("*").eq("id",b.dataset.momedit).single();
+      const {data:acts}=await sb.from("mom_actions").select("*").eq("mom_id",b.dataset.momedit);
+      momForm(p,m,body,acts||[]);
+    });
+    body.querySelectorAll("[data-actdone]").forEach(c=>c.onchange=async()=>{
+      await sb.from("mom_actions").update({status:c.checked?"done":"open"}).eq("id",c.dataset.actdone);
+      dsMoM(p,body);
+    });
+  }
+}
+
+/* MoM popup: summary + action items (concerned person + deadline) */
+function momForm(p,m,body,existingActions){
+  m=m||{};
+  const meetSel=async()=>{
+    const {data:meets}=await sb.from("design_meetings").select("id,title").eq("project_id",p.id).order("scheduled_at",{ascending:false});
+    return `<option value="">— standalone (no meeting) —</option>`+(meets||[]).map(x=>`<option value="${x.id}" ${m.meeting_id===x.id?"selected":""}>${esc(x.title)}</option>`).join("");
+  };
+  meetSel().then(opts=>{
+    const acts=existingActions||[];
+    openModal(`
+      <div class="modal-h">${m.id?"Edit MoM":"New Minutes of Meeting"}</div>
+      <div class="modal-b">
+        <div class="field"><label>Title</label><input id="mm_title" value="${esc(m.title||"Minutes of meeting")}"></div>
+        <div class="field"><label>Linked meeting</label><select id="mm_meet">${opts}</select></div>
+        <div class="field"><label>Discussion summary</label><textarea id="mm_sum" rows="5" placeholder="What was discussed and decided…">${esc(m.summary||"")}</textarea></div>
+        <div class="sec-label">Action items — assign a person & deadline</div>
+        <div id="mm_actions">${acts.map(a=>actionRow(a)).join("")||actionRow({})}</div>
+        <button class="ghost" id="mm_addrow" style="margin-top:6px">+ Add action item</button>
+      </div>
+      <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="mm_save">Save MoM</button></div>`);
+    $("#mm_addrow").onclick=()=>{ $("#mm_actions").insertAdjacentHTML("beforeend",actionRow({})); };
+    $("#mm_save").onclick=async()=>{
+      const payload={ project_id:p.id, title:$("#mm_title").value.trim()||"Minutes of meeting",
+        meeting_id:$("#mm_meet").value?Number($("#mm_meet").value):null, summary:$("#mm_sum").value.trim()||null };
+      let momId=m.id;
+      if(momId){ await sb.from("design_moms").update(payload).eq("id",momId); await sb.from("mom_actions").delete().eq("mom_id",momId); }
+      else { const {data,error}=await sb.from("design_moms").insert(payload).select().single(); if(error) return toast(error.message); momId=data.id; }
+      const rows=Array.from(document.querySelectorAll("#mm_actions .mom-action-edit"));
+      const inserts=rows.map(r=>({
+        mom_id:momId, project_id:p.id,
+        item:r.querySelector(".ai_item").value.trim(),
+        assignee_id:r.querySelector(".ai_who").value?Number(r.querySelector(".ai_who").value):null,
+        deadline:r.querySelector(".ai_due").value||null
+      })).filter(x=>x.item);
+      if(inserts.length) await sb.from("mom_actions").insert(inserts);
+      closeModal(); toast("MoM saved"); designSub="mom"; dsMoM(p,body);
+    };
+  });
+}
+function actionRow(a){
+  a=a||{};
+  return `<div class="mom-action-edit">
+    <input class="ai_item" placeholder="Action item" value="${esc(a.item||"")}">
+    <select class="ai_who">${staffOpts(a.assignee_id)}</select>
+    <input class="ai_due" type="date" value="${a.deadline||""}">
+    <button class="linkbtn del" onclick="this.parentElement.remove()">✕</button>
+  </div>`;
+}
+
+
 async function pwFiles(p,body,kind){
   const label=kind==="design"?"Design":"Document";
   const {data:files}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false});
