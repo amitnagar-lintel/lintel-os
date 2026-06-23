@@ -256,6 +256,28 @@
   }
   /* ---- overview / timeline ---- */
   .ov-grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+  /* ---- lead workspace ---- */
+  .lw-grid{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  .panel h3{margin:0 0 14px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep);font-weight:700}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--ink-soft);flex:none}
+  .kv .v{font-weight:500;text-align:right;word-break:break-word}
+  .lw-pills{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
+  .lw-pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;background:var(--paper-2);color:var(--ink-soft)}
+  .lw-pill.src{background:#EEF1F7;color:#48506B}
+  .lw-pill.due{background:#FBEFEA;color:var(--clay)} .lw-pill.due.today{background:#FFF6E5;color:#A9791E}
+  .contact-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .wa-btn{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-weight:600;font-size:13px;cursor:pointer}
+  .wa-btn.alt{background:#fff;color:#128C7E;border:1px solid #25D366}
+  .lw-actions{display:flex;flex-direction:column;gap:9px;align-items:stretch}
+  .lw-actions button{width:100%;justify-content:center}
+  .qgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .qcard{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .qcard .ql{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-soft);font-weight:600;margin-bottom:3px}
+  .qcard .qv{font-size:13.5px;font-weight:500}
+  @media(max-width:880px){.lw-grid{grid-template-columns:1fr}.qgrid{grid-template-columns:1fr}}
   .ov-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
   .ov-prog{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-soft)}
   .ov-bar{width:120px;height:6px;background:var(--paper-2);border-radius:4px;overflow:hidden}
@@ -491,7 +513,7 @@ async function enter(session){
     if(canManageStaff()) $("#navTeam").style.display="";
     document.querySelectorAll("nav.tabs button").forEach(b=>{
       b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
-        b.classList.add("active"); render(b.dataset.view); };
+        b.classList.add("active"); activeLead=null; activeProject=null; render(b.dataset.view); };
     });
     render("leads");
   } catch(e) {
@@ -584,6 +606,8 @@ function render(view){
 
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false };
+let activeLead = null, leadTab = "overview";
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -609,9 +633,10 @@ function dueClass(d){ if(!d) return ""; const t=todayISO(); return d<t?"overdue"
 
 async function renderLeads(){
   await ensureStaff();
+  if(activeLead) return renderLeadWorkspace(activeLead);
   const m=$("#main");
   m.innerHTML=`<div class="view-head"><div>
-      <h2 class="display">Leads</h2><div class="sub">Pipeline · ${canWrite()?"drag-free board, click a card to open":"read-only for your role"}</div></div>
+      <h2 class="display">Leads</h2><div class="sub">Pipeline · ${canWrite()?"click any card to open its workspace":"read-only for your role"}</div></div>
       ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
     </div>
     <div class="lead-filters">
@@ -668,7 +693,7 @@ async function drawBoard(){
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
         <span class="val">${l.expected_value?fmt(l.expected_value):""}</span></div>
         ${(l.pm_id||l.consultant_id)?`<div class="avrow">${[l.consultant_id,l.designer_id,l.pm_id].filter(Boolean).map(id=>`<span class="av" title="${esc(staffName(id))}">${initials(staffName(id))}</span>`).join("")}</div>`:""}`;
-      c.onclick=()=>leadDetail(l);
+      c.onclick=()=>openLead(l.id);
       const waBtn=c.querySelector(".card-wa");
       if(waBtn) waBtn.onclick=(e)=>{ e.stopPropagation(); waMenu(l, waBtn); };
       col.appendChild(c);
@@ -750,137 +775,264 @@ function leadForm(lead){
     else { row.owner_id=me.id; res=await sb.from("leads").insert(row).select().single(); newId=res.data&&res.data.id; }
     if(res.error) return toast(res.error.message);
     if(!lead && newId) await sb.from("lead_activities").insert({lead_id:newId,type:"created",text:"Lead added via "+(row.source||"—"),by_user:me.id});
-    closeModal(); toast(lead?"Lead updated":"Lead created"); drawBoard();
+    closeModal(); toast(lead?"Lead updated":"Lead created");
+    if(activeLead) renderLeadWorkspace(activeLead); else drawBoard();
   };
 }
 
-async function leadDetail(l){
+/* ===================== LEAD WORKSPACE (full-page, tabbed) ===================== */
+function openLead(id){ activeLead=id; leadTab="overview"; renderLeadWorkspace(id); }
+function closeLead(){ activeLead=null; renderLeads(); }
+async function refreshLead(){ renderLeadWorkspace(activeLead); }
+
+async function renderLeadWorkspace(id){
   await ensureStaff();
   if(!Object.keys(PROFILE_NAMES).length) await loadProfileNames();
-  const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",l.id).order("created_at",{ascending:false});
+  const {data:l,error}=await sb.from("leads").select("*").eq("id",id).single();
+  if(error||!l){ activeLead=null; return renderLeads(); }
   const score=l.bant_score||bantFromQual(l);
-  const team=[["Consultant",l.consultant_id],["Designer",l.designer_id],["PM",l.pm_id],["Presales",l.presales_id]]
-    .filter(x=>x[1]).map(x=>`${x[0]}: <b>${esc(staffName(x[1]))}</b>`).join(" · ")||"—";
-  const qualRows=Object.keys(QUAL).filter(k=>l[k]).map(k=>`<span class="qchip">${QUAL_LABELS[k]}: ${esc(QUAL_TEXT[l[k]]||l[k])}</span>`).join("")||"<span style='color:var(--ink-soft)'>Not qualified yet</span>";
-  openModal(`
-    <div class="modal-h">${esc(l.name)} <span class="bant ${score>=60?"hi":score<35?"lo":""}" style="margin-left:8px">${score}</span></div>
-    <div class="modal-b">
-      ${canWrite()?`<div class="lead-quickbar">
-        <div class="field"><label>Stage</label>
-          <select id="ld_stage" class="lf-sel" style="width:100%">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
-        <div class="field"><label>Design consultant</label>
-          <select id="ld_consultant" class="lf-sel" style="width:100%">${staffOpts(l.consultant_id)}</select></div>
-      </div>`:`<div class="field"><label>Stage</label><div><span class="stage-pill">${esc((STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1])}</span></div></div>`}
-      <div class="grid2">
-        <div class="field"><label>Phone</label><div>${esc(l.phone||"—")}${l.phone?` · <button class="linkbtn" id="waLead">WhatsApp</button> · <button class="linkbtn" id="waLeadEdit">edit msg</button>`:""}</div></div>
-        <div class="field"><label>Email</label><div>${esc(l.email||"—")}</div></div>
+  const stageLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1];
+  const dc=dueClass(l.next_follow_up);
+  const m=$("#main");
+  m.innerHTML=`
+    <div class="pw-top">
+      <button class="ghost" id="lwBack">← All leads</button>
+      <div class="pw-title">
+        <span class="bant ${score>=60?"hi":score<35?"lo":""}">${score}</span>
+        <h2 class="display">${esc(l.name)}</h2>
+        <span class="stage-pill">${esc(stageLabel)}</span>
       </div>
-      <div class="grid2">
-        <div class="field"><label>Site address</label><div>${esc(l.site_address||l.locality||"—")}</div></div>
-        <div class="field"><label>Project type</label><div>${esc(l.project_type||"—")}</div></div>
+      <div class="lw-pills">
+        ${l.source?`<span class="lw-pill src">${esc(l.source)}</span>`:""}
+        ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
+        ${l.expected_value?`<span class="lw-pill">${fmt(l.expected_value)}</span>`:""}
       </div>
-      <div class="grid2">
-        <div class="field"><label>Budget</label><div class="mono">${l.expected_value?fmt(l.expected_value):"—"}</div></div>
-        <div class="field"><label>Next follow-up</label>
-          <div class="${dueClass(l.next_follow_up)}" style="margin-bottom:6px">${l.next_follow_up?("⏱ "+l.next_follow_up):"— none set —"}</div>
-          ${canWrite()?`<div class="fu-set">
-            <button class="chip" data-fu="1">Tomorrow</button>
-            <button class="chip" data-fu="3">In 3 days</button>
-            <button class="chip" data-fu="7">Next week</button>
-            <input type="date" id="fu_date" class="lf-sel" style="padding:5px 8px">
-            ${l.next_follow_up?`<button class="chip clear" data-fu="clear">Clear</button>`:""}
-          </div>`:""}
-        </div>
-      </div>
-      <div class="field"><label>Team</label><div>${team}</div></div>
-      <div class="field"><label>Qualification</label><div class="qrow">${qualRows}</div></div>
-      ${(l.tags&&l.tags.length)?`<div class="field"><label>Tags</label><div class="tagrow">${l.tags.map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div></div>`:""}
-      ${l.notes?`<div class="field"><label>Notes</label><div>${esc(l.notes)}</div></div>`:""}
-
-      <div class="sec-label">Activity & client notes</div>
-      ${canWrite()?`<div class="actadd">
-        <select id="act_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option></select>
-        <input id="act_text" placeholder="What did the client say? Record the note…">
-        <button class="primary" id="act_add">Log</button></div>`:""}
-      <div class="timeline" id="timeline">${(acts||[]).map(a=>{
-          const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍"}[a.type]||"•";
-          const who=a.by_user?staffNameByProfile(a.by_user):"";
-          const dt=new Date(a.created_at);
-          const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
-          return `<div class="tl-item2">
-            <div class="tl-ic">${icon}</div>
-            <div class="tl-main">
-              <div class="tl-top"><span class="tl-type2">${esc(a.type)}</span><span class="tl-when2 mono">${when}</span></div>
-              <div class="tl-text2">${esc(a.text||"")}</div>
-              ${who?`<div class="tl-who">— ${esc(who)}</div>`:""}
-            </div></div>`;
-        }).join("")||`<div class="tl-empty">No notes yet. Every call and client conversation logged here builds the lead's history.</div>`}</div>
     </div>
-    <div class="modal-f">
-      ${canWrite()?`<button class="ghost" id="dEdit">Edit</button>`:""}
-      ${canManageLeads()?`<button class="primary" id="dConv">Create a project →</button>`:`<button class="ghost" onclick="closeModal()">Close</button>`}
-    </div>`);
-  if(canWrite()){
-    const setFU=async(iso)=>{
-      const {error}=await sb.from("leads").update({next_follow_up:iso}).eq("id",l.id);
-      if(error) return toast(error.message);
-      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:iso?("Follow-up set for "+iso):"Follow-up cleared",by_user:me.id});
-      toast(iso?("Follow-up set: "+iso):"Follow-up cleared");
-      l.next_follow_up=iso; leadDetail(l);
-    };
-    document.querySelectorAll("[data-fu]").forEach(b=>b.onclick=()=>{
-      const v=b.dataset.fu;
-      if(v==="clear") return setFU(null);
-      const d=new Date(); d.setDate(d.getDate()+Number(v));
-      setFU(d.toISOString().slice(0,10));
-    });
-    const fd=$("#fu_date"); if(fd) fd.onchange=()=>{ if(fd.value) setFU(fd.value); };
-  }
-  if(l.phone && $("#waLead")){
-    $("#waLead").onclick=()=>{
-      waOpen(l.phone, waLeadMsg(l));
-      // auto-log the touch
-      if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id});
-    };
-    $("#waLeadEdit").onclick=()=>{
-      openModal(`
-        <div class="modal-h">WhatsApp message</div>
-        <div class="modal-b">
-          <div class="field"><label>To</label><div>${esc(l.name||"")} · +${waNumber(l.phone)}</div></div>
-          <div class="field"><label>Message</label><textarea id="wa_text" rows="6" style="width:100%">${esc(waLeadMsg(l))}</textarea></div>
+    <nav class="pw-tabs" id="lwTabs">
+      ${LEAD_TABS.map(t=>`<button data-t="${t[0]}" class="${leadTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
+    </nav>
+    <div id="lwBody">Loading…</div>`;
+  $("#lwBack").onclick=closeLead;
+  $("#lwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    leadTab=b.dataset.t;
+    $("#lwTabs").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
+    drawLeadTab(l);
+  });
+  drawLeadTab(l);
+}
+
+function drawLeadTab(l){
+  const body=$("#lwBody"); if(!body) return;
+  if(leadTab==="overview") return lwOverview(l,body);
+  if(leadTab==="briefing") return lwBriefing(l,body);
+  if(leadTab==="activity") return lwActivity(l,body);
+  if(leadTab==="notes")    return lwNotes(l,body);
+}
+
+/* ---- Overview: action rail + snapshot, Livspace-style ---- */
+function lwOverview(l,body){
+  const w=canWrite();
+  const team=[["Consultant",l.consultant_id],["Designer",l.designer_id],["PM",l.pm_id],["Presales",l.presales_id]]
+    .filter(x=>x[1]).map(x=>`<div class="kv"><span class="k">${x[0]}</span><span class="v">${esc(staffName(x[1]))}</span></div>`).join("")
+    ||`<div style="color:var(--ink-soft);font-size:13px">No one assigned yet.</div>`;
+  body.innerHTML=`
+  <div class="lw-grid">
+    <div>
+      <div class="panel">
+        <h3>Pipeline</h3>
+        ${w?`<div class="grid2">
+          <div class="field"><label>Stage</label>
+            <select id="ld_stage" class="lf-sel" style="width:100%">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
+          <div class="field"><label>Design consultant</label>
+            <select id="ld_consultant" class="lf-sel" style="width:100%">${staffOpts(l.consultant_id)}</select></div>
+        </div>`:`<div class="kv"><span class="k">Stage</span><span class="v">${esc((STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1])}</span></div>`}
+      </div>
+      <div class="panel">
+        <h3>Contact</h3>
+        <div class="kv"><span class="k">Phone</span><span class="v">${esc(l.phone||"—")}</span></div>
+        <div class="kv"><span class="k">Email</span><span class="v">${esc(l.email||"—")}</span></div>
+        <div class="kv"><span class="k">Locality</span><span class="v">${esc(l.locality||l.city||"—")}</span></div>
+        ${l.phone?`<div class="contact-row">
+          <button class="wa-btn" id="waLead">🟢 WhatsApp</button>
+          <button class="wa-btn alt" id="waLeadEdit">Edit message</button>
+        </div>`:""}
+      </div>
+      <div class="panel">
+        <h3>Follow-up</h3>
+        <div class="${dueClass(l.next_follow_up)}" style="margin-bottom:10px;font-weight:500">${l.next_follow_up?("⏱ "+l.next_follow_up):"— none set —"}</div>
+        ${w?`<div class="fu-set">
+          <button class="chip" data-fu="1">Tomorrow</button>
+          <button class="chip" data-fu="3">In 3 days</button>
+          <button class="chip" data-fu="7">Next week</button>
+          <input type="date" id="fu_date" class="lf-sel" style="padding:5px 8px">
+          ${l.next_follow_up?`<button class="chip clear" data-fu="clear">Clear</button>`:""}
+        </div>`:""}
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>Snapshot</h3>
+        <div class="kv"><span class="k">BANT score</span><span class="v">${l.bant_score||bantFromQual(l)}</span></div>
+        <div class="kv"><span class="k">Budget</span><span class="v">${l.expected_value?fmt(l.expected_value):"—"}</span></div>
+        <div class="kv"><span class="k">Source</span><span class="v">${esc(l.source||"—")}</span></div>
+        <div class="kv"><span class="k">Project type</span><span class="v">${esc(l.project_type||"—")}</span></div>
+        <div class="kv"><span class="k">Created</span><span class="v">${l.created_at?new Date(l.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}):"—"}</span></div>
+      </div>
+      <div class="panel">
+        <h3>Team</h3>
+        ${team}
+      </div>
+      ${w?`<div class="panel">
+        <h3>Actions</h3>
+        <div class="lw-actions">
+          <button class="ghost" id="dEdit">Edit lead</button>
+          ${canManageLeads()?`<button class="primary" id="dConv">Create a project →</button>`:""}
         </div>
-        <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="wa_send">Open in WhatsApp →</button></div>`);
-      $("#wa_send").onclick=()=>{ waOpen(l.phone,$("#wa_text").value); closeModal();
-        if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id}); };
-    };
-  }
-  if(canWrite()){
-    $("#dEdit").onclick=()=>{closeModal();leadForm(l);};
-    const sd=$("#ld_stage");
-    if(sd) sd.onchange=async()=>{
-      const newStage=sd.value, oldLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1], newLabel=(STAGES.find(s=>s[0]===newStage)||["",newStage])[1];
-      const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
-      if(error){ sd.value=l.stage; return toast(error.message); }
-      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Stage: ${oldLabel} → ${newLabel}`,by_user:me.id});
-      l.stage=newStage; toast("Stage updated"); leadDetail(l);
-    };
-    const cd=$("#ld_consultant");
-    if(cd) cd.onchange=async()=>{
-      const cid=cd.value?Number(cd.value):null;
-      const {error}=await sb.from("leads").update({consultant_id:cid,updated_at:new Date().toISOString()}).eq("id",l.id);
-      if(error) return toast(error.message);
-      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:cid?("Design consultant assigned: "+staffName(cid)):"Design consultant unassigned",by_user:me.id});
-      l.consultant_id=cid; toast("Consultant updated"); leadDetail(l);
-    };
-    $("#dConv").onclick=()=>convertLead(l);
-    $("#act_add").onclick=async()=>{
+      </div>`:""}
+    </div>
+  </div>`;
+  bindLeadCommon(l);
+}
+
+/* ---- Briefing: full client + qualification ---- */
+function lwBriefing(l,body){
+  const w=canWrite();
+  const qcards=Object.keys(QUAL).filter(k=>l[k]).map(k=>`
+    <div class="qcard"><div class="ql">${QUAL_LABELS[k]}</div><div class="qv">${esc(QUAL_TEXT[l[k]]||l[k])}</div></div>`).join("")
+    ||`<div style="color:var(--ink-soft);font-size:13px">Not qualified yet — use Edit to capture BANT details.</div>`;
+  body.innerHTML=`
+  <div class="lw-grid">
+    <div>
+      <div class="panel">
+        <h3>Client & site</h3>
+        <div class="kv"><span class="k">Client name</span><span class="v">${esc(l.name||"—")}</span></div>
+        <div class="kv"><span class="k">Phone</span><span class="v">${esc(l.phone||"—")}</span></div>
+        <div class="kv"><span class="k">Email</span><span class="v">${esc(l.email||"—")}</span></div>
+        <div class="kv"><span class="k">Current address</span><span class="v">${esc(l.current_address||"—")}</span></div>
+        <div class="kv"><span class="k">Site address</span><span class="v">${esc(l.site_address||l.locality||"—")}</span></div>
+      </div>
+      <div class="panel">
+        <h3>Project brief</h3>
+        <div class="kv"><span class="k">Project type</span><span class="v">${esc(l.project_type||"—")}</span></div>
+        <div class="kv"><span class="k">Property type</span><span class="v">${esc(l.property_type||"—")}</span></div>
+        <div class="kv"><span class="k">Configuration</span><span class="v">${esc(l.p_config||"—")}</span></div>
+        <div class="kv"><span class="k">Carpet area</span><span class="v">${esc(l.p_carpet_area||"—")}</span></div>
+        <div class="kv"><span class="k">Builder</span><span class="v">${esc(l.p_builder||"—")}</span></div>
+        <div class="kv"><span class="k">Budget band</span><span class="v">${esc(l.budget_band||"—")}</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3>Qualification (BANT)</h3>
+        <div class="qgrid">${qcards}</div>
+      </div>
+      ${(l.tags&&l.tags.length)?`<div class="panel"><h3>Tags</h3><div class="tagrow">${l.tags.map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div></div>`:""}
+      ${w?`<div class="panel"><h3>Actions</h3><div class="lw-actions"><button class="ghost" id="dEdit">Edit lead</button></div></div>`:""}
+    </div>
+  </div>`;
+  bindLeadCommon(l);
+}
+
+/* ---- Activity: the timeline centerpiece, full width ---- */
+async function lwActivity(l,body){
+  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Activity & client notes</h3><div id="actInner">Loading…</div></div>`;
+  const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",l.id).order("created_at",{ascending:false});
+  const w=canWrite();
+  $("#actInner").innerHTML=`
+    ${w?`<div class="actadd">
+      <select id="act_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option></select>
+      <input id="act_text" placeholder="What did the client say? Record the note…">
+      <button class="primary" id="act_add">Log</button></div>`:""}
+    <div class="timeline" id="timeline">${(acts||[]).map(a=>{
+        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",created:"✨"}[a.type]||"•";
+        const who=a.by_user?staffNameByProfile(a.by_user):"";
+        const dt=new Date(a.created_at);
+        const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+        return `<div class="tl-item2"><div class="tl-ic">${icon}</div>
+          <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(a.type)}</span><span class="tl-when2 mono">${when}</span></div>
+          <div class="tl-text2">${esc(a.text||"")}</div>${who?`<div class="tl-who">— ${esc(who)}</div>`:""}</div></div>`;
+      }).join("")||`<div class="tl-empty">No notes yet. Every call and client conversation logged here builds the lead's history.</div>`}</div>`;
+  if(w){
+    const add=$("#act_add");
+    if(add) add.onclick=async()=>{
       const text=$("#act_text").value.trim(); if(!text) return;
       const {error}=await sb.from("lead_activities").insert({lead_id:l.id,type:$("#act_type").value,text,by_user:me.id});
       if(error) return toast(error.message);
-      leadDetail(l);
+      lwActivity(l,body);
     };
   }
 }
+
+/* ---- Notes: free-form, editable ---- */
+function lwNotes(l,body){
+  const w=canWrite();
+  body.innerHTML=`<div class="panel" style="max-width:760px">
+    <h3>Notes</h3>
+    ${w?`<textarea id="lw_notes" rows="10" style="width:100%;resize:vertical">${esc(l.notes||"")}</textarea>
+       <div style="margin-top:12px"><button class="primary" id="lw_notes_save">Save notes</button></div>`
+       :`<div>${l.notes?esc(l.notes):'<span style="color:var(--ink-soft)">No notes.</span>'}</div>`}
+  </div>`;
+  if(w) $("#lw_notes_save").onclick=async()=>{
+    const {error}=await sb.from("leads").update({notes:$("#lw_notes").value,updated_at:new Date().toISOString()}).eq("id",l.id);
+    if(error) return toast(error.message);
+    l.notes=$("#lw_notes").value; toast("Notes saved");
+  };
+}
+
+/* ---- shared handlers across lead tabs ---- */
+function bindLeadCommon(l){
+  if(!canWrite()) return;
+  const ed=$("#dEdit"); if(ed) ed.onclick=()=>leadForm(l);
+  const cv=$("#dConv"); if(cv) cv.onclick=()=>convertLead(l);
+  const sd=$("#ld_stage");
+  if(sd) sd.onchange=async()=>{
+    const newStage=sd.value, oldLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1], newLabel=(STAGES.find(s=>s[0]===newStage)||["",newStage])[1];
+    const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
+    if(error){ sd.value=l.stage; return toast(error.message); }
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Stage: ${oldLabel} → ${newLabel}`,by_user:me.id});
+    l.stage=newStage; toast("Stage updated"); renderLeadWorkspace(l.id);
+  };
+  const cd=$("#ld_consultant");
+  if(cd) cd.onchange=async()=>{
+    const cid=cd.value?Number(cd.value):null;
+    const {error}=await sb.from("leads").update({consultant_id:cid,updated_at:new Date().toISOString()}).eq("id",l.id);
+    if(error) return toast(error.message);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:cid?("Design consultant assigned: "+staffName(cid)):"Design consultant unassigned",by_user:me.id});
+    l.consultant_id=cid; toast("Consultant updated");
+  };
+  const setFU=async(iso)=>{
+    const {error}=await sb.from("leads").update({next_follow_up:iso}).eq("id",l.id);
+    if(error) return toast(error.message);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:iso?("Follow-up set for "+iso):"Follow-up cleared",by_user:me.id});
+    toast(iso?("Follow-up set: "+iso):"Follow-up cleared");
+    l.next_follow_up=iso; renderLeadWorkspace(l.id);
+  };
+  document.querySelectorAll("[data-fu]").forEach(b=>b.onclick=()=>{
+    const v=b.dataset.fu;
+    if(v==="clear") return setFU(null);
+    const d=new Date(); d.setDate(d.getDate()+Number(v));
+    setFU(d.toISOString().slice(0,10));
+  });
+  const fd=$("#fu_date"); if(fd) fd.onchange=()=>{ if(fd.value) setFU(fd.value); };
+  const wl=$("#waLead");
+  if(wl) wl.onclick=()=>{
+    waOpen(l.phone, waLeadMsg(l));
+    sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id});
+  };
+  const wle=$("#waLeadEdit");
+  if(wle) wle.onclick=()=>{
+    openModal(`
+      <div class="modal-h">WhatsApp message</div>
+      <div class="modal-b">
+        <div class="field"><label>To</label><div>${esc(l.name||"")} · +${waNumber(l.phone)}</div></div>
+        <div class="field"><label>Message</label><textarea id="wa_text" rows="6" style="width:100%">${esc(waLeadMsg(l))}</textarea></div>
+      </div>
+      <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="wa_send">Open in WhatsApp →</button></div>`);
+    $("#wa_send").onclick=()=>{ waOpen(l.phone,$("#wa_text").value); closeModal();
+      sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id}); };
+  };
+}
+
 
 async function convertLead(l){
   // grab latest BOQ total for this lead (if any) as contract value
@@ -896,7 +1048,7 @@ async function convertLead(l){
   // link the BOQ to the project too, and mark lead won
   if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
   await sb.from("leads").update({stage:"won",updated_at:new Date().toISOString()}).eq("id",l.id);
-  closeModal(); toast(`Project ${code} created`); render("projects");
+  activeLead=null; toast(`Project ${code} created`); render("projects");
   document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
 }
 
