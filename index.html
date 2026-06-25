@@ -253,15 +253,6 @@
   .ex-legend span{display:inline-flex;align-items:center;gap:6px}
   .ex-key{width:14px;height:10px;border-radius:3px;display:inline-block}
   .ex-key.plan{background:#D8DEE9} .ex-key.act{background:var(--brass)} .ex-key.crit{background:var(--navy)} .ex-key.late{background:var(--clay)}
-  /* ---- BOQ-driven execution engine ---- */
-  .ex-genbadge{font-size:10px;font-weight:700;background:var(--brass);color:#fff;padding:2px 8px;border-radius:20px;vertical-align:middle;margin-left:6px;text-transform:uppercase;letter-spacing:.4px}
-  .ex-hint{font-size:12.5px;color:var(--ink-soft);background:var(--paper-2);border-radius:8px;padding:9px 12px;margin-bottom:12px}
-  .ex-hint b{color:var(--ink)}
-  .ex-kom{display:inline-flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink-soft);font-weight:600}
-  .ex-kom input{border:1px solid var(--line-2);border-radius:6px;padding:5px 7px;font-size:12px;background:#fff}
-  .gantt-phase{background:#FBF5E6;color:var(--brass-deep);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.8px;padding:6px 14px;border-bottom:1px solid var(--line)}
-  .g-sub{font-size:11px;color:var(--ink-soft);margin-left:8px;font-weight:400}
-  .ex-ph{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--navy);background:var(--paper-2);padding:2px 6px;border-radius:5px}
   .gantt{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 0;overflow-x:auto;margin-bottom:16px}
   .gantt-row{display:grid;grid-template-columns:230px 1fr;align-items:center;border-bottom:1px solid var(--line);min-height:40px}
   .gantt-row:last-child{border-bottom:none}
@@ -299,6 +290,20 @@
   .mini-item:last-child{border-bottom:none}
   .mini-item .mi-due{margin-left:auto;font-size:11px;color:var(--ink-soft)} .mini-item .mi-due.over{color:var(--clay);font-weight:600}
   @media(max-width:880px){.cc-grid{grid-template-columns:1fr 1fr}.gantt-row{grid-template-columns:140px 1fr}.g-name{font-size:12px}}
+  /* ---- lead BOQ workflow strip ---- */
+  .wf-bar{display:flex;align-items:center;gap:0;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;flex-wrap:wrap}
+  .wf-step{display:flex;align-items:center;gap:9px}
+  .wf-dot{width:30px;height:30px;border-radius:50%;background:var(--paper-2);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:none;border:2px solid transparent}
+  .wf-step.done .wf-dot{background:var(--green);color:#fff}
+  .wf-step.active .wf-dot{background:#fff;color:var(--navy);border-color:var(--brass)}
+  .wf-lbl{font-size:13px;font-weight:600;color:var(--ink-soft)}
+  .wf-step.done .wf-lbl,.wf-step.active .wf-lbl{color:var(--ink)}
+  .wf-line{flex:1;min-width:24px;height:2px;background:var(--line);margin:0 12px}
+  .wf-line.on{background:var(--green)}
+  .wf-actions{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:16px}
+  .wf-amt{display:flex;gap:26px} .wf-amt .k{display:block;font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.4px} .wf-amt b{font-size:17px}
+  .wf-btns{display:flex;gap:8px;flex-wrap:wrap}
+  .wf-btns button:disabled{opacity:.4;cursor:not-allowed}
   .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .addgrid{display:grid;grid-template-columns:130px 150px 1fr 60px 60px 70px 60px auto;gap:8px;align-items:end}
   .addgrid .field label{font-size:10px}
@@ -689,7 +694,7 @@ function render(view){
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false };
 let activeLead = null, leadTab = "overview";
-const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["activity","Activity"],["notes","Notes"]];
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -907,6 +912,7 @@ function drawLeadTab(l){
   const body=$("#lwBody"); if(!body) return;
   if(leadTab==="overview") return lwOverview(l,body);
   if(leadTab==="briefing") return lwBriefing(l,body);
+  if(leadTab==="boq")      return lwBoq(l,body);
   if(leadTab==="activity") return lwActivity(l,body);
   if(leadTab==="notes")    return lwNotes(l,body);
 }
@@ -1116,23 +1122,181 @@ function bindLeadCommon(l){
 }
 
 
+/* ===================== LEAD BOQ + PROPOSAL/ADVANCE WORKFLOW ===================== */
+let _leadBoqCtx = null; // {l, body}
+
+async function lwBoq(l, body){
+  _leadBoqCtx = {l, body};
+  body.innerHTML=`<div id="lboqFlow"></div><div id="lboqGen">Loading BOQ…</div>`;
+  await renderLeadBoqFlow();
+  await leadBoqGenerator(l, $("#lboqGen"));
+}
+function refreshLeadBoqFlow(){ if(_leadBoqCtx) renderLeadBoqFlow(); }
+
+async function leadBoqTotal(l){
+  const {data}=await sb.from("boq_versions").select("total").eq("lead_id",l.id).order("version",{ascending:false}).limit(1);
+  return data&&data[0]?Number(data[0].total)||0:0;
+}
+
+/* ---- workflow strip: BOQ → Proposal sent → 10% advance → Convert ---- */
+async function renderLeadBoqFlow(){
+  const {l}=_leadBoqCtx; const host=$("#lboqFlow"); if(!host) return;
+  const fresh=(await sb.from("leads").select("*").eq("id",l.id).single()).data||l;
+  Object.assign(l,fresh);
+  const total=await leadBoqTotal(l);
+  const advance=Math.round(total*0.10);
+  const hasBoq=total>0;
+  const proposalSent=!!l.proposal_sent_at;
+  const advancePaid=!!l.advance_paid_at;
+  const w=canWrite();
+  const step=(n,label,done,active)=>`<div class="wf-step ${done?"done":active?"active":""}">
+      <div class="wf-dot">${done?"✓":n}</div><div class="wf-lbl">${label}</div></div>`;
+  host.innerHTML=`
+    <div class="wf-bar">
+      ${step(1,"BOQ ready",hasBoq,!hasBoq)}
+      <div class="wf-line ${hasBoq?"on":""}"></div>
+      ${step(2,"Proposal sent",proposalSent,hasBoq&&!proposalSent)}
+      <div class="wf-line ${proposalSent?"on":""}"></div>
+      ${step(3,"10% advance",advancePaid,proposalSent&&!advancePaid)}
+      <div class="wf-line ${advancePaid?"on":""}"></div>
+      ${step(4,"Convert to project",l.stage==="won",advancePaid&&l.stage!=="won")}
+    </div>
+    <div class="wf-actions">
+      <div class="wf-amt">
+        <div><span class="k">BOQ total</span><b class="mono">${total?fmt(total):"—"}</b></div>
+        <div><span class="k">10% advance</span><b class="mono">${advance?fmt(advance):"—"}</b></div>
+      </div>
+      ${w?`<div class="wf-btns">
+        <button class="ghost" id="wf_proposal" ${!hasBoq?"disabled":""}>${proposalSent?"✓ Proposal sent":"Mark proposal sent"}</button>
+        <button class="ghost" id="wf_advance" ${!proposalSent?"disabled":""}>Share 10% advance</button>
+        <button class="ghost" id="wf_advdone" ${!proposalSent?"disabled":""}>${advancePaid?"✓ Advance received":"Mark advance received"}</button>
+        <button class="primary" id="wf_convert" ${!advancePaid?"disabled":""}>Convert to project →</button>
+      </div>`:""}
+    </div>`;
+  if(!w) return;
+  $("#wf_proposal").onclick=async()=>{
+    if(proposalSent) return;
+    await sb.from("leads").update({proposal_sent_at:new Date().toISOString(),stage:"proposal",advance_amount:advance,updated_at:new Date().toISOString()}).eq("id",l.id);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Email",text:`Proposal sent · BOQ ${fmt(total)}`,by_user:me.id});
+    toast("Marked proposal sent"); renderLeadWorkspace(l.id);
+  };
+  $("#wf_advance").onclick=()=>shareAdvance(l,total,advance);
+  $("#wf_advdone").onclick=async()=>{
+    if(advancePaid){ if(!confirm("Advance already marked received. Mark again?")) return; }
+    await sb.from("leads").update({advance_paid_at:new Date().toISOString(),advance_amount:advance,updated_at:new Date().toISOString()}).eq("id",l.id);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`10% advance received · ${fmt(advance)}`,by_user:me.id});
+    toast("Advance recorded"); renderLeadWorkspace(l.id);
+  };
+  $("#wf_convert").onclick=()=>convertLead(l);
+}
+
+/* ---- 10% advance: real UPI payment link + QR + share ---- */
+function shareAdvance(l,total,advance){
+  const upiId="Lintels234@idfcbank", payee="LINTEL SPACE ATELIER";
+  const note=`Advance ${l.name||""}`.trim();
+  const upiLink=`upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payee)}&am=${advance}&cu=INR&tn=${encodeURIComponent(note)}`;
+  const msg=`Dear ${l.name||"Client"},\n\nThank you for choosing Lintel Space Atelier. To begin your project, here is the 10% advance:\n\nAmount: ${fmt(advance)} (10% of ${fmt(total)})\n\nPay via UPI: ${upiId}\nOr scan the QR we've shared.\n\nBank: IDFC FIRST Bank\nA/c Name: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED\nA/c No: 10218270193\nIFSC: IDFB0080156\n\nKindly share the transaction reference once paid. We look forward to building something beautiful with you!\n\n— Team Lintel`;
+  openModal(`
+    <div class="modal-h">Share 10% advance · ${fmt(advance)}</div>
+    <div class="modal-b">
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+        <div style="text-align:center">
+          <div id="adv_qr" style="background:#fff;padding:10px;border:1px solid var(--line);border-radius:10px;display:inline-block"></div>
+          <div style="font-size:11px;color:var(--ink-soft);margin-top:6px">Scan with any UPI app</div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div class="field"><label>UPI ID</label><div class="mono" style="font-size:15px">${upiId}</div></div>
+          <div class="field"><label>Amount</label><div class="mono" style="font-size:18px;font-weight:600">${fmt(advance)}</div></div>
+          <div class="field"><label>UPI payment link</label>
+            <input id="adv_link" readonly value="${esc(upiLink)}" style="font-size:12px">
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:3px">Opens a UPI app on the client's phone.</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Close</button>
+      ${l.phone?`<button class="wa-btn" id="adv_wa">🟢 Send on WhatsApp</button>`:""}
+      ${l.email?`<button class="ghost" id="adv_email">✉️ Email</button>`:""}
+    </div>`);
+  // render QR of the UPI link
+  try{ new QRCode($("#adv_qr"),{text:upiLink,width:150,height:150,colorDark:"#0D0D27",colorLight:"#ffffff"}); }
+  catch(e){ $("#adv_qr").innerHTML='<div style="font-size:12px;color:var(--ink-soft);width:150px">QR unavailable</div>'; }
+  if($("#adv_wa")) $("#adv_wa").onclick=()=>{
+    waOpen(l.phone,msg);
+    sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:`Shared 10% advance request · ${fmt(advance)}`,by_user:me.id});
+  };
+  if($("#adv_email")) $("#adv_email").onclick=()=>{
+    const subj=`Advance payment to begin your project — Lintel Space Atelier`;
+    location.href=`mailto:${encodeURIComponent(l.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(msg)}`;
+    sb.from("lead_activities").insert({lead_id:l.id,type:"Email",text:`Emailed 10% advance request · ${fmt(advance)}`,by_user:me.id});
+  };
+}
+
+/* ---- BOQ generator on a lead (reuses module G, keyed by lead_id) ---- */
+async function leadBoqGenerator(l, host){
+  G.projectId=null; G.leadId=l.id;
+  if(!G.rates.length){
+    const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,id:r.id}));
+  }
+  const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false});
+  if(!versions||!versions.length){
+    host.innerHTML=`<div class="pw-card">${emptyState("No BOQ for this lead yet","Build the BOQ here, then mark the proposal sent above.")}
+      ${canWrite()?`<div style="text-align:center"><button class="primary" id="lwNewBoq">+ Start BOQ</button></div>`:""}</div>`;
+    if(canWrite()) $("#lwNewBoq").onclick=async()=>{
+      const id=await newBoqFor({lead_id:l.id,title:l.name});
+      await sb.from("boq_versions").update({client_name:l.name,client_phone:l.phone,client_email:l.email,project_name:l.name,property:l.site_address||l.locality,quote_date:new Date().toISOString().slice(0,10)}).eq("id",id);
+      leadBoqGenerator(l,host);
+    };
+    return;
+  }
+  G.boqId=versions[0].id; G.ver=versions[0];
+  const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",G.boqId).order("sort_idx");
+  G.rows=(items||[]).map((r,i)=>({
+    id:i, dbid:r.id, room:r.room||r.room_tag||"General", cat:r.category||"", item:r.item_name||r.description||"",
+    unit:r.uom||"", rate:Number(r.rate)||0, originalRate:Number(r.rate)||0,
+    w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
+    amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom
+  }));
+  G.uid=G.rows.length;
+  gRender(l, host); // generator uses l like a project; gSave guards the project-only write
+}
+
 async function convertLead(l){
-  // grab latest BOQ total for this lead (if any) as contract value
+  await ensureStaff();
   const {data:bv}=await sb.from("boq_versions").select("id,total").eq("lead_id",l.id).order("version",{ascending:false}).limit(1);
   const total=bv&&bv[0]?bv[0].total:0;
-  const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
-  const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
-  const {data:proj,error}=await sb.from("projects").insert({
-    code, name:l.name, client_name:l.name, client_phone:l.phone, property_type:l.property_type,
-    site_address:l.locality, lead_id:l.id, contract_value:total, pm_id:me.id, status:"active"
-  }).select().single();
-  if(error) return toast(error.message);
-  // link the BOQ to the project too, and mark lead won
-  if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
-  await sb.from("leads").update({stage:"won",updated_at:new Date().toISOString()}).eq("id",l.id);
-  activeLead=null; toast(`Project ${code} created`); render("projects");
-  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+  openModal(`
+    <div class="modal-h">Convert lead to project</div>
+    <div class="modal-b">
+      <div class="banner">This creates a live project from <b>${esc(l.name||"")}</b>, carries over the BOQ${total?` (${fmt(total)})`:""}, and marks the lead won.</div>
+      <div class="grid2">
+        <div class="field"><label>Assign designer (interior designer)</label><select id="cv_designer">${staffOpts(l.designer_id)}</select></div>
+        <div class="field"><label>Project manager</label><select id="cv_pm">${staffOpts(l.pm_id)}</select></div>
+      </div>
+      <div class="field"><label>Contract value (₹)</label><input id="cv_val" type="number" value="${total||0}"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
+  $("#cv_go").onclick=async()=>{
+    const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
+    const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
+    const designer=$("#cv_designer").value?Number($("#cv_designer").value):null;
+    const pm=$("#cv_pm").value?Number($("#cv_pm").value):null;
+    const {data:proj,error}=await sb.from("projects").insert({
+      code, name:l.name, client_name:l.name, client_phone:l.phone, client_email:l.email, property_type:l.property_type,
+      site_address:l.site_address||l.locality, lead_id:l.id, contract_value:Number($("#cv_val").value||total||0),
+      consultant_id:l.consultant_id||null, designer_id:designer, pm_id:pm||me.id, status:"active", current_stage:"Briefing"
+    }).select().single();
+    if(error) return toast(error.message);
+    if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
+    await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
+    await sb.from("leads").update({stage:"won",designer_id:designer,updated_at:new Date().toISOString()}).eq("id",l.id);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code}${designer?" · designer "+staffName(designer):""}`,by_user:me.id});
+    closeModal(); activeLead=null; toast(`Project ${code} created`); render("projects");
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+  };
 }
+
 
 /* ===================== BOQ ===================== */
 let activeBoq=null, rateLib=[];
@@ -2096,145 +2260,6 @@ function actionRow(a){
 
 /* ===================== PROJECT EXECUTION SCHEDULE ===================== */
 // Standard interior design-build site sequence. is_critical pre-marks the spine.
-/* ============================================================
-   BOQ → EXECUTION SCHEDULE ENGINE  (Lintel OS)
-   Reads the project BOQ, maps each category to a build phase,
-   expands into room-level dependency chains, dates from KOM.
-   ============================================================ */
-const EX_PHASE_NAMES={1:"Mobilization",2:"Demolition",3:"Civil & Masonry",4:"Waterproofing",5:"MEP First Fix",6:"Flooring & Wet Tiling",7:"Ceiling & Wall POP",8:"Partitions & Windows",9:"Carpentry — Base",10:"Doors",11:"Paint — Base Coats",12:"Modular / Factory Install",13:"Carpentry — Finishing",14:"Stone, Dado & Glass",15:"Paint — Final Coat",16:"MEP Final Fix",17:"Flooring Finish & Wall Decor",18:"Polish & Soft Furnishing",19:"Decor, Appliances & Furniture",20:"Closeout & Handover"};
-const EX_CRITICAL=new Set([2,5,6,9,11,12,16,20]);
-// keyword -> profile. First matching keyword (in order) wins.
-const EX_PROFILES=[
-  [["demolition","dismantl","breaking"],{phase:2,owner:"PM",lead:0,sub:[["Demolition",2]]}],
-  [["debris","disposal"],{phase:2,owner:"PM",lead:0,sub:[["Debris Removal",1]]}],
-  [["waterproof"],{phase:4,owner:"SE",lead:5,sub:[["Water Proofing / PCC",2]]}],
-  [["masonry","brick","block work","plaster","civil"],{phase:3,owner:"SE",lead:3,sub:[["Brick / Block Work",2],["Plaster",2]]}],
-  [["core cut"],{phase:3,owner:"SE",lead:0,sub:[["Core Cutting",1]]}],
-  [["plumb"],{phase:5,owner:"SE",lead:7,sub:[["Plumbing Slots & Lines",3],["Concealed Piping & Testing",2]]},["fixture","cp ","sanitary","fitting"],{phase:16,owner:"SE",lead:10,sub:[["CP & Sanitary Fixtures",3]]}],
-  [["electric","wiring","conduit"],{phase:5,owner:"SE",lead:7,sub:[["Marking & Chiseling",2],["Conduiting & Wiring",2],["Wall Repacking",1]]},["fixture","switch","light","fitting"],{phase:16,owner:"SE",lead:10,sub:[["Switches & Fixtures",2],["Light Fittings & Testing",2]]}],
-  [["hvac","air cond","ac work","a/c"],{phase:5,owner:"SE",lead:10,sub:[["AC Copper & Drain Lines",2],["Indoor Unit Prep",2]]}],
-  [["marble","granite floor","stone floor"],{phase:6,owner:"SE",lead:14,sub:[["Base Prep",2],["Marble / Stone Laying",6],["Grinding & Polishing",3]]}],
-  [["wash","bath","dado","wall tile"],{phase:6,owner:"SE",lead:7,sub:[["Surface Prep",2],["Wall Tiling",3],["Grouting",1]]}],
-  [["floor","tile","tiling","vitrified"],{phase:6,owner:"SE",lead:7,sub:[["Plastering",2],["Tiles Installation",3],["Grouting",1]]}],
-  [["gypsum","false ceiling","ceiling"],{phase:7,owner:"SE",lead:7,sub:[["Framework",3],["Board Fixing",2],["Jointing & Finishing",2]]}],
-  [["pop"],{phase:7,owner:"SE",lead:5,sub:[["POP Framework",2],["POP Casting",2],["Finishing",2]]}],
-  [["partition","drywall"],{phase:8,owner:"SE",lead:7,sub:[["Framing",2],["Board & Insulation",2],["Finishing",1]]}],
-  [["window","glazing","upvc","aluminium window"],{phase:8,owner:"SE",lead:21,sub:[["Window Installation",2],["Sealing & Finishing",1]]}],
-  [["door"],{phase:10,owner:"SE",lead:21,sub:[["Door Installation",1],["Finishing",1]]}],
-  [["modular","factory","kws","wardrobe","kitchen cabinet","loft","storage unit"],{phase:12,owner:"KE",lead:21,sub:[["Base Carcass",2],["Wall & Loft Carcass",1],["Shutter Installation",2],["Hardware Installation",2],["Filler & Alignment",1]]}],
-  [["carpentry","woodwork","onsite carpentry","panel"],{phase:9,owner:"SE",lead:10,sub:[["Base Structure",6],["Laminate / Finishing Works",4],["Installation",3]]}],
-  [["counter","kitchen top","granite counter","quartz"],{phase:14,owner:"SE",lead:14,sub:[["Template & Cutting",2],["Counter Installation",2]]}],
-  [["glass","mirror","shower"],{phase:14,owner:"SE",lead:14,sub:[["Base Prep",1],["Glass / Mirror Fixing",2]]}],
-  [["wallpaper","texture","veneer panel","wall panel","wall solution"],{phase:17,owner:"SE",lead:10,sub:[["Surface Prep",1],["Application / Install",1]]}],
-  [["polish","melamine","pu ","duco"],{phase:18,owner:"SE",lead:3,sub:[["Sanding & Staining",2],["Polish Coats",2]]}],
-  [["paint","putty","primer"],{phase:11,owner:"SE",lead:3,sub:[["Rubbing",2],["Primer & Putty",2],["1st Coat",2]]}],
-  [["curtain","blind","soft furnish","upholster"],{phase:18,owner:"SE",lead:14,sub:[["Curtain / Blind Installation",1]]}],
-  [["appliance"],{phase:19,owner:"PM",lead:14,sub:[["Appliance Installation",1]]}],
-  [["furniture","sofa","loose"],{phase:19,owner:"PM",lead:21,sub:[["Loose Furniture Placement",2]]}],
-  [["decor","accessor","styling","artefact"],{phase:19,owner:"PM",lead:10,sub:[["Decor & Styling",2]]}],
-];
-function exMapCat(cat){
-  const c=(cat||"").toLowerCase();
-  for(const entry of EX_PROFILES){
-    const kws=entry[0], base=entry[1], altKws=entry[2], alt=entry[3];
-    if(kws.some(k=>c.includes(k.trim()))){
-      if(altKws && altKws.some(k=>c.includes(k.trim()))) return {key:cat,...alt};
-      return {key:cat,...base};
-    }
-  }
-  return {key:cat,phase:9,owner:"SE",lead:7,sub:[[cat||"Work",3]],unmapped:true}; // generic fallback, nothing dropped
-}
-// ---- date math: 6-day week, Sundays off ----
-function exParse(iso){const[y,m,d]=iso.split("-").map(Number);return new Date(y,m-1,d);}
-function exISO(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
-function exRoll(d){const x=new Date(d);while(x.getDay()===0)x.setDate(x.getDate()+1);return x;}
-function exAdd(d,n){const x=exRoll(new Date(d));let c=0;while(c<n){x.setDate(x.getDate()+1);if(x.getDay()!==0)c++;}return x;}
-function exNext(d){const x=new Date(d);x.setDate(x.getDate()+1);return exRoll(x);}
-const EX_PRELIMS=[["Floor Protection",1,"PM"],["Drawing & Elevation Marking",1,"PM"],["Line Marking",1,"PM"],["Kickoff Meeting",1,"PM"],["Site Mobilization",3,"PM"]];
-const EX_CLOSEOUT=[["Touchups & Final Finishing",3,"PM"],["Deep Cleaning",1,"PM"],["Final Walkthrough & Handover",1,"PM"]];
-// build the row plan from BOQ items
-function exBuildRows(items,komISO){
-  const KOM=exParse(komISO);
-  const rows=[];
-  const add=(phase,trade,room,task,owner,dur,lead,pred)=>{rows.push({phase,trade,room,task,owner,dur,lead,pred});return rows.length-1;};
-  let prev=-1;
-  EX_PRELIMS.forEach(([t,d,o])=>{prev=add(1,"Site Setup","Full House",t,o,d,0,prev);});
-  const lastPrelim=prev;
-  const norm=r=>{const v=(r||"").trim();return(!v||/^general$|^full house$|^common$|^na$/i.test(v))?"Full House":v;};
-  // unique (room, category)
-  const byRoom={};
-  items.forEach(it=>{const room=norm(it.room);const cat=(it.category||"").trim();if(!cat)return;byRoom[room]=byRoom[room]||{};byRoom[room][cat]=true;});
-  const rooms=Object.keys(byRoom);
-  // full house first
-  prev=lastPrelim;
-  if(byRoom["Full House"]){
-    Object.keys(byRoom["Full House"]).map(exMapCat).sort((a,b)=>a.phase-b.phase).forEach(pr=>{
-      pr.sub.forEach(([st,sd])=>{prev=add(pr.phase,pr.key,"Full House",st,pr.owner,sd,pr.lead,prev);});
-    });
-  }
-  const fhLast=prev;
-  const roomLast=[];
-  rooms.filter(r=>r!=="Full House").forEach(room=>{
-    let p=fhLast;
-    Object.keys(byRoom[room]).map(exMapCat).sort((a,b)=>a.phase-b.phase).forEach(pr=>{
-      pr.sub.forEach(([st,sd])=>{p=add(pr.phase,pr.key,room,st,pr.owner,sd,pr.lead,p);});
-    });
-    roomLast.push(p);
-  });
-  const cPreds=roomLast.length?roomLast:[fhLast];
-  prev=null;
-  EX_CLOSEOUT.forEach(([t,d,o])=>{prev=add(20,"Closeout","Full House",t,o,d,0,prev===null?{max:cPreds}:prev);});
-  // forward pass
-  rows.forEach(r=>{
-    let bs;
-    if(r.pred===-1)bs=exRoll(KOM);
-    else if(r.pred&&r.pred.max)bs=exNext(new Date(Math.max(...r.pred.max.map(j=>rows[j].bf))));
-    else bs=exNext(rows[r.pred].bf);
-    r.bs=bs;r.bf=exAdd(bs,r.dur-1);
-  });
-  return rows;
-}
-// generate + persist to Supabase
-async function exGenerateFromBoq(p,body){
-  if(!canWrite())return;
-  const {data:vers}=await sb.from("boq_versions").select("id").eq("project_id",p.id).order("version",{ascending:false}).limit(1);
-  if(!vers||!vers.length){toast("No BOQ on this project yet — add one in the Project BOQ tab first.");return;}
-  const {data:items}=await sb.from("boq_items").select("room,category,item_name,description,qty,uom").eq("boq_version_id",vers[0].id);
-  if(!items||!items.length){toast("This project's BOQ has no line items yet.");return;}
-  if(!confirm("Build the execution schedule from this project's BOQ?\n\nThis replaces the current execution activities with a dated, room-by-room schedule. Manually added rows will be cleared."))return;
-  const kom=p.kom_date||todayISO();
-  const rows=exBuildRows(items,kom);
-  const payload=rows.map((r,i)=>({
-    project_id:p.id,seq:i,name:r.task,phase:r.phase,trade:r.trade,room:r.room,owner:r.owner,
-    duration:r.dur,lead_days:r.lead,generated:true,is_critical:EX_CRITICAL.has(r.phase),
-    percent_complete:0,planned_start:exISO(r.bs),planned_finish:exISO(r.bf)
-  }));
-  await sb.from("project_activities").delete().eq("project_id",p.id);
-  const {error}=await sb.from("project_activities").insert(payload);
-  if(error){toast(error.message);return;}
-  toast("Schedule built — "+rows.length+" activities from BOQ");
-  pwExecution(p,body);
-}
-// JIT procurement plan from generated rows
-function exProcureHtml(acts){
-  const mat=acts.filter(a=>a.generated&&a.lead_days>0&&a.planned_start);
-  // one row per (trade, room) = earliest start
-  const seen={};const out=[];
-  mat.sort((a,b)=>a.planned_start<b.planned_start?-1:1).forEach(a=>{
-    const k=a.trade+"|"+a.room;if(seen[k])return;seen[k]=1;
-    const need=exParse(a.planned_start);const order=new Date(need.getTime()-a.lead_days*86400000);
-    out.push({trade:a.trade,room:a.room,lead:a.lead_days,need,order});
-  });
-  if(!out.length)return "";
-  const today=exParse(todayISO());const soon=exAdd(today,7);
-  const fmtD=d=>d.getDate().toString().padStart(2,"0")+" "+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]+" "+d.getFullYear();
-  out.sort((a,b)=>a.order-b.order);
-  return `<div class="sec-label" style="margin-top:22px">Procurement / JIT plan <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0;font-size:12px">— last day to raise each PO so material lands on site in time</span></div>
-  <div style="overflow-x:auto"><table class="ex-tbl"><thead><tr><th>#</th><th>Scope / Material</th><th>Room</th><th>Lead</th><th>Required on-site</th><th>Order&nbsp;by</th><th>Flag</th></tr></thead><tbody>
-  ${out.map((m,i)=>{const hot=m.order<=soon;return `<tr class="${hot?'late':''}"><td class="mono">${i+1}</td><td>${esc(m.trade)}</td><td>${esc(m.room)}</td><td class="mono">${m.lead}d</td><td class="mono">${fmtD(m.need)}</td><td class="mono" style="font-weight:600;color:${hot?'var(--clay)':'var(--navy)'}">${fmtD(m.order)}</td><td><span class="ex-st ${hot?'late':'todo'}">${hot?'Order now':'Scheduled'}</span></td></tr>`;}).join("")}
-  </tbody></table></div>`;
-}
-
 const STD_ACTIVITIES = [
   ["Site handover & protection", false],
   ["Demolition & civil work", true],
@@ -2271,6 +2296,7 @@ function exStatusLabel(s){ return s==="in_progress"?"In progress":s==="late"?"De
 async function pwExecution(p,body){
   await ensureStaff();
   let {data:acts}=await sb.from("project_activities").select("*").eq("project_id",p.id).order("seq");
+  // seed standard sequence on first open
   if((!acts||!acts.length) && canWrite()){
     const seed=STD_ACTIVITIES.map((a,i)=>({project_id:p.id,name:a[0],seq:i,is_critical:a[1],percent_complete:0}));
     const {data:ins}=await sb.from("project_activities").insert(seed).select().order("seq");
@@ -2278,18 +2304,14 @@ async function pwExecution(p,body){
   }
   acts=acts||[];
   const ro=!canWrite();
-  const isGen=acts.some(a=>a.generated);
   body.innerHTML=`
     <div class="gbar">
-      <div class="sec-label" style="border:none;padding:0">Execution schedule${isGen?' <span class="ex-genbadge">from BOQ</span>':''}</div>
+      <div class="sec-label" style="border:none;padding:0">Execution schedule</div>
       <div class="gact">
-        ${ro?"":`<label class="ex-kom">KOM <input type="date" id="ex_kom" value="${p.kom_date||""}"></label>`}
-        ${ro?"":`<button class="ghost" id="ex_gen">⚙ Generate from BOQ</button>`}
         ${ro?"":`<button class="ghost" id="ex_add">+ Activity</button>`}
         <button class="primary" id="ex_share">Client schedule (print / PDF)</button>
       </div>
     </div>
-    ${isGen?`<div class="ex-hint">Schedule built from the project BOQ, anchored to the KOM date. Edit any actual date or % below — delays flag automatically. Re-run <b>Generate from BOQ</b> after BOQ or KOM changes.</div>`:`<div class="ex-hint">Standard 17-step sequence. Enter dates below, or click <b>Generate from BOQ</b> to build a dated, room-by-room schedule from this project's BOQ.</div>`}
     <div class="ex-legend">
       <span><i class="ex-key plan"></i> Planned</span>
       <span><i class="ex-key act"></i> Progress</span>
@@ -2297,16 +2319,8 @@ async function pwExecution(p,body){
       <span><i class="ex-key late"></i> Delayed</span>
     </div>
     <div id="ex_gantt">${ganttHtml(acts)}</div>
-    <div style="overflow-x:auto">${exTable(acts,ro)}</div>
-    ${isGen?exProcureHtml(acts):""}`;
+    <div style="overflow-x:auto">${exTable(acts,ro)}</div>`;
   if(!ro){
-    const kom=$("#ex_kom");
-    if(kom)kom.onchange=async()=>{
-      const v=kom.value||null;
-      await sb.from("projects").update({kom_date:v}).eq("id",p.id); p.kom_date=v;
-      if(isGen) toast("KOM updated — click Generate from BOQ to re-date the schedule");
-    };
-    $("#ex_gen").onclick=()=>exGenerateFromBoq(p,body);
     $("#ex_add").onclick=async()=>{
       const {error}=await sb.from("project_activities").insert({project_id:p.id,name:"New activity",seq:acts.length,percent_complete:0});
       if(error) return toast(error.message); pwExecution(p,body);
@@ -2318,41 +2332,43 @@ async function pwExecution(p,body){
 
 function ganttHtml(acts){
   const dated=acts.filter(a=>a.planned_start&&a.planned_finish);
-  if(!dated.length) return `<div class="gantt"><div style="padding:18px;color:var(--ink-soft);font-size:13px">Set planned start &amp; finish dates below, or click <b>Generate from BOQ</b>, to see the timeline bars and critical path.</div></div>`;
+  if(!dated.length) return `<div class="gantt"><div style="padding:18px;color:var(--ink-soft);font-size:13px">Set planned start &amp; finish dates below to see the timeline bars and critical path.</div></div>`;
   const toT=d=>new Date(d).getTime();
   const min=Math.min(...dated.map(a=>toT(a.planned_start)));
-  const max=Math.max(...dated.map(a=>toT(a.planned_finish)).concat(dated.filter(a=>a.actual_finish).map(a=>toT(a.actual_finish))));
+  const max=Math.max(...dated.map(a=>toT(a.planned_finish), ...dated.filter(a=>a.actual_finish).map(a=>toT(a.actual_finish))));
   const span=Math.max(max-min, 86400000);
   const pos=d=>((toT(d)-min)/span)*100;
-  let curPh=null,out="";
-  acts.forEach(a=>{
-    if(a.generated&&a.phase!==curPh){curPh=a.phase;out+=`<div class="gantt-phase">${String(a.phase).padStart(2,"0")} · ${EX_PHASE_NAMES[a.phase]||""}</div>`;}
-    const st=exStatus(a);const hasDates=a.planned_start&&a.planned_finish;let bar="";
+  return `<div class="gantt">${acts.map(a=>{
+    const st=exStatus(a);
+    const hasDates=a.planned_start&&a.planned_finish;
+    let bar="";
     if(hasDates){
       const left=pos(a.planned_start), width=Math.max(pos(a.planned_finish)-left,1.5);
       const cls=st==="late"?"late":a.is_critical?"crit":"";
       bar=`<div class="g-bar ${cls}" style="left:${left}%;width:${width}%"></div>`;
-      if(a.percent_complete>0){const fw=Math.max(width*(Math.min(a.percent_complete,100)/100),0.8);bar+=`<div class="g-fill" style="left:${left}%;width:${fw}%"></div>`;}
+      const fillEnd=a.actual_finish?a.actual_finish:(a.percent_complete>0?null:null);
+      if(a.percent_complete>0){
+        const fw=Math.max(width*(Math.min(a.percent_complete,100)/100),0.8);
+        bar+=`<div class="g-fill" style="left:${left}%;width:${fw}%"></div>`;
+      }
     }
-    const sub=a.generated&&a.room?`<span class="g-sub">${esc(a.room)}</span>`:"";
-    out+=`<div class="gantt-row ${a.is_critical?"crit":""}"><div class="g-name">${a.is_critical?'<span class="g-crit-dot"></span>':""}${esc(a.name)}${sub}</div><div class="g-track">${bar}</div></div>`;
-  });
-  return `<div class="gantt">${out}</div>`;
+    return `<div class="gantt-row ${a.is_critical?"crit":""}">
+      <div class="g-name">${a.is_critical?'<span class="g-crit-dot"></span>':""}${esc(a.name)}</div>
+      <div class="g-track">${bar}</div>
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function exTable(acts,ro){
-  const gen=acts.some(a=>a.generated);
   return `<table class="ex-tbl"><thead><tr>
-    <th>#</th>${gen?"<th>Ph</th>":""}<th>Activity</th>${gen?"<th>Room</th><th>Own</th>":""}<th>Plan start</th><th>Plan finish</th><th>Actual start</th><th>Actual finish</th><th>%</th><th>Status</th>${ro?"":"<th>CP</th><th></th>"}
+    <th>#</th><th>Activity</th><th>Plan start</th><th>Plan finish</th><th>Actual start</th><th>Actual finish</th><th>%</th><th>Status</th>${ro?"":"<th>CP</th><th></th>"}
   </tr></thead><tbody>
   ${acts.map((a,i)=>{
     const st=exStatus(a);
     const rowCls=st==="late"?"late":st==="done"?"done":"";
-    const phCell=gen?`<td><span class="ex-ph">${a.phase!=null?String(a.phase).padStart(2,"0"):"—"}</span></td>`:"";
-    const roomCell=gen?`<td style="font-size:12px;color:var(--ink-soft)">${esc(a.room||"—")}</td><td class="mono" style="font-size:12px">${esc(a.owner||"—")}</td>`:"";
     return `<tr class="${rowCls}" data-arow="${a.id}">
-      <td class="mono">${i+1}</td>${phCell}
-      <td>${ro?esc(a.name):`<input value="${esc(a.name)}" data-ef="name" style="width:100%;min-width:150px;border:1px solid var(--line-2);border-radius:6px;padding:5px 7px;font-size:13px">`}</td>${roomCell}
+      <td class="mono">${i+1}</td>
+      <td>${ro?esc(a.name):`<input value="${esc(a.name)}" data-ef="name" style="width:100%;border:1px solid var(--line-2);border-radius:6px;padding:5px 7px;font-size:13px">`}</td>
       <td>${ro?(a.planned_start||"—"):`<input type="date" data-ef="planned_start" value="${a.planned_start||""}">`}</td>
       <td>${ro?(a.planned_finish||"—"):`<input type="date" data-ef="planned_finish" value="${a.planned_finish||""}">`}</td>
       <td>${ro?(a.actual_start||"—"):`<input type="date" data-ef="actual_start" value="${a.actual_start||""}">`}</td>
@@ -2634,10 +2650,10 @@ function emptyState(t,s){return `<div class="empty"><div class="display">${t}</d
 /* ===== BOQ GENERATOR MODULE ===== */
 /* ===================== FULL BOQ GENERATOR (ported) ===================== */
 /* State for the generator, scoped per open BOQ version */
-let G = { ver:null, rows:[], rates:[], uid:0, tab:'est', dirty:false, projectId:null, boqId:null };
+let G = { ver:null, rows:[], rates:[], uid:0, tab:'est', dirty:false, projectId:null, leadId:null, boqId:null };
 
 async function pwBoq(p, body){
-  G.projectId = p.id;
+  G.projectId = p.id; G.leadId = null;
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
@@ -3029,9 +3045,10 @@ async function gSave(p){
     const {error}=await sb.from("boq_items").insert(payload);
     if(error) return toast(error.message);
   }
-  // reflect contract value on project
-  await sb.from("projects").update({contract_value:gFin().total}).eq("id",p.id);
+  // reflect contract value on project (only when this BOQ belongs to a project)
+  if(G.projectId) await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
   G.dirty=false; toast("BOQ saved");
+  if(G.leadId && typeof refreshLeadBoqFlow==="function") refreshLeadBoqFlow();
 }
 function gExportCSV(){
   if(!G.rows.length) return toast("No items to export");
