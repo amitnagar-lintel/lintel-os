@@ -2790,6 +2790,15 @@ function gEstimator(p){
       <div class="field"><label>Qty</label><input id="ci-qty" type="number" step="0.5"></div>
       <button class="ghost" id="addCustom">+ Add</button>
     </div>
+    <div class="hint">Custom items are auto-saved to the rate library for future use.</div>
+  </div>
+
+  <div class="pw-card">
+    <div class="sec-label" style="border:none;padding-top:0">Import from another project</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="ghost" id="importRoom">⬇ Import a room from another BOQ</button>
+      <button class="ghost" id="importFull">⬇ Import entire BOQ from another project</button>
+    </div>
   </div>`}
 
   <div class="table-wrap"><table><thead><tr>
@@ -2815,6 +2824,8 @@ function gEstimator(p){
     $("#in-w").oninput=()=>aq("#in-w","#in-h","#in-qty"); $("#in-h").oninput=()=>aq("#in-w","#in-h","#in-qty");
     $("#ci-w").oninput=()=>aq("#ci-w","#ci-h","#ci-qty"); $("#ci-h").oninput=()=>aq("#ci-w","#ci-h","#ci-qty");
     $("#addLib").onclick=gAddLib; $("#addCustom").onclick=gAddCustom;
+    if($("#importRoom")) $("#importRoom").onclick=()=>gImportFrom(p,false);
+    if($("#importFull")) $("#importFull").onclick=()=>gImportFrom(p,true);
   }
   gTotals();
 }
@@ -2826,15 +2837,18 @@ function gTableRows(ro){
   gRooms().forEach(room=>{
     const rr=G.rows.filter(r=>r.room===room);
     const rsub=rr.reduce((s,r)=>s+gBoosted(r),0);
-    html+=`<tr class="roomhdr"><td colspan="${span}">${esc(room)}</td></tr>`;
+    html+=`<tr class="roomhdr"><td colspan="${ro?span:span-1}">${esc(room)}</td>${ro?'':`<td style="text-align:right"><button class="linkbtn" data-copyroom="${esc(room)}" title="Duplicate this room">⧉ Copy</button></td>`}</tr>`;
     rr.forEach(r=>{
+      const catItems=G.rates.filter(x=>x.cat===r.cat);
+      const itemOpts=catItems.map(x=>`<option value="${esc(x.item)}" ${x.item===r.item?"selected":""}>${esc(x.item)}</option>`).join("");
+      const hasInLib=catItems.some(x=>x.item===r.item);
       let cells;
       if(ro){
         cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td><td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td>`;
       } else {
         cells=`<td><input class="ii" style="width:90px" value="${esc(r.room)}" data-id="${r.id}" data-f="room"></td>`+
-          `<td><input class="ii" style="width:90px" value="${esc(r.cat)}" data-id="${r.id}" data-f="cat"></td>`+
-          `<td><input class="ii" style="width:150px" value="${esc(r.item)}" data-id="${r.id}" data-f="item"></td>`+
+          `<td><select class="ii" style="width:100px" data-id="${r.id}" data-f="cat">${[...new Set(G.rates.map(x=>x.cat))].map(c=>`<option ${c===r.cat?"selected":""}>${esc(c)}</option>`).join("")}<option value="${esc(r.cat)}" ${!G.rates.some(x=>x.cat===r.cat)?"selected":""}>${esc(r.cat)}</option></select></td>`+
+          `<td><select class="ii gitem-sel" style="width:160px" data-id="${r.id}" data-f="item">${itemOpts}${!hasInLib?`<option value="${esc(r.item)}" selected>${esc(r.item)} (custom)</option>`:""}</select></td>`+
           `<td><input class="ii" style="width:42px" value="${esc(r.unit)}" data-id="${r.id}" data-f="unit"></td>`+
           `<td><input class="ii" style="width:70px" type="number" value="${r.rate}" data-id="${r.id}" data-f="rate"></td>`+
           `<td><input class="ii" style="width:42px" type="number" value="${r.w||0}" data-id="${r.id}" data-f="w"></td>`+
@@ -2858,11 +2872,36 @@ function gBindTable(ro){
       const r=G.rows.find(x=>x.id==inp.dataset.id), f=inp.dataset.f;
       if(!r) return;
       if(['rate','w','h','qty'].includes(f)){ r[f]=parseFloat(inp.value)||0; if(f==='rate')r.originalRate=r.rate; if((f==='w'||f==='h')&&r.w&&r.h)r.qty=Math.round(r.w*r.h*10)/10; r.amount=r.rate*r.qty; gDrawTable(ro); gTotals(); }
+      else if(f==='cat'){
+        r.cat=inp.value;
+        // reset item to first in new category + update rate/unit
+        const catItems=G.rates.filter(x=>x.cat===r.cat);
+        if(catItems.length){ r.item=catItems[0].item; r.unit=catItems[0].unit; r.rate=catItems[0].rate; r.originalRate=r.rate; r.amount=r.rate*r.qty; }
+        G.dirty=true; gDrawTable(ro); gTotals();
+      }
+      else if(f==='item'){
+        r.item=inp.value;
+        // auto-fill rate and unit from library
+        const lib=G.rates.find(x=>x.item===r.item&&x.cat===r.cat);
+        if(lib){ r.unit=lib.unit; r.rate=lib.rate; r.originalRate=lib.rate; r.amount=r.rate*r.qty; }
+        G.dirty=true; gDrawTable(ro); gTotals();
+      }
       else { r[f]=inp.value; if(f==='room'){gDrawTable(ro);} }
       G.dirty=true;
     };
   });
   $$("#gbody [data-del]").forEach(btn=>btn.onclick=()=>{ G.rows=G.rows.filter(r=>r.id!=btn.dataset.del); G.dirty=true; gDrawTable(ro); gTotals(); });
+  // Feature 3: Copy room
+  $$("#gbody [data-copyroom]").forEach(btn=>btn.onclick=()=>{
+    const srcRoom=btn.dataset.copyroom;
+    const newName=prompt("New room name (copy of "+srcRoom+"):",srcRoom+" Copy");
+    if(!newName||!newName.trim()) return;
+    const src=G.rows.filter(r=>r.room===srcRoom);
+    src.forEach(r=>{
+      G.rows.push({id:G.uid++,room:newName.trim(),cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom});
+    });
+    G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+newName.trim());
+  });
 }
 function gAddLib(){
   const room=$("#in-room").value.trim(),cat=$("#in-cat").value,item=$("#in-item").value,qty=parseFloat($("#in-qty").value)||0,w=parseFloat($("#in-w").value)||0,h=parseFloat($("#in-h").value)||0;
@@ -2878,6 +2917,68 @@ function gAddCustom(){
   G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true});
   G.dirty=true; ["ci-room","ci-cat","ci-item","ci-rate","ci-w","ci-h","ci-qty"].forEach(i=>$("#"+i).value='');
   gDrawTable(false); gTotals(); refreshRoomDL();
+  // Feature 4: auto-save to rate library if not already there
+  if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
+    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true}).select().single().then(({data,error})=>{
+      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,id:data.id}); toast("Added to rate library: "+item); }
+      else if(error) console.error("Library add error:",error.message);
+    });
+  }
+}
+
+/* ---- Feature 2: Import room or full BOQ from another project ---- */
+async function gImportFrom(p,fullBoq){
+  const {data:boqs}=await sb.from("boq_versions").select("id,project_id,lead_id,project_name,client_name,version").order("version",{ascending:false});
+  if(!boqs||!boqs.length) return toast("No other BOQs found");
+  // exclude current BOQ
+  const others=boqs.filter(b=>b.id!==G.boqId);
+  if(!others.length) return toast("No other BOQs to import from");
+  openModal(`
+    <div class="modal-h">${fullBoq?"Import entire BOQ":"Import a room"}</div>
+    <div class="modal-b">
+      <div class="field"><label>Select source BOQ</label>
+        <select id="imp-boq" class="lf-sel" style="width:100%">
+          <option value="">— select —</option>
+          ${others.map(b=>`<option value="${b.id}">${esc(b.project_name||b.client_name||"BOQ")} (v${b.version})</option>`).join("")}
+        </select>
+      </div>
+      ${fullBoq?'':`<div class="field" id="imp-room-wrap" style="display:none"><label>Select room to import</label><select id="imp-room" class="lf-sel" style="width:100%"></select></div>`}
+      <div id="imp-preview" style="margin-top:10px"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="imp-go" disabled>Import</button></div>`);
+  let importItems=[];
+  const boqSel=$("#imp-boq");
+  boqSel.onchange=async()=>{
+    const bid=boqSel.value; if(!bid){ importItems=[]; return; }
+    const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",bid).order("sort_idx");
+    if(!items||!items.length){ $("#imp-preview").innerHTML='<div style="color:var(--ink-soft)">This BOQ has no items.</div>'; importItems=[]; return; }
+    if(fullBoq){
+      importItems=items;
+      $("#imp-preview").innerHTML=`<div style="font-size:13px"><b>${items.length}</b> items across <b>${[...new Set(items.map(i=>i.room||i.room_tag))].length}</b> rooms will be imported.</div>`;
+      $("#imp-go").disabled=false;
+    } else {
+      const rooms=[...new Set(items.map(i=>i.room||i.room_tag||"General"))];
+      const wrap=$("#imp-room-wrap"); wrap.style.display="";
+      const rsel=$("#imp-room");
+      rsel.innerHTML=rooms.map(r=>`<option>${esc(r)}</option>`).join("");
+      const updatePreview=()=>{
+        const selRoom=rsel.value;
+        importItems=items.filter(i=>(i.room||i.room_tag||"General")===selRoom);
+        $("#imp-preview").innerHTML=`<div style="font-size:13px"><b>${importItems.length}</b> items from <b>${esc(selRoom)}</b> will be imported.</div>`;
+        $("#imp-go").disabled=!importItems.length;
+      };
+      rsel.onchange=updatePreview;
+      updatePreview();
+    }
+  };
+  $("#imp-go").onclick=()=>{
+    if(!importItems.length) return;
+    importItems.forEach(it=>{
+      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom});
+    });
+    G.dirty=true; closeModal(); gDrawTable(false); gTotals(); refreshRoomDL();
+    toast("Imported "+importItems.length+" items");
+  };
 }
 function refreshRoomDL(){ const dl=$("#roomdl"); if(dl) dl.innerHTML=gRooms().map(r=>`<option value="${esc(r)}">`).join(""); }
 function gTotals(){
@@ -3016,16 +3117,39 @@ function gRates(p){
   b.innerHTML=`<div class="pw-card">
     <div class="mrcbar"><input id="rsearch" placeholder="Search items…" class="lf-in" style="max-width:240px">
       <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
-    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Item</th><th>Unit</th><th>Rate ₹</th></tr></thead><tbody id="rbody"></tbody></table></div>
+    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
     <div class="hint">Editing a rate updates the shared library for future items. Existing line items keep their rate.</div>
-  </div>`;
+  </div>
+  ${canWrite()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
+    <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add new item to library</div>
+    <div class="addgrid">
+      <div class="field"><label>Category</label><input id="rl-cat" list="rlcatdl" placeholder="Carpentry"><datalist id="rlcatdl">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></div>
+      <div class="field" style="flex:2"><label>Item name</label><input id="rl-item" placeholder="Wardrobe with laminate finish"></div>
+      <div class="field"><label>Unit</label><input id="rl-unit" placeholder="sqft" value="sqft"></div>
+      <div class="field"><label>Rate ₹</label><input id="rl-rate" type="number" placeholder="850"></div>
+      <button class="primary" id="rl-add">+ Add to library</button>
+    </div>
+  </div>`:''}`; 
   const draw=()=>{
     const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value;
     const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q)));
-    $("#rbody").innerHTML=rows.map(r=>`<tr><td><span class="tg">${esc(r.cat)}</span></td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td></tr>`).join("")||'<tr><td colspan="4" class="empty">No items match</td></tr>';
-    if(canWrite()) $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.rate=nr; toast("Rate updated"); });
+    $("#rbody").innerHTML=rows.map(r=>`<tr><td><span class="tg">${esc(r.cat)}</span></td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`).join("")||'<tr><td colspan="5" class="empty">No items match</td></tr>';
+    if(canWrite()){
+      $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.rate=nr; toast("Rate updated"); });
+      $$("#rbody [data-rldel]").forEach(btn=>btn.onclick=async()=>{ if(!confirm("Remove this item from the library?")) return; await sb.from("rate_library").update({is_active:false}).eq("id",btn.dataset.rldel); G.rates=G.rates.filter(x=>x.id!=btn.dataset.rldel); draw(); toast("Removed from library"); });
+    }
   };
   $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; draw();
+  if(canWrite()&&$("#rl-add")) $("#rl-add").onclick=async()=>{
+    const cat=$("#rl-cat").value.trim(), item=$("#rl-item").value.trim(), unit=$("#rl-unit").value.trim()||'nos', rate=parseFloat($("#rl-rate").value)||0;
+    if(!cat||!item) return toast("Category and Item name needed");
+    if(G.rates.find(r=>r.item===item&&r.cat===cat)) return toast("This item already exists in the library");
+    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true}).select().single();
+    if(error) return toast(error.message);
+    G.rates.push({cat,item,unit,rate,id:data.id}); 
+    ["rl-cat","rl-item","rl-unit","rl-rate"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
+    draw(); toast("Added to library: "+item);
+  };
 }
 
 /* ================= SAVE / CSV ================= */
