@@ -600,7 +600,7 @@ async function enter(session){
     if(canManageStaff()) $("#navTeam").style.display="";
     document.querySelectorAll("nav.tabs button").forEach(b=>{
       b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
-        b.classList.add("active"); activeLead=null; activeProject=null; render(b.dataset.view); };
+        b.classList.add("active"); activeLead=null; activeProject=null; if(typeof gStopAutosave==="function")gStopAutosave(); render(b.dataset.view); };
     });
     render("leads");
   } catch(e) {
@@ -899,8 +899,9 @@ async function renderLeadWorkspace(id){
       ${LEAD_TABS.map(t=>`<button data-t="${t[0]}" class="${leadTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
     <div id="lwBody">Loading…</div>`;
-  $("#lwBack").onclick=closeLead;
+  $("#lwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(l,true); gStopAutosave(); } closeLead(); };
   $("#lwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    if(leadTab==="boq" && b.dataset.t!=="boq" && typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(l,true); gStopAutosave(); }
     leadTab=b.dataset.t;
     $("#lwTabs").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
     drawLeadTab(l);
@@ -1330,12 +1331,19 @@ async function newBoqFor(seed){
   if(seed.lead_id) q=q.eq("lead_id",seed.lead_id);
   const {data:prev}=await q;
   const version=(prev&&prev[0]?prev[0].version:0)+1;
+  const d=new Date();
+  const vlabel="v"+d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
   const {data,error}=await sb.from("boq_versions").insert({
     lead_id:seed.lead_id||null, project_id:seed.project_id||null,
-    title:seed.title||"New BOQ", version, status:"draft", created_by:me.id
+    title:seed.title||"New BOQ", version, version_label:vlabel, status:"draft",
+    created_by:me.id, last_edited_by:me.id, last_edited_at:new Date().toISOString()
   }).select().single();
   if(error) return toast(error.message);
   activeBoq=data.id; toast("BOQ created");
+  // log creation to lead activity timeline
+  if(seed.lead_id){
+    try{ await sb.from("lead_activities").insert({lead_id:seed.lead_id,type:"Note",text:"BOQ created · "+vlabel,by_user:me.id}); }catch(e){}
+  }
   return data.id;
 }
 
@@ -1495,8 +1503,10 @@ async function renderProjectWorkspace(pid){
       ${PROJ_TABS.map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
     <div id="pwBody">Loading…</div>`;
-  $("#pwBack").onclick=()=>{ activeProject=null; renderProjects(); };
+  $("#pwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); } activeProject=null; renderProjects(); };
   $("#pwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    // leaving BOQ tab → flush + stop autosave
+    if(projectTab==="boq" && b.dataset.t!=="boq" && typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); }
     projectTab=b.dataset.t;
     $("#pwTabs").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
     drawProjectTab(p);
@@ -2706,6 +2716,7 @@ function gRooms(){ const o=[]; G.rows.forEach(r=>{ if(o.indexOf(r.room)===-1)o.p
 /* ---- main render with sub-tabs ---- */
 function gRender(p, body){
   const ro=!canWrite();
+  if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
   <div class="gbar">
     <div class="gsub">
@@ -2715,7 +2726,7 @@ function gRender(p, body){
       <button data-g="rate" class="${G.tab==='rate'?'on':''}">Rates</button>
     </div>
     <div class="gact">
-      ${ro?'':`<button class="ghost" id="gSave">Save</button>`}
+      ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
       <button class="ghost" id="gCsv">Export CSV</button>
       <button class="primary" id="gPrint">Print / PDF</button>
     </div>
@@ -2726,6 +2737,7 @@ function gRender(p, body){
   if(!ro&&$("#gSave")) $("#gSave").onclick=()=>gSave(p);
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
+  if(!ro) gStartAutosave(p); // autosave every 5s while editing this BOQ
 }
 function $$(s){ return Array.from(document.querySelectorAll(s)); }
 
@@ -2741,8 +2753,17 @@ function gEstimator(p){
   const v=G.ver||{}, ro=!canWrite();
   const cats=[...new Set(G.rates.map(r=>r.cat))];
   const b=$("#gBody");
+  const createdBy=v.created_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.created_by):""):"";
+  const editedBy=v.last_edited_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.last_edited_by):""):"";
+  const editedAt=v.last_edited_at?new Date(v.last_edited_at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
   b.innerHTML=`
   <div class="pw-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--ink-soft)">
+        ${createdBy?`Created by <b>${esc(createdBy)}</b>`:""}${editedBy?` · last edited by <b>${esc(editedBy)}</b>${editedAt?` at ${editedAt}`:""}`:""}
+      </div>
+      ${ro?'':`<div id="g-autosave" style="font-size:12px;color:var(--ink-soft)">Autosave on</div>`}
+    </div>
     <div class="grid4">
       <div class="field"><label>Client</label><input id="m-client" value="${esc(v.client_name||'')}"></div>
       <div class="field"><label>Project</label><input id="m-project" value="${esc(v.project_name||'')}"></div>
@@ -2759,7 +2780,7 @@ function gEstimator(p){
       <div class="field"><label>Design Consultant</label><input id="m-consultant" value="${esc(v.consultant||'')}"></div>
       <div class="field"><label>Consultant Phone</label><input id="m-consultant-phone" value="${esc(v.consultant_phone||'')}"></div>
       <div class="field"><label>Quote valid till</label><input id="m-validity" type="date" value="${v.validity_date||''}"></div>
-      <div class="field"><label>Quote version</label><input id="m-version" value="${esc(v.version_label||'v1.0')}"></div>
+      <div class="field"><label>Quote version</label><input id="m-version" value="${esc(v.version_label||'')}" placeholder="auto: date + time"></div>
     </div>
   </div>
 
@@ -2890,7 +2911,13 @@ function gBindTable(ro){
       G.dirty=true;
     };
   });
-  $$("#gbody [data-del]").forEach(btn=>btn.onclick=()=>{ G.rows=G.rows.filter(r=>r.id!=btn.dataset.del); G.dirty=true; gDrawTable(ro); gTotals(); });
+  $$("#gbody [data-del]").forEach(btn=>btn.onclick=(e)=>{
+    e.preventDefault(); e.stopPropagation();
+    const delId=btn.dataset.del;
+    const before=G.rows.length;
+    G.rows=G.rows.filter(r=>String(r.id)!==String(delId));
+    if(G.rows.length<before){ G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Item removed"); }
+  });
   // Feature 3: Copy room
   $$("#gbody [data-copyroom]").forEach(btn=>btn.onclick=()=>{
     const srcRoom=btn.dataset.copyroom;
@@ -3153,27 +3180,63 @@ function gRates(p){
 }
 
 /* ================= SAVE / CSV ================= */
-async function gSave(p){
+async function gSave(p, silent){
   if(!G.boqId) return;
+  if(G._saving) return; // prevent overlapping saves
+  G._saving=true;
   const v=G.ver||{};
-  await sb.from("boq_versions").update({
-    client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
-    quote_date:v.quote_date||null,fee_pct:Number(v.fee_pct)||0,gst_pct:Number(v.gst_pct)||0,disc_pct:Number(v.disc_pct)||0,boost_pct:Number(v.boost_pct)||0,
-    consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
-    total:gFin().total
-  }).eq("id",G.boqId);
-  // replace items
-  await sb.from("boq_items").delete().eq("boq_version_id",G.boqId);
-  if(G.rows.length){
-    const payload=G.rows.map((r,i)=>({boq_version_id:G.boqId,room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room}));
-    const {error}=await sb.from("boq_items").insert(payload);
-    if(error) return toast(error.message);
+  // auto-generate a version label with date+time if none set
+  if(!v.version_label){
+    const d=new Date();
+    v.version_label="v"+d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+    G.ver=v;
+    const vl=$("#m-version"); if(vl) vl.value=v.version_label;
   }
-  // reflect contract value on project (only when this BOQ belongs to a project)
-  if(G.projectId) await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
-  G.dirty=false; toast("BOQ saved");
-  if(G.leadId && typeof refreshLeadBoqFlow==="function") refreshLeadBoqFlow();
+  try{
+    await sb.from("boq_versions").update({
+      client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
+      quote_date:v.quote_date||null,fee_pct:Number(v.fee_pct)||0,gst_pct:Number(v.gst_pct)||0,disc_pct:Number(v.disc_pct)||0,boost_pct:Number(v.boost_pct)||0,
+      consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
+      total:gFin().total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
+    }).eq("id",G.boqId);
+    // replace items
+    await sb.from("boq_items").delete().eq("boq_version_id",G.boqId);
+    if(G.rows.length){
+      const payload=G.rows.map((r,i)=>({boq_version_id:G.boqId,room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room}));
+      const {error}=await sb.from("boq_items").insert(payload);
+      if(error){ G._saving=false; if(!silent) toast(error.message); return; }
+    }
+    if(G.projectId) await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
+    G.dirty=false;
+    // update the autosave indicator
+    const ind=$("#g-autosave"); if(ind){ ind.textContent="✓ Saved "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); ind.style.color="var(--green)"; }
+    if(!silent){
+      toast("BOQ saved");
+      // log to activity (lead or project)
+      gLogActivity(p, "BOQ saved · "+v.version_label);
+    }
+    if(G.leadId && typeof refreshLeadBoqFlow==="function" && !silent) refreshLeadBoqFlow();
+  }catch(e){ if(!silent) toast("Save failed: "+e.message); }
+  G._saving=false;
 }
+
+// log BOQ activity to the right timeline (lead_activities or project)
+async function gLogActivity(p, text){
+  try{
+    if(G.leadId){
+      await sb.from("lead_activities").insert({lead_id:G.leadId,type:"Note",text:text,by_user:me.id});
+    }
+  }catch(e){}
+}
+
+// ── Autosave: every 5 seconds if there are unsaved changes ──
+function gStartAutosave(p){
+  gStopAutosave();
+  G._autosaveTimer=setInterval(()=>{
+    if(G.dirty && G.boqId && !G._saving){ gSave(p, true); }
+  }, 5000);
+}
+function gStopAutosave(){ if(G._autosaveTimer){ clearInterval(G._autosaveTimer); G._autosaveTimer=null; } }
 function gExportCSV(){
   if(!G.rows.length) return toast("No items to export");
   const f=gFin(); let csv='Room,Category,Item,Unit,Rate,W,H,Qty,Amount,Remarks\n';
