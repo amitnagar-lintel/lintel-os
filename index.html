@@ -1680,7 +1680,9 @@ async function pwOverview(p,body){
 /* ---- Payments / Client Wallet ---- */
 async function pwPayments(p,body){
   const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
+  const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx");
   const list=pays||[];
+  const mlist=miles||[];
   const received=list.reduce((s,r)=>s+Number(r.amount||0),0);
   const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
   const balance=invoiced-received;
@@ -1692,6 +1694,25 @@ async function pwPayments(p,body){
       <div class="wcell wgood"><div class="wl">Received</div><div class="wv mono">${fmt(received)}</div></div>
       <div class="wcell ${balance>0?'wdue':''}"><div class="wl">Balance due</div><div class="wv mono">${fmt(balance)}</div></div>
       <div class="wcell"><div class="wl">Paid</div><div class="wv">${pctPaid}%</div><div class="ov-bar" style="margin-top:8px"><div style="width:${Math.min(100,pctPaid)}%"></div></div></div>
+    </div>
+
+    <div class="pw-card">
+      <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Payment schedule & proforma invoices</div>
+        ${ro?'':`<button class="ghost" id="mileSetup">${mlist.length?'Edit schedule':'Set up schedule'}</button>`}</div>
+      ${mlist.length?`<table><thead><tr><th>Milestone</th><th class="num">%</th><th class="num">Amount</th><th>Status</th><th>PI</th>${ro?'':'<th></th>'}</tr></thead><tbody>
+        ${mlist.map(m=>`<tr>
+          <td>${esc(m.label)}</td>
+          <td class="num">${m.percent}%</td>
+          <td class="num mono">${fmt(m.amount)}</td>
+          <td>${m.status==='paid'?'<span class="ex-st done">Paid</span>':m.status==='link_sent'?'<span class="ex-st in_progress">Link sent</span>':'<span class="ex-st todo">Pending</span>'}</td>
+          <td class="mono" style="font-size:12px">${m.pi_number?esc(m.pi_number):'—'}</td>
+          ${ro?'':`<td style="white-space:nowrap">
+            <button class="linkbtn" data-pi="${m.id}">${m.pi_number?'View PI':'Generate PI'}</button>
+          </td>`}
+        </tr>`).join("")}
+      </tbody></table>
+      <div class="hint">Proforma invoices are numbered from the project code. Razorpay payment links attach once your keys are live.</div>`
+      :`<div style="font-size:13px;color:var(--ink-soft)">No payment schedule yet. ${ro?'':'Click "Set up schedule" to create milestones (10% advance, then your milestone %).'}</div>`}
     </div>
 
     <div class="pw-card">
@@ -1717,12 +1738,188 @@ async function pwPayments(p,body){
   if(!ro){
     $("#payAdd").onclick=()=>paymentForm(p);
     $("#payInv").onclick=()=>invoicedForm(p);
+    if($("#mileSetup")) $("#mileSetup").onclick=()=>milestoneSetup(p,mlist);
+    body.querySelectorAll("[data-pi]").forEach(b=>b.onclick=()=>{
+      const m=mlist.find(x=>String(x.id)===String(b.dataset.pi));
+      if(m) generateProforma(p,m);
+    });
     body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
       if(!confirm("Delete this payment entry?")) return;
       await sb.from("project_payments").delete().eq("id",b.dataset.pid);
       pwPayments(p,body);
     });
   }
+}
+
+/* ---- Milestone schedule setup ---- */
+function milestoneSetup(p, existing){
+  const contractVal=Number(p.contract_value)||0;
+  const def=existing.length?existing:[
+    {label:"Advance",percent:10},
+    {label:"On design sign-off",percent:40},
+    {label:"On material procurement",percent:30},
+    {label:"On handover",percent:20}
+  ];
+  const rowHtml=(m,i)=>`<div class="mom-action-edit" data-mrow="${i}">
+    <input class="ms-label" placeholder="Milestone" value="${esc(m.label||'')}">
+    <input class="ms-pct" type="number" placeholder="%" value="${m.percent||0}" style="width:80px">
+    <span class="ms-amt mono" style="font-size:12px;color:var(--ink-soft)">${fmt(Math.round(contractVal*(m.percent||0)/100))}</span>
+    <button class="linkbtn del" onclick="this.parentElement.remove();window._recalcMile&&window._recalcMile()">×</button>
+  </div>`;
+  openModal(`
+    <div class="modal-h">Payment schedule</div>
+    <div class="modal-b">
+      <div class="banner">Contract value: <b>${fmt(contractVal)}</b>. Percentages should add up to 100%.</div>
+      <div id="ms-rows">${def.map((m,i)=>rowHtml(m,i)).join("")}</div>
+      <button class="ghost" id="ms-add" style="margin-top:6px">+ Add milestone</button>
+      <div id="ms-total" style="margin-top:10px;font-size:13px"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="ms-save">Save schedule</button></div>`);
+  const recalc=()=>{
+    let totPct=0;
+    document.querySelectorAll("#ms-rows .mom-action-edit").forEach(r=>{
+      const pct=Number(r.querySelector(".ms-pct").value)||0; totPct+=pct;
+      r.querySelector(".ms-amt").textContent=fmt(Math.round(contractVal*pct/100));
+    });
+    const el=$("#ms-total");
+    el.innerHTML=`Total: <b style="color:${totPct===100?'var(--green)':'var(--clay)'}">${totPct}%</b>${totPct!==100?' — should be 100%':' ✓'}`;
+  };
+  window._recalcMile=recalc;
+  $("#ms-rows").addEventListener("input",recalc);
+  $("#ms-add").onclick=()=>{ $("#ms-rows").insertAdjacentHTML("beforeend",rowHtml({label:"",percent:0},Date.now())); recalc(); };
+  recalc();
+  $("#ms-save").onclick=async()=>{
+    const rows=Array.from(document.querySelectorAll("#ms-rows .mom-action-edit")).map((r,i)=>({
+      label:r.querySelector(".ms-label").value.trim(),
+      percent:Number(r.querySelector(".ms-pct").value)||0,
+      idx:i
+    })).filter(x=>x.label&&x.percent);
+    if(!rows.length) return toast("Add at least one milestone");
+    // clear existing and re-insert
+    await sb.from("payment_milestones").delete().eq("project_id",p.id);
+    const payload=rows.map(r=>({project_id:p.id,label:`${r.label} (${r.percent}%)`,percent:r.percent,amount:Math.round(contractVal*r.percent/100),sort_idx:r.idx,status:"pending"}));
+    const {error}=await sb.from("payment_milestones").insert(payload);
+    if(error) return toast(error.message);
+    closeModal(); toast("Schedule saved"); pwPayments(p,$("#pwBody"));
+  };
+}
+
+/* ---- Generate / view Proforma Invoice ---- */
+async function generateProforma(p, milestone){
+  // get latest BOQ for ref
+  const {data:bv}=await sb.from("boq_versions").select("version,version_label").eq("project_id",p.id).order("version",{ascending:false}).limit(1);
+  const boqRef=`BOQ/${p.code||'LSA'}${bv&&bv[0]?'/v'+bv[0].version:''}`;
+  let piNumber=milestone.pi_number;
+  // generate PI number if not already set
+  if(!piNumber){
+    const {data:proj}=await sb.from("projects").select("pi_counter").eq("id",p.id).single();
+    const next=((proj&&proj.pi_counter)||0)+1;
+    piNumber=`${p.code||'LSA-2026'}/PI-${next}`;
+    await sb.from("projects").update({pi_counter:next}).eq("id",p.id);
+    await sb.from("payment_milestones").update({pi_number:piNumber,status:milestone.status==='pending'?'link_sent':milestone.status}).eq("id",milestone.id);
+    await sb.from("proforma_invoices").insert({
+      project_id:p.id, milestone_id:milestone.id, pi_number:piNumber, boq_ref:boqRef,
+      amount:milestone.amount, remark:`Refer to final ${boqRef} shared for details.`,
+      client_name:p.client_name||p.name, client_phone:p.client_phone, client_email:p.client_email, created_by:me.id
+    });
+  }
+  showProformaDoc(p, milestone, piNumber, boqRef);
+}
+
+function showProformaDoc(p, milestone, piNumber, boqRef){
+  const amt=Number(milestone.amount)||0;
+  const today=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+  const doc=`
+  <div id="pidoc" style="font-family:'Times New Roman',serif;max-width:760px;margin:0 auto;background:#fff;color:#1a1a1a">
+    <div style="background:#0D0D27;color:#fff;padding:24px 32px;display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>
+        <div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">
+          Survey No.36/4, site no.25 to 30, Ground Floor,<br>Ramky House, Hennur Village, Bengaluru 560043<br>
+          +91 9916558777 · contact@lintelspace.com
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;letter-spacing:1px">PROFORMA INVOICE</div>
+        <div style="font-size:13px;color:#DFB05E;margin-top:6px">${esc(piNumber)}</div>
+        <div style="font-size:12px;color:#9CA0B0;margin-top:4px">${today}</div>
+      </div>
+    </div>
+    <div style="padding:24px 32px">
+      <div style="display:flex;justify-content:space-between;gap:20px;margin-bottom:20px">
+        <div>
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Bill To</div>
+          <div style="font-size:15px;font-weight:600">${esc(p.client_name||p.name||'Client')}</div>
+          <div style="font-size:13px;color:#555">${esc(p.client_phone||'')}</div>
+          <div style="font-size:13px;color:#555">${esc(p.site_address||'')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Project</div>
+          <div style="font-size:14px;font-weight:600">${esc(p.code||'')}</div>
+          <div style="font-size:13px;color:#555">${esc(p.name||'')}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0">
+        <thead><tr style="background:#F6F4EF;text-align:left">
+          <th style="padding:11px 12px;font-size:12px;color:#8A8FA3">DESCRIPTION</th>
+          <th style="padding:11px 12px;font-size:12px;color:#8A8FA3;text-align:right">AMOUNT</th>
+        </tr></thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #ECECEC">
+            <td style="padding:14px 12px">
+              <div style="font-weight:600">${esc(milestone.label)}</div>
+              <div style="font-size:12px;color:#777;margin-top:4px">Refer to final <b>${esc(boqRef)}</b> shared for details.</div>
+            </td>
+            <td style="padding:14px 12px;text-align:right;font-weight:600">₹${amt.toLocaleString('en-IN')}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px">
+        <div style="width:260px">
+          <div style="display:flex;justify-content:space-between;padding:12px;background:#0D0D27;color:#fff;border-radius:6px">
+            <span style="font-weight:600">Amount Payable</span>
+            <span style="font-weight:700;color:#DFB05E">₹${amt.toLocaleString('en-IN')}</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:24px;display:flex;gap:24px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Pay via UPI</div>
+          <div style="font-size:14px;font-weight:600">Lintels234@idfcbank</div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Bank Details</div>
+          <div style="font-size:13px;line-height:1.6">
+            IDFC FIRST Bank · Jayanagar Branch<br>
+            A/c: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED<br>
+            A/c No: 10218270193 · IFSC: IDFB0080156
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:24px;padding-top:14px;border-top:1px solid #ECECEC;font-size:11px;color:#999">
+        This is a proforma invoice for advance/milestone payment and is not a tax invoice. A GST tax invoice will be issued upon request.
+        <br>Lintel Space Atelier · Where luxury meets functionality
+      </div>
+    </div>
+  </div>`;
+  openModal(`<div class="modal-h">Proforma Invoice · ${esc(piNumber)}</div>
+    <div class="modal-b">${doc}</div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Close</button>
+      ${p.client_phone?`<button class="wa-btn" id="pi-wa">Send on WhatsApp</button>`:''}
+      <button class="primary" id="pi-print">Print / PDF →</button>
+    </div>`);
+  $("#pi-print").onclick=()=>{
+    const w=window.open("","_blank");
+    w.document.write(`<html><head><title>${esc(piNumber)}</title></head><body style="margin:0">${doc}</body></html>`);
+    w.document.close(); setTimeout(()=>w.print(),300);
+  };
+  if($("#pi-wa")) $("#pi-wa").onclick=()=>{
+    const msg=`Dear ${p.client_name||'Client'},\n\nPlease find your proforma invoice ${piNumber} for ${milestone.label}.\n\nAmount payable: ₹${amt.toLocaleString('en-IN')}\n\nRefer to ${boqRef} shared earlier for the detailed scope.\n\nPay via UPI: Lintels234@idfcbank\nBank: IDFC FIRST · A/c 10218270193 · IFSC IDFB0080156\n\nKindly share the reference once paid. Thank you!\n\n— Team Lintel`;
+    waOpen(p.client_phone,msg);
+    sb.from("lead_activities"); // no-op guard
+    toast("Opening WhatsApp");
+  };
 }
 
 function paymentForm(p){
