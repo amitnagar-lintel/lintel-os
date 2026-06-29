@@ -1708,6 +1708,7 @@ async function pwPayments(p,body){
           <td class="mono" style="font-size:12px">${m.pi_number?esc(m.pi_number):'—'}</td>
           ${ro?'':`<td style="white-space:nowrap">
             <button class="linkbtn" data-pi="${m.id}">${m.pi_number?'View PI':'Generate PI'}</button>
+            ${m.status!=='paid'?`<button class="linkbtn" data-plink="${m.id}" style="margin-left:6px">${m.razorpay_link?'Copy link':'Create link'}</button>`:''}
           </td>`}
         </tr>`).join("")}
       </tbody></table>
@@ -1742,6 +1743,10 @@ async function pwPayments(p,body){
     body.querySelectorAll("[data-pi]").forEach(b=>b.onclick=()=>{
       const m=mlist.find(x=>String(x.id)===String(b.dataset.pi));
       if(m) generateProforma(p,m);
+    });
+    body.querySelectorAll("[data-plink]").forEach(b=>b.onclick=()=>{
+      const m=mlist.find(x=>String(x.id)===String(b.dataset.plink));
+      if(m) createRazorpayLink(p,m);
     });
     body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
       if(!confirm("Delete this payment entry?")) return;
@@ -1802,6 +1807,47 @@ function milestoneSetup(p, existing){
     if(error) return toast(error.message);
     closeModal(); toast("Schedule saved"); pwPayments(p,$("#pwBody"));
   };
+}
+
+/* ---- Razorpay: create / copy single-use payment link ---- */
+const PRIYA_SERVER="https://lintel-crm-production.up.railway.app";
+async function createRazorpayLink(p, milestone){
+  // if already exists, just copy it
+  if(milestone.razorpay_link){
+    navigator.clipboard?.writeText(milestone.razorpay_link);
+    toast("Payment link copied");
+    if(p.client_phone){
+      const msg=`Dear ${p.client_name||'Client'},\n\nPayment link for ${milestone.label}:\n${milestone.razorpay_link}\n\nAmount: ₹${Number(milestone.amount).toLocaleString('en-IN')}\n\n— Team Lintel`;
+      if(confirm("Send this link to the client on WhatsApp?")) waOpen(p.client_phone,msg);
+    }
+    return;
+  }
+  toast("Creating payment link…");
+  // ensure a PI number exists for reference
+  let boqRef=`BOQ/${p.code||'LSA'}`;
+  try{
+    const r=await fetch(PRIYA_SERVER+"/payment/create-link",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        milestoneId:milestone.id, projectId:p.id, amount:milestone.amount,
+        label:milestone.label, piNumber:milestone.pi_number||"",
+        clientName:p.client_name||p.name, clientPhone:p.client_phone, clientEmail:p.client_email,
+        boqRef:boqRef
+      })
+    });
+    const data=await r.json();
+    if(data.error){ toast("Razorpay: "+data.error); return; }
+    if(data.short_url){
+      milestone.razorpay_link=data.short_url; milestone.status="link_sent";
+      toast("Payment link created");
+      navigator.clipboard?.writeText(data.short_url);
+      pwPayments(p,$("#pwBody"));
+      if(p.client_phone){
+        const msg=`Dear ${p.client_name||'Client'},\n\nPayment link for ${milestone.label}:\n${data.short_url}\n\nAmount: ₹${Number(milestone.amount).toLocaleString('en-IN')}\n\n— Team Lintel`;
+        if(confirm("Link copied. Send to client on WhatsApp now?")) waOpen(p.client_phone,msg);
+      }
+    }
+  }catch(e){ toast("Could not reach payment server"); }
 }
 
 /* ---- Generate / view Proforma Invoice ---- */
