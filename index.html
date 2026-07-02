@@ -873,6 +873,69 @@ function leadForm(lead){
     Object.keys(QUAL).forEach(k=>row[k]=$("#f_"+k).value||null);
     row.bant_score=bantFromQual(row);
     if(!row.name) return toast("Client name is required");
+    // Duplicate check: same phone or email already exists elsewhere (leads + converted projects)
+    const dupe=await findDuplicateContact(row.phone,row.email,lead?lead.id:null);
+    if(dupe){
+      const proceed=await confirmDuplicateModal(dupe);
+      if(!proceed) return; // user chose to stop and review the existing record
+    }
+    await saveLeadRow(row,lead);
+  };
+}
+
+/* ---- Duplicate contact check: same phone or email elsewhere in leads/projects ---- */
+async function findDuplicateContact(phone,email,excludeLeadId){
+  const normPh=(phone||"").replace(/\D/g,"").slice(-10);
+  const normEm=(email||"").trim().toLowerCase();
+  if(!normPh && !normEm) return null;
+  // check leads
+  let q=sb.from("leads").select("id,name,phone,email,stage");
+  const {data:allLeads}=await q;
+  const leadHit=(allLeads||[]).find(x=>{
+    if(excludeLeadId && x.id===excludeLeadId) return false;
+    const xp=(x.phone||"").replace(/\D/g,"").slice(-10);
+    const xe=(x.email||"").trim().toLowerCase();
+    return (normPh && xp && xp===normPh) || (normEm && xe && xe===normEm);
+  });
+  if(leadHit) return {type:"lead",record:leadHit};
+  // check projects (converted clients)
+  const {data:allProj}=await sb.from("projects").select("id,name,code,client_phone,client_email");
+  const projHit=(allProj||[]).find(x=>{
+    const xp=(x.client_phone||"").replace(/\D/g,"").slice(-10);
+    const xe=(x.client_email||"").trim().toLowerCase();
+    return (normPh && xp && xp===normPh) || (normEm && xe && xe===normEm);
+  });
+  if(projHit) return {type:"project",record:projHit};
+  return null;
+}
+
+function confirmDuplicateModal(dupe){
+  return new Promise(resolve=>{
+    const label=dupe.type==="lead"
+      ? `an existing lead — <b>${esc(dupe.record.name)}</b> (${esc((STAGES.find(s=>s[0]===dupe.record.stage)||["",dupe.record.stage])[1])})`
+      : `an existing project — <b>${esc(dupe.record.name)}</b> (${esc(dupe.record.code||"")})`;
+    openModal(`
+      <div class="modal-h">⚠ Possible duplicate</div>
+      <div class="modal-b">
+        <div class="banner" style="background:#FBF1ED;border-color:#B45844">This phone number or email matches ${label}.</div>
+        <div style="font-size:13px;color:var(--ink-soft)">Do you want to open that record instead, or continue creating this one anyway (e.g. a family member sharing a number)?</div>
+      </div>
+      <div class="modal-f">
+        <button class="ghost" id="dup_cancel">Cancel</button>
+        <button class="ghost" id="dup_open">Open existing</button>
+        <button class="primary" id="dup_continue">Continue anyway</button>
+      </div>`);
+    $("#dup_cancel").onclick=()=>{ closeModal(); resolve(false); };
+    $("#dup_continue").onclick=()=>{ closeModal(); resolve(true); };
+    $("#dup_open").onclick=()=>{
+      closeModal(); resolve(false);
+      if(dupe.type==="lead"){ openLead(dupe.record.id); }
+      else { activeProject=dupe.record.id; projectTab="overview"; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(dupe.record.id),60); }
+    };
+  });
+}
+
+async function saveLeadRow(row,lead){
     let res, newId;
     if(lead) res=await sb.from("leads").update(row).eq("id",lead.id);
     else { row.owner_id=me.id; res=await sb.from("leads").insert(row).select().single(); newId=res.data&&res.data.id; }
@@ -880,7 +943,6 @@ function leadForm(lead){
     if(!lead && newId) await sb.from("lead_activities").insert({lead_id:newId,type:"created",text:"Lead added via "+(row.source||"—"),by_user:me.id});
     closeModal(); toast(lead?"Lead updated":"Lead created");
     if(activeLead) renderLeadWorkspace(activeLead); else drawBoard();
-  };
 }
 
 /* ===================== LEAD WORKSPACE (full-page, tabbed) ===================== */
