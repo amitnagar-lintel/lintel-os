@@ -142,6 +142,35 @@
   .banner{background:#FBEFE0;border:1px solid #EAD3B0;color:#7a5a1f;padding:10px 14px;border-radius:9px;font-size:12.5px;margin-bottom:18px}
   /* ---- CRM additions ---- */
   .lead-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+  /* Board/Table toggle */
+  .viewtoggle{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;background:#fff}
+  .viewtoggle button{padding:8px 14px;border:none;background:#fff;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-soft)}
+  .viewtoggle button.on{background:var(--navy);color:var(--brass)}
+  /* Lead table view */
+  .lead-table-wrap{width:100%}
+  .lead-count{font-size:12px;color:var(--ink-soft);margin-bottom:10px}
+  .ltbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 2px 10px -6px rgba(13,13,39,.12)}
+  .lead-table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
+  .lead-table thead th{text-align:left;padding:12px 14px;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-soft);background:var(--sand,#F6F3EA);border-bottom:1px solid var(--line);white-space:nowrap}
+  .lead-table tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .lead-table tbody tr{cursor:pointer;transition:background .12s}
+  .lead-table tbody tr:hover{background:#FAF8F2}
+  .lead-table tbody tr:last-child td{border-bottom:none}
+  .ltd-lead{display:flex;align-items:center;gap:11px}
+  .ltd-av{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--navy),#26264a);color:var(--brass);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;font-family:'Times New Roman',serif}
+  .ltd-name{font-weight:600;color:var(--ink)}
+  .ltd-sub{font-size:11.5px;color:var(--ink-soft);margin-top:1px}
+  .ltd-ph{font-size:13px;color:var(--ink)}
+  .ltd-val{font-weight:600;font-variant-numeric:tabular-nums}
+  .stpill{display:inline-block;padding:4px 11px;border-radius:20px;font-size:11.5px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff);white-space:nowrap}
+  .srcpill{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500;background:var(--sand,#F1EDE1);color:var(--ink-soft)}
+  .scorepill{display:inline-flex;min-width:30px;justify-content:center;padding:3px 8px;border-radius:6px;font-size:12px;font-weight:700;background:#EEE;color:#555}
+  .scorepill.hi{background:#E3F1E8;color:#2E7D5B}
+  .scorepill.lo{background:#FBECEC;color:#B4453A}
+  @media(max-width:1200px){.lead-table .hide-xl{display:none}}
+  @media(max-width:1000px){.lead-table .hide-lg{display:none}}
+  @media(max-width:820px){.lead-table .hide-md{display:none}}
+  @media(max-width:600px){.lead-table .hide-sm{display:none}}
   .lf-in{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:13px}
   .lf-sel{padding:9px 10px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:13px}
   .fu-set{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -722,9 +751,16 @@ async function renderLeads(){
   await ensureStaff();
   if(activeLead) return renderLeadWorkspace(activeLead);
   const m=$("#main");
+  if(!window.leadView) window.leadView="board";
   m.innerHTML=`<div class="view-head"><div>
-      <h2 class="display">Leads</h2><div class="sub">Pipeline · ${canWrite()?"click any card to open its workspace":"read-only for your role"}</div></div>
-      ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
+      <h2 class="display">Leads</h2><div class="sub">Pipeline · ${canWrite()?"click any row or card to open its workspace":"read-only for your role"}</div></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <div class="viewtoggle">
+          <button data-lv="board" class="${window.leadView==='board'?'on':''}">▦ Board</button>
+          <button data-lv="table" class="${window.leadView==='table'?'on':''}">☰ Table</button>
+        </div>
+        ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
+      </div>
     </div>
     <div class="lead-filters">
       <input id="lf_search" class="lf-in" placeholder="Search name, phone, locality…" value="${esc(leadFilters.search)}">
@@ -733,14 +769,81 @@ async function renderLeads(){
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
     </div>
-    <div class="board" id="board">Loading…</div>`;
+    <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">Loading…</div>`;
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
-  $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawBoard();};
-  $("#lf_source").onchange=e=>{leadFilters.source=e.target.value;drawBoard();};
-  $("#lf_owner").onchange=e=>{leadFilters.owner=e.target.value;drawBoard();};
-  $("#lf_tag").onchange=e=>{leadFilters.tag=e.target.value;drawBoard();};
-  $("#lf_due").onchange=e=>{leadFilters.dueOnly=e.target.checked;drawBoard();};
-  drawBoard();
+  $$(".viewtoggle button").forEach(b=>b.onclick=()=>{ window.leadView=b.dataset.lv; renderLeads(); });
+  $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawLeadsView();};
+  $("#lf_source").onchange=e=>{leadFilters.source=e.target.value;drawLeadsView();};
+  $("#lf_owner").onchange=e=>{leadFilters.owner=e.target.value;drawLeadsView();};
+  $("#lf_tag").onchange=e=>{leadFilters.tag=e.target.value;drawLeadsView();};
+  $("#lf_due").onchange=e=>{leadFilters.dueOnly=e.target.checked;drawLeadsView();};
+  drawLeadsView();
+}
+
+function drawLeadsView(){
+  if(window.leadView==="table") return drawLeadsTable();
+  return drawBoard();
+}
+
+async function drawLeadsTable(){
+  const host=$("#board"); if(!host) return;
+  host.className="lead-table-wrap";
+  const {data:leads,error}=await sb.from("leads").select("*").order("updated_at",{ascending:false});
+  if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
+  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
+  const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
+  const f=leadFilters, q=f.search.toLowerCase();
+  const rows=(leads||[]).filter(l=>{
+    if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
+    if(f.source && l.source!==f.source) return false;
+    if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
+    if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
+    if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
+    return true;
+  });
+  const dueN=(leads||[]).filter(l=>l.next_follow_up && l.next_follow_up<=todayISO() && l.stage!=="won" && l.stage!=="lost").length;
+  const badge=$("#dueCount"); if(badge){ badge.textContent=dueN?dueN:""; badge.style.display=dueN?"inline-flex":"none"; }
+  const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];
+  const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
+  const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id||l.presales_id;return id?staffName(id):"";};
+  host.innerHTML=`
+    <div class="lead-count">${rows.length} of ${(leads||[]).length} leads</div>
+    <div class="ltbl-scroll">
+    <table class="lead-table">
+      <thead><tr>
+        <th>Lead</th><th class="hide-md">Contact</th><th class="hide-lg">Property</th>
+        <th class="hide-sm">Value</th><th>Stage</th><th class="hide-md">Source</th>
+        <th class="hide-lg">Score</th><th class="hide-xl">Owner</th><th class="hide-sm">Follow-up</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(l=>{
+          const pr=l.stage==="won"?projByLead[l.id]:null;
+          const score=l.bant_score||bantFromQual(l);
+          const sCls=score>=60?"hi":score<35?"lo":"";
+          const dc=dueClass(l.next_follow_up);
+          return `<tr data-leadrow="${l.id}" ${pr?`data-projrow="${pr.id}"`:''}>
+            <td><div class="ltd-lead">
+              <span class="ltd-av">${initials(l.name)}</span>
+              <div><div class="ltd-name">${esc(l.name)}</div>
+                <div class="ltd-sub">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div></div>
+            </div></td>
+            <td class="hide-md"><div class="ltd-ph">${esc(l.phone||"—")}</div><div class="ltd-sub">${esc(l.email||"")}</div></td>
+            <td class="hide-lg">${esc(l.project_type||l.bhk||"—")}</td>
+            <td class="hide-sm ltd-val">${l.expected_value?fmt(l.expected_value):"—"}</td>
+            <td>${pr?`<span class="stpill" style="--c:#2E7D5B">✓ ${esc(pr.code||"Won")}</span>`:`<span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>`}</td>
+            <td class="hide-md">${l.source?`<span class="srcpill">${esc(l.source)}</span>`:"—"}</td>
+            <td class="hide-lg"><span class="scorepill ${sCls}">${score}</span></td>
+            <td class="hide-xl ltd-sub">${esc(owner(l)||"—")}</td>
+            <td class="hide-sm">${l.next_follow_up?`<span class="fu ${dc}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
+          </tr>`;
+        }).join("")||`<tr><td colspan="9"><div class="empty" style="padding:30px">No leads match your filters.</div></td></tr>`}
+      </tbody>
+    </table></div>`;
+  host.querySelectorAll("[data-leadrow]").forEach(tr=>tr.onclick=()=>{
+    const pid=tr.dataset.projrow;
+    if(pid){ activeProject=Number(pid); projectTab="overview"; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(Number(pid)),60); }
+    else openLead(Number(tr.dataset.leadrow));
+  });
 }
 
 async function drawBoard(){
