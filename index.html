@@ -694,7 +694,7 @@ function render(view){
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false };
 let activeLead = null, leadTab = "overview";
-const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["activity","Activity"],["notes","Notes"]];
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -747,6 +747,9 @@ async function drawBoard(){
   const {data:leads,error}=await sb.from("leads").select("*").order("next_follow_up",{ascending:true,nullsFirst:false});
   const board=$("#board"); if(!board) return;
   if(error){board.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
+  // fetch projects to link won leads to their converted project
+  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
+  const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
   const f=leadFilters, q=f.search.toLowerCase();
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
@@ -757,7 +760,6 @@ async function drawBoard(){
     return true;
   });
   board.innerHTML="";
-  // due-for-follow-up count (today or overdue, excluding won/lost)
   const dueN=(leads||[]).filter(l=>l.next_follow_up && l.next_follow_up<=todayISO() && l.stage!=="won" && l.stage!=="lost").length;
   const badge=$("#dueCount"); if(badge) badge.textContent=dueN?dueN:"";
   if(badge) badge.style.display=dueN?"inline-flex":"none";
@@ -767,8 +769,22 @@ async function drawBoard(){
     const col=document.createElement("div");col.className="col";
     col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}
       <span class="col-count">${items.length}</span></div>
-      ${val?`<div class="col-val mono">${fmt(val)}</div>`:""}`;
+      ${val&&key!=="won"?`<div class="col-val mono">${fmt(val)}</div>`:""}`;
     items.forEach(l=>{
+      // WON: show as a compact "converted → project" link, not a full lead card
+      if(key==="won"){
+        const pr=projByLead[l.id];
+        const c=document.createElement("div");c.className="card card-won";
+        c.innerHTML=`<div class="nm">${esc(l.name)}</div>
+          <div class="meta">${pr?`✓ Converted → <b>${esc(pr.code||pr.name)}</b>`:"✓ Won"}</div>
+          ${pr?`<div class="row2"><span class="linkbtn">Open project →</span></div>`:""}`;
+        c.onclick=()=>{
+          if(pr){ activeProject=pr.id; projectTab="overview"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(pr.id),60); }
+          else openLead(l.id);
+        };
+        col.appendChild(c);
+        return;
+      }
       const score=l.bant_score||bantFromQual(l);
       const sCls=score>=60?"hi":score<35?"lo":"";
       const dc=dueClass(l.next_follow_up);
@@ -914,8 +930,152 @@ function drawLeadTab(l){
   if(leadTab==="overview") return lwOverview(l,body);
   if(leadTab==="briefing") return lwBriefing(l,body);
   if(leadTab==="boq")      return lwBoq(l,body);
+  if(leadTab==="meetings") return lwMeetings(l,body);
   if(leadTab==="activity") return lwActivity(l,body);
   if(leadTab==="notes")    return lwNotes(l,body);
+}
+
+/* ---- Lead Meetings & MoM (mirrors project Design tab, keyed by lead) ---- */
+async function lwMeetings(l,body){
+  const w=canWrite();
+  body.innerHTML=`<div class="gsub" style="margin-bottom:14px">
+    <button class="on" id="lmT_meet">Meetings</button>
+    <button id="lmT_mom">Minutes (MoM)</button>
+  </div><div id="lmBody">Loading…</div>`;
+  const meetBtn=$("#lmT_meet"), momBtn=$("#lmT_mom");
+  const showMeet=()=>{ meetBtn.classList.add("on"); momBtn.classList.remove("on"); lwMeetList(l,$("#lmBody"),w); };
+  const showMom=()=>{ momBtn.classList.add("on"); meetBtn.classList.remove("on"); lwMoMList(l,$("#lmBody"),w); };
+  meetBtn.onclick=showMeet; momBtn.onclick=showMom;
+  showMeet();
+}
+
+async function lwMeetList(l,body,w){
+  const {data:meets}=await sb.from("design_meetings").select("*").eq("lead_id",l.id).order("scheduled_at",{ascending:false});
+  body.innerHTML=`
+  ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Schedule a client meeting</h3>
+    <div class="grid2">
+      <div class="field"><label>Title</label><input id="lm_title" placeholder="e.g. Requirement discussion" value="Discovery meeting"></div>
+      <div class="field"><label>Client email (guest)</label><input id="lm_email" placeholder="client@email.com" value="${esc(l.email||"")}"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Date & time</label><input type="datetime-local" id="lm_when"></div>
+      <div class="field"><label>Duration (min)</label><input type="number" id="lm_dur" value="30" min="15" step="15"></div>
+    </div>
+    <div class="field"><label>Agenda</label><textarea id="lm_agenda" rows="2" placeholder="What will be discussed"></textarea></div>
+    <button class="primary" id="lm_add">Save meeting</button>
+  </div>`:""}
+  <div id="lm_list">${meetsHtml(meets||[],w)}</div>`;
+  if(w){
+    $("#lm_add").onclick=async()=>{
+      const title=$("#lm_title").value.trim(); const when=$("#lm_when").value;
+      if(!title||!when) return toast("Title and date/time needed");
+      const {error}=await sb.from("design_meetings").insert({
+        lead_id:l.id, title, scheduled_at:new Date(when).toISOString(),
+        duration_min:Number($("#lm_dur").value)||30, client_email:$("#lm_email").value.trim()||null,
+        agenda:$("#lm_agenda").value.trim()||null });
+      if(error) return toast(error.message);
+      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:"Meeting scheduled: "+title,by_user:me.id});
+      toast("Meeting saved"); lwMeetList(l,body,w);
+    };
+  }
+  // reuse the same meeting action bindings, but re-render via lwMeetList
+  body.querySelectorAll("[data-gcal]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.gcal).single();
+    if(mt) window.open(gcalUrl(mt),"_blank");
+  });
+  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Remove this meeting?")) return;
+    await sb.from("design_meetings").delete().eq("id",b.dataset.mdel); lwMeetList(l,body,w);
+  });
+  body.querySelectorAll("[data-mlink]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mlink).single();
+    openModal(`<div class="modal-h">Google Meet link</div>
+      <div class="modal-b">
+        <div class="banner">Open <b>📅 Calendar + Meet</b>, add Google Meet to the event and save, then paste the Meet link here so everyone gets a join button.</div>
+        <div class="field"><label>Meet link</label><input id="ml_in" placeholder="https://meet.google.com/abc-defg-hij" value="${esc(mt?.meet_link||"")}"></div>
+      </div>
+      <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="ml_save">Save link</button></div>`);
+    $("#ml_save").onclick=async()=>{
+      await sb.from("design_meetings").update({meet_link:$("#ml_in").value.trim()||null}).eq("id",b.dataset.mlink);
+      closeModal(); toast("Meet link saved"); lwMeetList(l,body,w);
+    };
+  });
+  body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>lwMoMForm(l,{meeting_title:b.dataset.momtitle},body,w));
+}
+
+async function lwMoMList(l,body,w){
+  const {data:moms}=await sb.from("design_moms").select("*").eq("lead_id",l.id).order("created_at",{ascending:false});
+  const {data:actions}=await sb.from("mom_actions").select("*").eq("lead_id",l.id);
+  body.innerHTML=`
+  ${w?`<div style="margin-bottom:14px"><button class="primary" id="lmom_new">+ New MoM</button></div>`:""}
+  <div id="lmom_list">${(moms||[]).map(m=>{
+    const acts=(actions||[]).filter(a=>a.mom_id===m.id);
+    return `<div class="mom-card">
+      <div class="mom-h"><div class="mom-t">${esc(m.title||"Minutes")}<span class="mom-date"> · ${m.created_at?new Date(m.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):""}</span>
+        ${w?` · <button class="linkbtn" data-lmomedit="${m.id}">edit</button> · <button class="linkbtn del" data-lmomdel="${m.id}">✕</button>`:""}</div></div>
+      ${m.summary?`<div class="mom-sum">${esc(m.summary)}</div>`:""}
+      ${acts.length?`<div class="mom-acts">${acts.map(a=>`<label class="mom-act"><input type="checkbox" data-lactdone="${a.id}" ${a.status==="done"?"checked":""}> <span>${esc(a.text)}${a.assignee?` · <b>${esc(a.assignee)}</b>`:""}${a.due_date?` · due ${a.due_date}`:""}</span></label>`).join("")}</div>`:""}
+    </div>`;
+  }).join("")||emptyState("No minutes yet", w?"Record minutes after a client meeting.":"Nothing recorded yet.")}</div>`;
+  if(w){
+    $("#lmom_new").onclick=()=>lwMoMForm(l,{},body,w);
+    body.querySelectorAll("[data-lmomdel]").forEach(b=>b.onclick=async()=>{
+      if(!confirm("Delete this MoM and its action items?")) return;
+      await sb.from("design_moms").delete().eq("id",b.dataset.lmomdel); lwMoMList(l,body,w);
+    });
+    body.querySelectorAll("[data-lmomedit]").forEach(b=>b.onclick=async()=>{
+      const {data:m}=await sb.from("design_moms").select("*").eq("id",b.dataset.lmomedit).single();
+      const {data:acts}=await sb.from("mom_actions").select("*").eq("mom_id",b.dataset.lmomedit);
+      lwMoMForm(l,m,body,w,acts||[]);
+    });
+    body.querySelectorAll("[data-lactdone]").forEach(c=>c.onchange=async()=>{
+      await sb.from("mom_actions").update({status:c.checked?"done":"open"}).eq("id",c.dataset.lactdone);
+      lwMoMList(l,body,w);
+    });
+  }
+}
+
+function lwMoMForm(l,m,body,w,acts){
+  m=m||{}; acts=acts||[];
+  const actRow=(a)=>`<div class="mom-action-edit" data-arow>
+    <input class="ae-text" placeholder="Action item" value="${esc(a.text||"")}">
+    <input class="ae-assignee" placeholder="Owner" value="${esc(a.assignee||"")}" style="width:110px">
+    <input class="ae-due" type="date" value="${a.due_date||""}" style="width:150px">
+    <button class="linkbtn del" onclick="this.parentElement.remove()">✕</button>
+  </div>`;
+  openModal(`<div class="modal-h">${m.id?"Edit":"New"} minutes of meeting</div>
+    <div class="modal-b">
+      <div class="field"><label>Title</label><input id="mom_title" value="${esc(m.title||m.meeting_title||"Client meeting")}"></div>
+      <div class="field"><label>Summary / discussion</label><textarea id="mom_summary" rows="4" placeholder="Key points discussed…">${esc(m.summary||"")}</textarea></div>
+      <div class="sec-label" style="border:none">Action items</div>
+      <div id="mom_actions">${acts.map(actRow).join("")||actRow({})}</div>
+      <button class="ghost" id="mom_addact" style="margin-top:6px">+ Add action item</button>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="mom_save">Save minutes</button></div>`);
+  $("#mom_addact").onclick=()=>$("#mom_actions").insertAdjacentHTML("beforeend",actRow({}));
+  $("#mom_save").onclick=async()=>{
+    const title=$("#mom_title").value.trim()||"Client meeting";
+    const summary=$("#mom_summary").value.trim();
+    let momId=m.id;
+    if(momId){
+      await sb.from("design_moms").update({title,summary}).eq("id",momId);
+      await sb.from("mom_actions").delete().eq("mom_id",momId);
+    } else {
+      const {data,error}=await sb.from("design_moms").insert({lead_id:l.id,title,summary}).select().single();
+      if(error) return toast(error.message);
+      momId=data.id;
+    }
+    const rows=Array.from(document.querySelectorAll("#mom_actions [data-arow]")).map(r=>({
+      text:r.querySelector(".ae-text").value.trim(),
+      assignee:r.querySelector(".ae-assignee").value.trim()||null,
+      due_date:r.querySelector(".ae-due").value||null
+    })).filter(x=>x.text);
+    if(rows.length){
+      await sb.from("mom_actions").insert(rows.map(r=>({lead_id:l.id,mom_id:momId,text:r.text,assignee:r.assignee,due_date:r.due_date,status:"open"})));
+    }
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:"MoM recorded: "+title,by_user:me.id});
+    closeModal(); toast("Minutes saved"); lwMoMList(l,body,w);
+  };
 }
 
 /* ---- Overview: action rail + snapshot, Livspace-style ---- */
@@ -1076,6 +1236,12 @@ function bindLeadCommon(l){
   const sd=$("#ld_stage");
   if(sd) sd.onchange=async()=>{
     const newStage=sd.value, oldLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1], newLabel=(STAGES.find(s=>s[0]===newStage)||["",newStage])[1];
+    // Won → trigger conversion flow (assign team, then convert). Don't just flip the stage.
+    if(newStage==="won" && l.stage!=="won"){
+      sd.value=l.stage; // revert visual until conversion confirmed
+      convertLead(l);
+      return;
+    }
     const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
     if(error){ sd.value=l.stage; return toast(error.message); }
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Stage: ${oldLabel} → ${newLabel}`,by_user:me.id});
@@ -3162,15 +3328,20 @@ function gBindTable(ro){
     if(G.rows.length<before){ G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Item removed"); }
   });
   // Feature 3: Copy room
-  $$("#gbody [data-copyroom]").forEach(btn=>btn.onclick=()=>{
+  $$("#gbody [data-copyroom]").forEach(btn=>btn.onclick=(e)=>{
+    e.preventDefault(); e.stopPropagation();
     const srcRoom=btn.dataset.copyroom;
-    const newName=prompt("New room name (copy of "+srcRoom+"):",srcRoom+" Copy");
-    if(!newName||!newName.trim()) return;
     const src=G.rows.filter(r=>r.room===srcRoom);
+    if(!src.length) return toast("No items in this room to copy");
+    const newName=prompt("New room name (copy of "+srcRoom+"):",srcRoom+" 2");
+    if(newName===null) return; // user cancelled
+    const finalName=(newName&&newName.trim())?newName.trim():srcRoom+" 2";
+    // ensure uid counter is valid (guard against undefined/collision)
+    if(typeof G.uid!=="number"||!G.uid){ G.uid=(G.rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0))+1; }
     src.forEach(r=>{
-      G.rows.push({id:G.uid++,room:newName.trim(),cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom});
+      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom});
     });
-    G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+newName.trim());
+    G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+finalName);
   });
 }
 function gAddLib(){
