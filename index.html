@@ -433,6 +433,83 @@
   #po-sheet{background:#fff;border:1px solid var(--line);border-radius:10px;max-width:840px;margin:0 auto;overflow:hidden;box-shadow:0 4px 30px rgba(0,0,0,.08)}
   @media print{ #po-sheet.printing,#po-sheet.printing *{visibility:visible} body:has(#po-sheet.printing) *{visibility:hidden} #po-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
   @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow,.wallet{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
+
+  /* ================= MOBILE (phones ≤640px): fit-to-screen, no zoom ================= */
+  @media(max-width:640px){
+    html,body{overflow-x:hidden}
+    /* Header: compact, wraps nav below brand, horizontally scrollable tabs */
+    header.top{height:auto;flex-wrap:wrap;gap:8px;padding:8px 12px;align-items:center}
+    .brand-word{font-size:16px}
+    .logo-mark{height:24px}
+    nav.tabs{order:3;width:100%;margin-left:0;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:2px;padding-bottom:2px}
+    nav.tabs button{padding:7px 12px;font-size:13px;white-space:nowrap;flex:none}
+    .who{font-size:12px;gap:6px;margin-left:auto}
+    .who .role-chip{display:none}
+    #pwaInstall{font-size:11px;padding:5px 9px}
+    main{padding:14px 12px}
+
+    /* View headers stack */
+    .view-head{flex-direction:column;align-items:stretch;gap:12px;margin-bottom:16px}
+    .view-head h2,.brand-serif{font-size:22px}
+    .view-head .primary,.view-head .ghost{width:100%}
+    .view-head>div:last-child{display:flex;flex-direction:column;gap:8px}
+    .viewtoggle{width:100%}.viewtoggle button{flex:1}
+
+    /* Filters stack full-width */
+    .lead-filters{flex-direction:column;align-items:stretch;gap:8px}
+    .lf-in,.lf-sel{width:100%;min-width:0;font-size:16px}  /* 16px prevents iOS zoom-on-focus */
+
+    /* Leads board → single column of stacked cards (no side-scroll needed) */
+    .board{display:flex;flex-direction:column;gap:12px;overflow-x:visible}
+    .col{min-height:0}
+    .card{padding:13px 14px}
+    .card .nm{font-size:15px}
+
+    /* Lead TABLE view: keep only essentials, allow horizontal scroll as fallback */
+    .lead-table{min-width:0;font-size:13px}
+    .lead-table thead th,.lead-table tbody td{padding:10px 10px}
+    .lead-table .hide-sm,.lead-table .hide-md,.lead-table .hide-lg,.lead-table .hide-xl{display:none}
+    .ltd-av{width:30px;height:30px;font-size:11px}
+
+    /* Generic tables: let them scroll horizontally inside a wrapper rather than overflow the page */
+    .table-wrap,.ltbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    table{font-size:13px}
+    th,td{padding:9px 10px}
+
+    /* Forms: all grids to single column, inputs 16px to stop iOS auto-zoom */
+    .grid2,.grid4,.addgrid,.qgrid{grid-template-columns:1fr!important}
+    .field input,.field select,.field textarea,input,select,textarea{font-size:16px}
+
+    /* Tab bars (project + lead workspace) scroll horizontally, don't wrap into a tall stack */
+    .pw-tabs,#pwTabs,#lwTabs,.lw-tabs,.gsub,.ds-sub,.gbar .gsub{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+    .pw-tabs button,#pwTabs button,#lwTabs button{padding:9px 12px;font-size:13px;flex:none}
+
+    /* BOQ: side nav on top, estimator table scrolls horizontally in its wrapper */
+    .boq-wrap{grid-template-columns:1fr}
+    .boq-side{display:flex;gap:6px;overflow-x:auto;height:auto}
+    .boq-side .si{flex:none;white-space:nowrap}
+    .sheet{overflow-x:auto}
+    .gbar{flex-direction:column;gap:10px;align-items:stretch}
+    .gbar .gsub{width:100%}
+    .gact{display:flex;gap:8px}.gact button{flex:1}
+
+    /* Wallet / summary cards: 2-up instead of 4-up */
+    .wallet,.totbar,.finrow{grid-template-columns:1fr 1fr}
+    .ov-grid{grid-template-columns:1fr}
+
+    /* Modals: near full-screen sheet from bottom */
+    .scrim{padding:0;align-items:flex-end}
+    .modal{width:100vw;max-width:100vw;max-height:94vh;border-radius:18px 18px 0 0}
+    .modal-f{flex-wrap:wrap}.modal-f button{flex:1;min-width:120px}
+
+    /* Kanban meta a touch bigger for tap targets */
+    .linkbtn{padding:6px 4px}
+    button{min-height:36px}
+  }
+  @media(max-width:640px){
+    /* make horizontally-scrollable regions show a subtle edge hint */
+    .board::-webkit-scrollbar,nav.tabs::-webkit-scrollbar{height:0}
+  }
 </style>
 </head>
 <body>
@@ -758,7 +835,7 @@ async function renderLeads(){
   await ensureStaff();
   if(activeLead) return renderLeadWorkspace(activeLead);
   const m=$("#main");
-  if(!window.leadView) window.leadView="board";
+  if(!window.leadView) window.leadView = (window.innerWidth<=640 ? "table" : "board");
   m.innerHTML=`<div class="view-head"><div>
       <h2 class="display">Leads</h2><div class="sub">Pipeline · ${canWrite()?"click any row or card to open its workspace":"read-only for your role"}</div></div>
       <div style="display:flex;gap:10px;align-items:center">
