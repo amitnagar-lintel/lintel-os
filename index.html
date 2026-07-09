@@ -979,6 +979,13 @@ function dueClass(d){ if(!d) return ""; const t=todayISO(); return d<t?"overdue"
 
 async function renderLeads(){
   await ensureStaff();
+  if(!window.__ownerInit){
+    window.__ownerInit=true;
+    if(myRole==="interior_designer"||myRole==="design_consultant"){
+      const meStaff=STAFF.find(s=>s.email && me && String(s.email).toLowerCase()===String(me.email||"").toLowerCase());
+      if(meStaff) leadFilters.owner=meStaff.id;
+    }
+  }
   if(activeLead) return renderLeadWorkspace(activeLead);
   const m=$("#main");
   if(!window.leadView) window.leadView = (window.innerWidth<=640 ? "table" : "board");
@@ -995,7 +1002,7 @@ async function renderLeads(){
     <div class="lead-filters">
       <input id="lf_search" class="lf-in" placeholder="Search name, phone, locality…" value="${esc(leadFilters.search)}">
       <select id="lf_source" class="lf-sel"><option value="">All sources</option>${SOURCES.map(s=>`<option ${leadFilters.source===s?"selected":""}>${s}</option>`).join("")}</select>
-      <select id="lf_owner" class="lf-sel"><option value="">All owners</option>${STAFF.map(s=>`<option value="${s.id}" ${leadFilters.owner===s.id?"selected":""}>${esc(s.full_name||s.email)}</option>`).join("")}</select>
+      <select id="lf_owner" class="lf-sel"><option value="">All owners</option><option value="__none__" ${leadFilters.owner==="__none__"?"selected":""}>— Unassigned —</option>${STAFF.map(s=>`<option value="${s.id}" ${leadFilters.owner===s.id?"selected":""}>${esc(s.full_name||s.email)}</option>`).join("")}</select>
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
     </div>
@@ -1026,7 +1033,8 @@ async function drawLeadsTable(){
   const rows=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.source && l.source!==f.source) return false;
-    if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
+    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id||l.presales_id) return false; }
+    else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
@@ -1087,7 +1095,8 @@ async function drawBoard(){
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.source && l.source!==f.source) return false;
-    if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
+    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id||l.presales_id) return false; }
+    else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
