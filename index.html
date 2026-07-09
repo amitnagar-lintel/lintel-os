@@ -1518,11 +1518,12 @@ async function lwActivity(l,body){
   const w=canWrite();
   $("#actInner").innerHTML=`
     ${w?`<div class="actadd">
-      <select id="act_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option></select>
+      <select id="act_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option><option value="Quote">📄 Quote</option></select>
       <input id="act_text" placeholder="What did the client say? Record the note…">
+      <input id="act_followup" type="date" title="Set next follow-up (optional)" style="flex:0 0 148px;max-width:148px">
       <button class="primary" id="act_add">Log</button></div>`:""}
     <div class="timeline" id="timeline">${(acts||[]).map(a=>{
-        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",created:"✨"}[a.type]||"•";
+        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",Quote:"📄",created:"✨"}[a.type]||"•";
         const who=a.by_user?staffNameByProfile(a.by_user):"";
         const dt=new Date(a.created_at);
         const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
@@ -1536,6 +1537,13 @@ async function lwActivity(l,body){
       const text=$("#act_text").value.trim(); if(!text) return;
       const {error}=await sb.from("lead_activities").insert({lead_id:l.id,type:$("#act_type").value,text,by_user:me.id});
       if(error) return toast(error.message);
+      const fu=$("#act_followup").value;
+      if(fu){
+        await sb.from("leads").update({next_follow_up:fu}).eq("id",l.id);
+        l.next_follow_up=fu;
+        await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:"Next follow-up set for "+fu,by_user:me.id});
+        toast("Update logged · follow-up set for "+fu);
+      }
       lwActivity(l,body);
     };
   }
