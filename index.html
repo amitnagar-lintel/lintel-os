@@ -602,7 +602,7 @@
       <button data-view="leads">Leads</button>
       <button data-view="projects">Projects</button>
       <button data-view="team" id="navTeam" style="display:none">Lintel Team</button>
-      <button onclick="window.open('https://amitnagar-lintel.github.io/lintel-studio/','_blank')" title="Client presentation & moodboard studio">Studio ↗</button>
+      <button data-external="1" onclick="window.open('https://amitnagar-lintel.github.io/lintel-studio/','_blank')" title="Client presentation & moodboard studio">Studio ↗</button>
     </nav>
     <div class="spacer"></div>
     <div class="who">
@@ -764,6 +764,7 @@ async function enter(session){
     $("#userRole").textContent = myRole.replace("_"," ");
     if(canManageStaff()) $("#navTeam").style.display="";
     document.querySelectorAll("nav.tabs button").forEach(b=>{
+      if(b.dataset.external) return;
       b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
         b.classList.add("active"); activeLead=null; activeProject=null; if(typeof gStopAutosave==="function")gStopAutosave(); render(b.dataset.view); };
     });
