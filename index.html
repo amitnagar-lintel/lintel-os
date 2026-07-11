@@ -2039,6 +2039,40 @@ async function drawProjectTab(p){
 
 /* ---- Overview (timeline) ---- */
 const STAGE_FLOW=["Briefing","Design","Proposal/BOQ","Production","Installation","Handover"];
+/* ---- Project activity: continues the lead's timeline (same lead_activities feed) ---- */
+async function renderProjectActivity(p){
+  const box=$("#pjAct"); if(!box) return;
+  if(!p.lead_id){
+    box.innerHTML=`<div class="tl-empty">This project was created without a linked lead, so there's no carried-forward activity history.</div>`;
+    return;
+  }
+  const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",p.lead_id).order("created_at",{ascending:false});
+  const w=canWrite();
+  box.innerHTML=`
+    ${w?`<div class="actadd">
+      <select id="pact_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option><option value="Quote">📄 Quote</option></select>
+      <input id="pact_text" placeholder="Log a project update, call, or client note…">
+      <button class="primary" id="pact_add">Log</button></div>`:""}
+    <div class="timeline">${(acts||[]).map(a=>{
+        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",Quote:"📄",created:"✨"}[a.type]||"•";
+        const who=a.by_user?staffNameByProfile(a.by_user):"";
+        const dt=new Date(a.created_at);
+        const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+        return `<div class="tl-item2"><div class="tl-ic">${icon}</div>
+          <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(a.type)}</span><span class="tl-when2 mono">${when}</span></div>
+          <div class="tl-text2">${esc(a.text||"")}</div>${who?`<div class="tl-who">— ${esc(who)}</div>`:""}</div></div>`;
+      }).join("")||`<div class="tl-empty">No notes yet. The lead's history and all project updates will build here.</div>`}</div>`;
+  if(w){
+    const add=$("#pact_add");
+    if(add) add.onclick=async()=>{
+      const text=$("#pact_text").value.trim(); if(!text) return;
+      const {error}=await sb.from("lead_activities").insert({lead_id:p.lead_id,type:$("#pact_type").value,text,by_user:me.id});
+      if(error) return toast(error.message);
+      renderProjectActivity(p);
+    };
+  }
+}
+
 async function pwOverview(p,body){
   await ensureStaff();
   const {data:ms}=await sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx");
@@ -2164,10 +2198,15 @@ async function pwOverview(p,body){
           </div>
         </div>
       </div>
+      <div class="pw-card" style="margin-top:14px">
+        <div class="sec-label" style="border:none;padding:0">Activity & client notes</div>
+        <div id="pjAct" style="margin-top:10px">Loading…</div>
+      </div>
     </div>`;
   // wire quick links + team
   body.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ projectTab=b.dataset.go; renderProjectWorkspace(p.id); });
   if($("#ovTeam")) $("#ovTeam").onclick=()=>{ projectTab="team"; renderProjectWorkspace(p.id); };
+  renderProjectActivity(p);
   if(!ro){
     body.querySelectorAll(".tl2-sel").forEach(sel=>sel.onchange=async()=>{
       const status=sel.value, id=sel.dataset.ms;
