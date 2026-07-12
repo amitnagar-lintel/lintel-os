@@ -347,6 +347,12 @@
   .addgrid button{height:32px;align-self:end}
   .roomhdr td{background:#FBF5E6;font-weight:700;font-size:11px;color:var(--brass-deep);padding:7px 12px;text-transform:uppercase;letter-spacing:1px}
   .roomsub td{background:var(--paper-2);font-size:11px;color:var(--ink-soft);padding:6px 12px}
+  tr.g-exc td{opacity:.5}
+  tr.g-exc td:nth-child(3),tr.g-exc td:nth-child(9),tr.g-exc td[data-amt]{text-decoration:line-through}
+  tr.g-opt td{background:#FDF9EE}
+  .gtag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;padding:1px 6px;border-radius:8px;vertical-align:middle}
+  .gtag-exc{background:#F6E4E4;color:#A33C3C}
+  .gtag-opt{background:#FBF5E6;color:#946F33;border:1px solid #D4B06A}
   .ii{height:28px;border:1px solid var(--line-2);border-radius:4px;padding:0 6px;font-size:11px;background:var(--paper);font-family:inherit}
   .totbar{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
   .tcell{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
@@ -1769,7 +1775,8 @@ async function leadBoqGenerator(l, host){
     id:i, dbid:r.id, room:r.room||r.room_tag||"General", cat:r.category||"", item:r.item_name||r.description||"",
     unit:r.uom||"", rate:Number(r.rate)||0, originalRate:Number(r.rate)||0,
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
-    amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom
+    amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
+    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
   }));
   G.uid=G.rows.length;
   gRender(l, host); // generator uses l like a project; gSave guards the project-only write
@@ -1863,7 +1870,7 @@ async function loadSheet(id){
   const sheet=$("#boqSheet");
   const {data:v}=await sb.from("boq_versions").select("*").eq("id",id).single();
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",id).order("sort_order");
-  const total=(items||[]).reduce((s,i)=>s+Number(i.amount||0),0);
+  const total=(items||[]).filter(i=>i.scope!=='excluded'&&i.scope!=='optional').reduce((s,i)=>s+Number(i.amount||0),0); // A2: excluded/optional never sum
   sheet.innerHTML=`<div class="sheet">
     <div class="sheet-top"><div class="t">${esc(v.title||"BOQ")} <span class="pill ${v.status}">${v.status}</span></div>
       <div class="tot"><div class="lbl">Sheet total</div><div class="amt">${fmt(total)}</div></div></div>
@@ -1889,10 +1896,11 @@ async function loadSheet(id){
 }
 
 function boqRow(it){
-  const tr=document.createElement("tr");tr.className="boq-row";
+  const sc=(it.scope==='excluded'||it.scope==='optional')?it.scope:'included';
+  const tr=document.createElement("tr");tr.className="boq-row"+(sc==='excluded'?" g-exc":sc==='optional'?" g-opt":"");
   const ro=!canWrite();
   tr.innerHTML=`
-    <td><span class="boq-cat">${esc(it.category||"—")}</span></td>
+    <td><span class="boq-cat">${esc(it.category||"—")}</span>${sc==='excluded'?' <span class="gtag gtag-exc">Excluded</span>':sc==='optional'?' <span class="gtag gtag-opt">Optional</span>':''}</td>
     <td>${ro?esc(it.description):`<input class="cellinput" value="${esc(it.description)}" data-f="description">`}</td>
     <td>${ro?esc(it.room_tag||""):`<input class="cellinput" value="${esc(it.room_tag||"")}" data-f="room_tag" placeholder="—">`}</td>
     <td>${ro?esc(it.uom):`<input class="cellinput" value="${esc(it.uom)}" data-f="uom">`}</td>
@@ -2636,9 +2644,11 @@ async function generatePOs(p,body){
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
   if(!items||!items.length) return toast("The BOQ has no line items");
   const boost=Number(ver.boost_pct)||0;
-  // group by category
+  // group by category (A2: excluded/optional lines are outside contracted scope — never in work orders)
+  const inScope=items.filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
+  if(!inScope.length) return toast("The BOQ has no included line items");
   const cats={};
-  items.forEach(r=>{ const c=r.category||"Uncategorised"; (cats[c]=cats[c]||[]).push(r); });
+  inScope.forEach(r=>{ const c=r.category||"Uncategorised"; (cats[c]=cats[c]||[]).push(r); });
   const catNames=Object.keys(cats);
   openModal(`
     <div class="modal-h">Generate work orders</div>
@@ -3238,6 +3248,8 @@ async function pwExecution(p,body){
     acts=ins||[];
   }
   acts=acts||[];
+  let mandays=null;
+  try{const {data:md}=await sb.from("v_project_mandays").select("*").eq("project_id",p.id).limit(1);mandays=(md&&md[0])||null;}catch(_){}
   const ro=!canWrite();
   body.innerHTML=`
     <div class="gbar">
@@ -3253,6 +3265,7 @@ async function pwExecution(p,body){
       <span><i class="ex-key crit"></i> Critical path</span>
       <span><i class="ex-key late"></i> Delayed</span>
     </div>
+    ${mandays?`<div id="ex_mandays" style="margin:6px 0 10px;padding:9px 12px;border:1px solid var(--line-2);border-radius:8px;font-size:13px;color:var(--ink-soft)">Site man-days: <b style="color:var(--ink)">${Number(mandays.man_days)||0}</b> &nbsp;&middot;&nbsp; ${Number(mandays.total_hours)||0} hrs logged &nbsp;&middot;&nbsp; last entry ${esc(String(mandays.last_date||"—"))}</div>`:""}
     <div id="ex_gantt">${ganttHtml(acts)}</div>
     <div style="overflow-x:auto">${exTable(acts,ro)}</div>`;
   if(!ro){
@@ -3615,7 +3628,8 @@ async function pwBoq(p, body){
     id:i, dbid:r.id, room:r.room||r.room_tag||"General", cat:r.category||"", item:r.item_name||r.description||"",
     unit:r.uom||"", rate:Number(r.rate)||0, originalRate:Number(r.rate)||0,
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
-    amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom
+    amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
+    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
   }));
   G.uid=G.rows.length;
   gRender(p, body);
@@ -3624,10 +3638,14 @@ async function pwBoq(p, body){
 /* ---- boosted + financials (exact logic from generator) ---- */
 function gBoost(){ return Number(G.ver?.boost_pct)||0; }
 function gBoosted(r){ const base=r.originalRate!==undefined?r.originalRate:r.rate; return Math.round(base*r.qty*(1+gBoost()/100)); }
+function gScope(r){ const s=r&&r.scope; return (s==='excluded'||s==='optional')?s:'included'; }
+function gIncluded(){ return G.rows.filter(r=>gScope(r)==='included'); }
+function gScopeTag(r){ const s=gScope(r); return s==='excluded'?'<span class="gtag gtag-exc">Excluded</span>':s==='optional'?'<span class="gtag gtag-opt">Optional</span>':''; }
 function gFin(){
   const mPct=Number(G.ver?.boost_pct)||0, mul=1+mPct/100;
-  const sub=G.rows.reduce((s,r)=>s+r.amount,0);
-  const subM=G.rows.reduce((s,r)=>s+gBoosted(r),0);
+  const inc=gIncluded(); // A2: only scope==='included' lines sum into totals
+  const sub=inc.reduce((s,r)=>s+r.amount,0);
+  const subM=inc.reduce((s,r)=>s+gBoosted(r),0);
   const fPct=Number(G.ver?.fee_pct)||0, gPct=Number(G.ver?.gst_pct)||0, dPct=Number(G.ver?.disc_pct)||0;
   const fee=Math.round(subM*fPct/100);
   const disc=Math.round((subM+fee)*dPct/100);
@@ -3748,7 +3766,7 @@ function gEstimator(p){
   </div>`}
 
   <div class="table-wrap"><table><thead><tr>
-    <th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th><th>Amount</th><th>Remarks</th>${ro?'':'<th></th>'}
+    <th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th><th>Amount</th><th>Remarks</th><th>Scope</th>${ro?'':'<th></th>'}
   </tr></thead><tbody id="gbody">${gTableRows(ro)}</tbody></table></div>
 
   <div class="totbar">
@@ -3777,20 +3795,21 @@ function gEstimator(p){
 }
 
 function gTableRows(ro){
-  const span = ro?10:11;
+  const span = ro?11:12;
   if(!G.rows.length) return `<tr><td colspan="${span}" class="empty">No items yet — add from the library or custom above</td></tr>`;
   let html='';
   gRooms().forEach(room=>{
     const rr=G.rows.filter(r=>r.room===room);
-    const rsub=rr.reduce((s,r)=>s+gBoosted(r),0);
+    const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0); // A2: excluded/optional never sum
     html+=`<tr class="roomhdr"><td colspan="${ro?span:span-1}">${esc(room)}</td>${ro?'':`<td style="text-align:right"><button class="linkbtn" data-copyroom="${esc(room)}" title="Duplicate this room">⧉ Copy</button></td>`}</tr>`;
     rr.forEach(r=>{
       const catItems=G.rates.filter(x=>x.cat===r.cat);
       const itemOpts=catItems.map(x=>`<option value="${esc(x.item)}" ${x.item===r.item?"selected":""}>${esc(x.item)}</option>`).join("");
       const hasInLib=catItems.some(x=>x.item===r.item);
+      const sc=gScope(r);
       let cells;
       if(ro){
-        cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td><td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td>`;
+        cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td><td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td><td>${gScopeTag(r)||'—'}</td>`;
       } else {
         cells=`<td><input class="ii" style="width:90px" value="${esc(r.room)}" data-id="${r.id}" data-f="room"></td>`+
           `<td><select class="ii" style="width:100px" data-id="${r.id}" data-f="cat">${[...new Set(G.rates.map(x=>x.cat))].map(c=>`<option ${c===r.cat?"selected":""}>${esc(c)}</option>`).join("")}<option value="${esc(r.cat)}" ${!G.rates.some(x=>x.cat===r.cat)?"selected":""}>${esc(r.cat)}</option></select></td>`+
@@ -3802,11 +3821,12 @@ function gTableRows(ro){
           `<td><input class="ii" style="width:52px" type="number" value="${r.qty}" data-id="${r.id}" data-f="qty"></td>`+
           `<td style="font-weight:600">${gFmt(gBoosted(r))}</td>`+
           `<td><input class="ii" style="width:80px" value="${esc(r.remarks||'')}" data-id="${r.id}" data-f="remarks" placeholder="note"></td>`+
+          `<td><select class="ii gscope-sel" style="width:92px" data-id="${r.id}" data-f="scope"><option value="included"${sc==='included'?' selected':''}>Included</option><option value="optional"${sc==='optional'?' selected':''}>Optional</option><option value="excluded"${sc==='excluded'?' selected':''}>Excluded</option></select></td>`+
           `<td><button class="linkbtn del" data-del="${r.id}">×</button></td>`;
       }
-      html+=`<tr>${cells}</tr>`;
+      html+=`<tr${sc==='excluded'?' class="g-exc"':sc==='optional'?' class="g-opt"':''}>${cells}</tr>`;
     });
-    html+=`<tr class="roomsub"><td colspan="8" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td><td colspan="${ro?1:2}"></td></tr>`;
+    html+=`<tr class="roomsub"><td colspan="8" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td><td colspan="${ro?2:3}"></td></tr>`;
   });
   return html;
 }
@@ -3832,6 +3852,7 @@ function gBindTable(ro){
         if(lib){ r.unit=lib.unit; r.rate=lib.rate; r.originalRate=lib.rate; r.amount=r.rate*r.qty; }
         G.dirty=true; gDrawTable(ro); gTotals();
       }
+      else if(f==='scope'){ r.scope=(inp.value==='excluded'||inp.value==='optional')?inp.value:'included'; G.dirty=true; gDrawTable(ro); gTotals(); }
       else { r[f]=inp.value; if(f==='room'){gDrawTable(ro);} }
       G.dirty=true;
     };
@@ -3855,7 +3876,7 @@ function gBindTable(ro){
     // ensure uid counter is valid (guard against undefined/collision)
     if(typeof G.uid!=="number"||!G.uid){ G.uid=(G.rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0))+1; }
     src.forEach(r=>{
-      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom});
+      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom,scope:gScope(r)});
     });
     G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+finalName);
   });
@@ -3931,7 +3952,7 @@ async function gImportFrom(p,fullBoq){
   $("#imp-go").onclick=()=>{
     if(!importItems.length) return;
     importItems.forEach(it=>{
-      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom});
+      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom,scope:(it.scope==='excluded'||it.scope==='optional')?it.scope:'included'});
     });
     G.dirty=true; closeModal(); gDrawTable(false); gTotals(); refreshRoomDL();
     toast("Imported "+importItems.length+" items");
@@ -3951,7 +3972,7 @@ function gTotals(){
 function gSummary(){
   const f=gFin(), b=$("#gBody");
   const rooms=gRooms();
-  const catTot={}; G.rows.forEach(r=>catTot[r.cat]=(catTot[r.cat]||0)+r.amount);
+  const catTot={}; gIncluded().forEach(r=>catTot[r.cat]=(catTot[r.cat]||0)+r.amount);
   const ents=Object.entries(catTot).sort((a,b)=>b[1]-a[1]);
   b.innerHTML=`<div class="finrow">
     <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(f.sub)}</div></div>
@@ -3961,7 +3982,7 @@ function gSummary(){
     <div class="fcell facc"><div class="fl">Total project value</div><div class="fv">${gFmt(f.total)}</div></div>
   </div>
   <div class="grid2" style="margin-top:16px">
-    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Room-wise cost</div>${rooms.map(room=>{const rsub=G.rows.filter(r=>r.room===room).reduce((s,r)=>s+r.amount,0);const pct=f.sub?Math.round(rsub/f.sub*100):0;return `<div class="rowitem"><span>${esc(room)}</span><span>${gFmt(rsub)}</span></div><div class="rbar"><div style="width:${pct}%;height:100%;background:var(--brass);border-radius:2px"></div></div>`;}).join("")||'<div class="empty">No items</div>'}</div>
+    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Room-wise cost</div>${rooms.map(room=>{const rsub=gIncluded().filter(r=>r.room===room).reduce((s,r)=>s+r.amount,0);const pct=f.sub?Math.round(rsub/f.sub*100):0;return `<div class="rowitem"><span>${esc(room)}</span><span>${gFmt(rsub)}</span></div><div class="rbar"><div style="width:${pct}%;height:100%;background:var(--brass);border-radius:2px"></div></div>`;}).join("")||'<div class="empty">No items</div>'}</div>
     <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Category split</div>${ents.map(e=>{const pct=f.sub?Math.round(e[1]/f.sub*100):0;return `<div class="rowitem"><span>${esc(e[0])}</span><span>${pct}% · ${gFmt(e[1])}</span></div>`;}).join("")||'<div class="empty">No items</div>'}</div>
   </div>`;
 }
@@ -3971,15 +3992,22 @@ function gClient(p){
   const v=G.ver||{}, f=gFin(), rooms=gRooms();
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
   const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
-  const roomSummary=rooms.map(room=>{const rsub=G.rows.filter(r=>r.room===room).reduce((s,r)=>s+gBoosted(r),0);return `<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:6px 10px">${esc(room)}</td><td style="padding:6px 10px;text-align:right;font-weight:500">${gFmt(rsub)}</td></tr>`;}).join("")+`<tr style="background:#0D0D27"><td style="padding:8px 10px;font-weight:600;color:#fff">Grand Total</td><td style="padding:8px 10px;text-align:right;font-weight:700;color:#DFB05E">${gFmt(f.subM)}</td></tr>`;
+  const roomSummary=rooms.map(room=>{const rsub=gIncluded().filter(r=>r.room===room).reduce((s,r)=>s+gBoosted(r),0);return `<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:6px 10px">${esc(room)}</td><td style="padding:6px 10px;text-align:right;font-weight:500">${gFmt(rsub)}</td></tr>`;}).join("")+`<tr style="background:#0D0D27"><td style="padding:8px 10px;font-weight:600;color:#fff">Grand Total</td><td style="padding:8px 10px;text-align:right;font-weight:700;color:#DFB05E">${gFmt(f.subM)}</td></tr>`;
   let detailed='';
   rooms.forEach(room=>{
-    const rr=G.rows.filter(r=>r.room===room), rsub=rr.reduce((s,r)=>s+gBoosted(r),0);
+    const rr=G.rows.filter(r=>r.room===room), rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
     detailed+=`<tr><td colspan="8" style="padding:8px 12px;font-size:10px;font-weight:700;color:#DFB05E;letter-spacing:1.5px;text-transform:uppercase;background:#0D0D27;border-bottom:1px solid #DFB05E">${esc(room)}</td></tr>`;
-    rr.forEach(r=>{ detailed+=`<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:7px 10px;color:#6B6560;font-size:11px">${esc(r.room)}</td><td style="padding:7px 10px">${esc(r.item)}</td><td style="padding:7px 10px;color:#9A9490;font-size:10px">${esc(r.cat)}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.w||'—'}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.h||'—'}</td><td style="padding:7px 10px;text-align:right">${r.qty}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${esc(r.unit)}</td><td style="padding:7px 10px;text-align:right;font-weight:500">${gFmt(gBoosted(r))}</td></tr>`; });
+    rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
+      const tag=exc?` <span style="font-size:8px;font-weight:700;color:#A33C3C;letter-spacing:1px;text-transform:uppercase;border:1px solid #DBB0B0;border-radius:8px;padding:0 5px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8px;font-weight:700;color:#946F33;letter-spacing:1px;text-transform:uppercase;border:1px solid #D4B06A;border-radius:8px;padding:0 5px;vertical-align:middle">Optional</span>`:'';
+      const itemCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${tag}`;
+      const amtCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA;font-weight:400">${gFmt(gBoosted(r))}</span>`:opt?`<span style="color:#946F33;font-weight:500">${gFmt(gBoosted(r))}*</span>`:`${gFmt(gBoosted(r))}`;
+      const dim=exc?'color:#B8B2AA':'';
+      detailed+=`<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:7px 10px;color:#6B6560;font-size:11px;${dim}">${esc(r.room)}</td><td style="padding:7px 10px">${itemCell}</td><td style="padding:7px 10px;color:#9A9490;font-size:10px">${esc(r.cat)}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.w||'—'}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.h||'—'}</td><td style="padding:7px 10px;text-align:right;${dim}">${r.qty}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${esc(r.unit)}</td><td style="padding:7px 10px;text-align:right;font-weight:500">${amtCell}</td></tr>`; });
     detailed+=`<tr style="background:#F5EDD8"><td colspan="7" style="padding:7px 12px;text-align:right;font-weight:600;color:#946F33;font-size:11px">Subtotal — ${esc(room)}</td><td style="padding:7px 10px;text-align:right;font-weight:700;color:#946F33">${gFmt(rsub)}</td></tr>`;
   });
   const discRow=f.dPct>0?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4;color:#946F33"><span>Discount (${f.dPct}%)</span><span style="font-weight:600">−${gFmt(f.disc)}</span></div>`:'';
+  const hasOpt=G.rows.some(r=>gScope(r)==='optional'), hasExc=G.rows.some(r=>gScope(r)==='excluded');
+  const scopeNote=(hasOpt||hasExc)?`<div style="font-size:10px;color:#9A9490;line-height:1.7;margin:-20px 0 28px">${hasOpt?'* Items marked <b style="color:#946F33">Optional</b> are quoted for reference and are not included in the totals above; they can be added on request. ':''}${hasExc?'Items marked <b style="color:#A33C3C">Excluded</b> are outside the scope of this quotation and are not included in the totals.':''}</div>`:'';
   $("#gBody").innerHTML=`
   <div class="print-hint">🖨 Use Print / PDF to save — formatted for client delivery</div>
   <div id="client-sheet">
@@ -4024,6 +4052,7 @@ function gClient(p){
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:28px"><thead><tr style="background:#1A1240">
         <th style="text-align:left;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7);text-transform:uppercase">Room</th><th style="text-align:left;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7);text-transform:uppercase">Item</th><th style="text-align:left;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7);text-transform:uppercase">Spec</th><th style="text-align:right;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7)">W</th><th style="text-align:right;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7)">H</th><th style="text-align:right;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7)">Qty</th><th style="text-align:right;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7)">Unit</th><th style="text-align:right;padding:8px 10px;font-size:10px;color:rgba(255,255,255,0.7)">Amount</th>
       </tr></thead><tbody>${detailed}</tbody></table>
+      ${scopeNote}
       <div style="background:#1f1b16;border-radius:10px;padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;gap:20px">
         <div style="font-size:36px">🏆</div>
         <div><div style="font-size:13px;font-weight:600;color:#DFB05E;margin-bottom:4px">10 Year Warranty</div><div style="font-size:11px;color:rgba(255,255,255,0.7);line-height:1.7">Lintel Space Atelier provides a 10-year warranty on all plywood and woodwork against manufacturing defects and installation workmanship under normal usage. Hardware warranty as per brand selection. 1 year free servicing included.</div></div>
@@ -4132,7 +4161,7 @@ async function gSave(p, silent){
     // replace items
     await sb.from("boq_items").delete().eq("boq_version_id",G.boqId);
     if(G.rows.length){
-      const payload=G.rows.map((r,i)=>({boq_version_id:G.boqId,room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room}));
+      const payload=G.rows.map((r,i)=>({boq_version_id:G.boqId,room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r)}));
       const {error}=await sb.from("boq_items").insert(payload);
       if(error){ G._saving=false; if(!silent) toast(error.message); return; }
     }
@@ -4169,8 +4198,8 @@ function gStartAutosave(p){
 function gStopAutosave(){ if(G._autosaveTimer){ clearInterval(G._autosaveTimer); G._autosaveTimer=null; } }
 function gExportCSV(){
   if(!G.rows.length) return toast("No items to export");
-  const f=gFin(); let csv='Room,Category,Item,Unit,Rate,W,H,Qty,Amount,Remarks\n';
-  G.rows.forEach(r=>{ csv+=`"${r.room}","${r.cat}","${r.item}","${r.unit}",${r.originalRate},${r.w||''},${r.h||''},${r.qty},${gBoosted(r)},"${r.remarks||''}"\n`; });
+  const f=gFin(); let csv='Room,Category,Item,Unit,Rate,W,H,Qty,Amount,Remarks,Scope\n';
+  G.rows.forEach(r=>{ csv+=`"${r.room}","${r.cat}","${r.item}","${r.unit}",${r.originalRate},${r.w||''},${r.h||''},${r.qty},${gBoosted(r)},"${r.remarks||''}","${gScope(r)}"\n`; });
   csv+=`\n,,,,,,,,Work Subtotal,${Math.round(f.subM)}`;
   csv+=`\n,,,,,,,,Design Fee (${f.fPct}%),${Math.round(f.fee)}`;
   if(f.dPct>0) csv+=`\n,,,,,,,,Discount (${f.dPct}%),-${Math.round(f.disc)}`;
