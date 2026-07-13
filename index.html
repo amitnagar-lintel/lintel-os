@@ -4444,30 +4444,22 @@ function gExportCSV(){
   a.download='Lintel_BOQ_'+((G.ver?.client_name)||'Client').replace(/\s/g,'_')+'.csv'; a.click();
 }
 
-/* ---- PWA: register an inline service worker so Lintel OS is installable ---- */
+/* ---- PWA: register the same-origin service worker (sw.js) ----
+   Real file (not a blob URL, which browsers reject), so it actually registers and
+   auto-updates. When a new version activates it claims the page and we reload once,
+   so a deploy reaches users without a manual hard refresh. */
 (function(){
   if(!("serviceWorker" in navigator)) return;
-  // minimal service worker: network-first, caches the app shell for offline launch
-  const swCode = `
-    const CACHE="lintel-os-v1";
-    self.addEventListener("install",e=>{ self.skipWaiting(); });
-    self.addEventListener("activate",e=>{ e.waitUntil(clients.claim()); });
-    self.addEventListener("fetch",e=>{
-      if(e.request.method!=="GET") return;
-      e.respondWith(
-        fetch(e.request).then(res=>{
-          const copy=res.clone();
-          caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});
-          return res;
-        }).catch(()=>caches.match(e.request))
-      );
+  // if a controller already exists, a later controllerchange means a NEW version took over — reload once
+  let reloading=false;
+  if(navigator.serviceWorker.controller){
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{
+      if(reloading) return; reloading=true; window.location.reload();
     });
-  `;
-  try{
-    const blob=new Blob([swCode],{type:"text/javascript"});
-    const url=URL.createObjectURL(blob);
-    navigator.serviceWorker.register(url).catch(()=>{});
-  }catch(e){}
+  }
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("/sw.js").then(reg=>{ try{ reg.update(); }catch(_){} }).catch(()=>{});
+  });
 })();
 
 /* ---- PWA install button: shows when the browser offers installation ---- */
