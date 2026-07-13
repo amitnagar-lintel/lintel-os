@@ -3322,6 +3322,7 @@ async function pwExecution(p,body){
   try{const {data:md}=await sb.from("v_project_mandays").select("*").eq("project_id",p.id).limit(1);mandays=(md&&md[0])||null;}catch(_){}
   const ro=!canWrite();
   body.innerHTML=`
+    <div id="sched-card"></div>
     <div class="gbar">
       <div class="sec-label" style="border:none;padding:0">Execution schedule</div>
       <div class="gact">
@@ -3346,6 +3347,120 @@ async function pwExecution(p,body){
     bindExec(p,body,acts);
   }
   $("#ex_share").onclick=()=>execClientView(p,acts);
+  schedRenderCard(p,$("#sched-card"));
+}
+
+/* ---- Slice 1: BOQ-driven schedule (trade-level, dated off KOM) ---- */
+const SCHED={trades:null,map:null};
+function schedNorm(s){ return (s||"").toLowerCase().replace(/\s+/g," ").trim(); }
+function schedAddDays(iso,n){ const d=new Date(iso+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+async function schedLoadMaster(){
+  if(SCHED.trades&&SCHED.trades.length&&SCHED.map) return;
+  const {data:tr,error:e1}=await sb.from("trade_master").select("code,name,exp_tat_days,seq").order("seq").order("id");
+  const {data:mp,error:e2}=await sb.from("boq_category_trade_map").select("category_norm,trade_code");
+  if(e1||e2){ toast("Could not load schedule master data"); return; }
+  SCHED.trades=(tr||[]).map(t=>({code:t.code,name:t.name,exp_tat_days:Number(t.exp_tat_days)||1,seq:Number(t.seq)||0}));
+  const map={}; (mp||[]).forEach(m=>{ (map[m.category_norm]=map[m.category_norm]||[]).push(m.trade_code); });
+  SCHED.map=map;
+}
+// latest included BOQ items for a project; returns {items} or {error}
+async function schedBoqItems(p){
+  const {data:vers,error:vErr}=await sb.from("boq_versions").select("id").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  if(vErr) return {error:vErr.message};
+  if(!vers||!vers.length) return {error:"No BOQ on this project yet — build one first."};
+  const {data:items,error:iErr}=await sb.from("boq_items").select("room,room_tag,category,scope").eq("boq_version_id",vers[0].id).order("id");
+  if(iErr) return {error:iErr.message};
+  const inScope=(items||[]).filter(i=>i.scope!=='excluded'&&i.scope!=='optional');
+  if(!inScope.length) return {error:"The BOQ has no included line items."};
+  return {items:inScope};
+}
+// build the trade-level task list + unmapped categories from BOQ + KOM
+async function schedCompute(p, komISO){
+  const bo=await schedBoqItems(p); if(bo.error) return bo;
+  await schedLoadMaster();
+  if(!SCHED.trades||!SCHED.trades.length) return {error:"Schedule master data unavailable — try again."};
+  const tradeByCode={}; SCHED.trades.forEach(t=>tradeByCode[t.code]=t);
+  const roomOrder=[], roomCats={};
+  bo.items.forEach(i=>{ const room=((i.room||i.room_tag||"General").trim())||"General";
+    if(!roomCats[room]){ roomCats[room]=new Set(); roomOrder.push(room); }
+    const c=schedNorm(i.category); if(c) roomCats[room].add(c); });
+  const tasks=[], unmapped=new Set();
+  roomOrder.forEach((room,ri)=>{
+    const codes=new Set();
+    roomCats[room].forEach(cn=>{ const hits=SCHED.map[cn]; if(hits&&hits.length) hits.forEach(tc=>codes.add(tc)); else unmapped.add(cn); });
+    const ordered=[...codes].map(tc=>tradeByCode[tc]).filter(Boolean).sort((a,b)=>a.seq-b.seq);
+    let cursor=komISO;
+    ordered.forEach((t,ti)=>{
+      const start=cursor, finish=schedAddDays(start, Math.max(1,t.exp_tat_days)-1);
+      tasks.push({room, room_seq:ri, trade_code:t.code, trade_name:t.name, tat_days:t.exp_tat_days, seq:ti, planned_start:start, planned_finish:finish});
+      cursor=schedAddDays(finish,1);
+    });
+  });
+  return {tasks, unmapped:[...unmapped]};
+}
+async function schedUnmapped(p){
+  const bo=await schedBoqItems(p); if(bo.error) return [];
+  await schedLoadMaster();
+  const un=new Set();
+  bo.items.forEach(i=>{ const c=schedNorm(i.category); if(c&&!SCHED.map[c]) un.add(c); });
+  return [...un];
+}
+function schedGenerate(p){
+  const today=todayISO();
+  openModal(`
+    <div class="modal-h">Generate schedule from BOQ</div>
+    <div class="modal-b">
+      <div class="banner">Builds a room-wise trade schedule from this project's latest BOQ, starting from the KOM (kick-off) date. Trades run in standard site sequence per room. <b>Beta:</b> trade-level only; regenerating replaces the current BOQ schedule.</div>
+      <div class="field"><label>KOM / project start date</label><input id="sch-kom" type="date" value="${today}"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="sch-go">Generate</button></div>`);
+  $("#sch-go").onclick=async()=>{
+    const btn=$("#sch-go"); if(btn.disabled) return; btn.disabled=true;
+    try{
+      const kom=$("#sch-kom").value; if(!kom){ toast("Pick a KOM date"); return; }
+      const res=await schedCompute(p,kom);
+      if(res.error){ toast(res.error); return; }
+      if(!res.tasks.length){ toast("No trades could be derived from the BOQ — categories may all be unmapped"); return; }
+      const {error}=await sb.rpc("schedule_replace",{p_project_id:p.id,p_kom:kom,p_tasks:res.tasks});
+      if(error){ toast(error.message); return; }
+      closeModal();
+      toast(`Schedule generated · ${res.tasks.length} tasks`+(res.unmapped.length?` · ${res.unmapped.length} unmapped`:''));
+      schedRenderCard(p,$("#sched-card"));
+    }finally{ btn.disabled=false; }
+  };
+}
+async function schedRenderCard(p, host){
+  if(!host) return;
+  const ro=!canWrite();
+  const {data:sch,error:sErr}=await sb.from("project_schedule").select("*").eq("project_id",p.id).eq("status","active").order("id",{ascending:false}).limit(1);
+  if(sErr){ host.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load the BOQ schedule: ${esc(sErr.message)}</div>`; return; }
+  const active=sch&&sch[0];
+  if(!active){
+    host.innerHTML=`<div class="pw-card"><div class="ov-head"><div class="sec-label" style="border:none;padding:0">BOQ-driven schedule <span class="pill">beta</span></div>${ro?'':`<button class="primary" id="sch-gen">⚡ Generate from BOQ</button>`}</div>
+      <div style="font-size:13px;color:var(--ink-soft)">Generate a room-wise trade schedule from this project's BOQ, dated from the KOM.${ro?'':' Click “Generate from BOQ”.'}</div></div>`;
+    if(!ro&&$("#sch-gen")) $("#sch-gen").onclick=()=>schedGenerate(p);
+    return;
+  }
+  const {data:tasks,error:tErr}=await sb.from("schedule_task").select("*").eq("schedule_id",active.id).order("room_seq").order("seq").order("id");
+  if(tErr){ host.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load schedule tasks: ${esc(tErr.message)}</div>`; return; }
+  const rows=tasks||[];
+  const rooms=[], byRoom={};
+  rows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
+  const unmapped=await schedUnmapped(p);
+  const end=rows.reduce((m,t)=>(t.planned_finish&&t.planned_finish>m)?t.planned_finish:m,"");
+  host.innerHTML=`<div class="pw-card">
+    <div class="ov-head"><div class="sec-label" style="border:none;padding:0">BOQ-driven schedule <span class="pill">beta</span></div>
+      ${ro?'':`<button class="ghost" id="sch-gen">↻ Regenerate</button>`}</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) across ${rooms.length} room(s)</div>
+    ${rooms.map(room=>`<div style="margin-bottom:12px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(room)}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
+        <th style="padding:4px 8px">Trade</th><th style="padding:4px 8px">Start</th><th style="padding:4px 8px">Finish</th><th style="padding:4px 8px" class="num">Days</th></tr></thead>
+        <tbody>${byRoom[room].map(t=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:4px 8px">${esc(t.trade_name||t.trade_code||'—')}</td><td style="padding:4px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:4px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:4px 8px" class="num">${t.tat_days}</td></tr>`).join("")}</tbody></table>
+    </div>`).join("")}
+    ${unmapped.length?`<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--clay);border-radius:8px;font-size:12px"><b style="color:var(--clay)">⚠ ${unmapped.length} BOQ ${unmapped.length===1?'category':'categories'} not mapped to any trade</b> — excluded from the schedule, needs review: ${unmapped.map(u=>esc(u)).join(", ")}</div>`:''}
+  </div>`;
+  if(!ro&&$("#sch-gen")) $("#sch-gen").onclick=()=>schedGenerate(p);
 }
 
 function ganttHtml(acts){
