@@ -3372,6 +3372,9 @@ function schedClassifyRoom(name){
   if(/bed|mbr|\bguest\b|kids|children|master/.test(s)) return 'bedroom';
   return 'general';
 }
+function schedTitle(s){ return (s||"").toLowerCase().replace(/\s+/g," ").trim().replace(/(^|\s)\w/g,c=>c.toUpperCase()); }
+// prep / whole-house line items that are not real construction rooms
+function schedIsNonRoom(key){ return /deep clean|floor protect|floor protector/.test(key); }
 async function schedLoadMaster(){
   if(SCHED.trades&&SCHED.trades.length&&SCHED.map&&SCHED.defaults) return;
   const {data:tr,error:e1}=await sb.from("trade_master").select("code,name,exp_tat_days,seq").order("seq").order("id");
@@ -3396,33 +3399,40 @@ async function schedBoqItems(p){
   return {items:inScope};
 }
 // build the trade-level task list + unmapped categories from BOQ + KOM
-async function schedCompute(p, komISO){
+async function schedCompute(p, komISO, opts){
+  const withSpine=!!(opts&&opts.spine);                             // civil/MEP spine is opt-in (full-reno only)
   const bo=await schedBoqItems(p); if(bo.error) return bo;
   await schedLoadMaster();
   if(!SCHED.trades||!SCHED.trades.length) return {error:"Schedule master data unavailable — try again."};
   const tradeByCode={}; SCHED.trades.forEach(t=>tradeByCode[t.code]=t);
-  const roomOrder=[], roomCats={};
-  bo.items.forEach(i=>{ const room=((i.room||i.room_tag||"General").trim())||"General";
-    if(!roomCats[room]){ roomCats[room]=new Set(); roomOrder.push(room); }
-    const c=schedNorm(i.category); if(c) roomCats[room].add(c); });
-  const tasks=[], unmapped=new Set();
-  roomOrder.forEach((room,ri)=>{
+  // group by normalized room key (merges "Kitchen"/"KITCHEN"); keep a tidy display label
+  const roomOrder=[], roomCats={}, roomLabel={};
+  bo.items.forEach(i=>{ const raw=((i.room||i.room_tag||"General").trim())||"General"; const key=schedNorm(raw);
+    if(!roomCats[key]){ roomCats[key]=new Set(); roomLabel[key]=schedTitle(raw); roomOrder.push(key); }
+    const c=schedNorm(i.category); if(c) roomCats[key].add(c); });
+  const tasks=[], unmapped=new Set(); let ri=0;
+  roomOrder.forEach(key=>{
     const boqCodes=new Set();
-    roomCats[room].forEach(cn=>{ const hits=SCHED.map[cn]; if(hits&&hits.length) hits.forEach(tc=>boqCodes.add(tc)); else unmapped.add(cn); });
-    const rt=schedClassifyRoom(room);
-    const spine=SCHED.defaults[rt]||SCHED.defaults['general']||[];   // room-type civil/MEP spine (BOQ omits it)
-    const all=new Set([...boqCodes,...spine]);                       // union dedupes shared trades
+    roomCats[key].forEach(cn=>{ const hits=SCHED.map[cn]; if(hits&&hits.length) hits.forEach(tc=>boqCodes.add(tc)); else unmapped.add(cn); });
+    // skip pseudo-rooms (deep cleaning / floor protection) and any room with no real BOQ trade —
+    // never fabricate a spine for a room that has no actual scope
+    if(!boqCodes.size || schedIsNonRoom(key)) return;
+    const rt=schedClassifyRoom(roomLabel[key]);
+    let all;
+    if(withSpine){ const spine=SCHED.defaults[rt]||SCHED.defaults['general']||[]; all=new Set([...boqCodes,...spine]); }
+    else { all=new Set(boqCodes); }                                 // BOQ scope only (default)
     const ordered=[...all].map(tc=>tradeByCode[tc]).filter(Boolean).sort((a,b)=>a.seq-b.seq);
     let cursor=schedNextWorkday(komISO);
     ordered.forEach((t,ti)=>{
       const start=schedNextWorkday(cursor);
       const finish=schedAddWorkdays(start, Math.max(1,t.exp_tat_days)-1);
-      tasks.push({room, room_seq:ri, room_type:rt, source:(boqCodes.has(t.code)?'boq':'spine'),
+      tasks.push({room:roomLabel[key], room_seq:ri, room_type:rt, source:(boqCodes.has(t.code)?'boq':'spine'),
         trade_code:t.code, trade_name:t.name, tat_days:t.exp_tat_days, seq:ti, planned_start:start, planned_finish:finish});
       cursor=schedAddDays(finish,1);
     });
+    ri++;
   });
-  return {tasks, unmapped:[...unmapped]};
+  return {tasks, unmapped:[...unmapped], spine:withSpine};
 }
 async function schedUnmapped(p){
   const bo=await schedBoqItems(p); if(bo.error) return [];
@@ -3436,15 +3446,23 @@ function schedGenerate(p){
   openModal(`
     <div class="modal-h">Generate schedule from BOQ</div>
     <div class="modal-b">
-      <div class="banner">Builds a room-wise trade schedule from this project's latest BOQ, starting from the KOM (kick-off) date. Each room combines its BOQ trades with a standard civil/MEP spine for its room type, sequenced by site order, dated on a 6-day work week (Sundays off). <b>Beta:</b> trade-level only; regenerating replaces the current BOQ schedule.</div>
+      <div class="banner">Builds a room-wise trade schedule from this project's latest BOQ, starting from the KOM (kick-off) date, on a 6-day work week (Sundays off). <b>Beta:</b> trade-level only; regenerating replaces the current BOQ schedule.</div>
       <div class="field"><label>KOM / project start date</label><input id="sch-kom" type="date" value="${today}"></div>
+      <div class="field"><label>Base-build scope</label>
+        <select id="sch-spine">
+          <option value="boq">BOQ scope only — furniture / modular</option>
+          <option value="full">Add civil/MEP works — full renovation</option>
+        </select>
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">“BOQ scope only” schedules just the trades in your BOQ. “Add civil/MEP” layers in demolition, flooring, ceiling, painting etc. per room type — use only for gut renovations.</div>
+      </div>
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="sch-go">Generate</button></div>`);
   $("#sch-go").onclick=async()=>{
     const btn=$("#sch-go"); if(btn.disabled) return; btn.disabled=true;
     try{
       const kom=$("#sch-kom").value; if(!kom){ toast("Pick a KOM date"); return; }
-      const res=await schedCompute(p,kom);
+      const spine=$("#sch-spine").value==='full';
+      const res=await schedCompute(p,kom,{spine});
       if(res.error){ toast(res.error); return; }
       if(!res.tasks.length){ toast("No trades could be derived from the BOQ — categories may all be unmapped"); return; }
       const {error}=await sb.rpc("schedule_replace",{p_project_id:p.id,p_kom:kom,p_tasks:res.tasks});
@@ -3473,11 +3491,12 @@ async function schedRenderCard(p, host){
   const rooms=[], byRoom={};
   rows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
   const unmapped=await schedUnmapped(p);
+  const hasSpine=rows.some(t=>t.source==='spine');
   const end=rows.reduce((m,t)=>(t.planned_finish&&t.planned_finish>m)?t.planned_finish:m,"");
   host.innerHTML=`<div class="pw-card">
     <div class="ov-head"><div class="sec-label" style="border:none;padding:0">BOQ-driven schedule <span class="pill">beta</span></div>
       ${ro?'':`<button class="ghost" id="sch-gen">↻ Regenerate</button>`}</div>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) across ${rooms.length} room(s) · 6-day week · <span style="border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span> = auto-added civil/MEP spine</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) across ${rooms.length} room(s) · 6-day week${hasSpine?` · <span style="border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span> = auto-added civil/MEP spine`:''}</div>
     ${rooms.map(room=>{const rt=(byRoom[room][0]||{}).room_type;return `<div style="margin-bottom:12px">
       <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(room)}${rt?` <span style="font-weight:400;color:var(--ink-soft);font-size:11px">· ${esc(rt)}</span>`:''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
