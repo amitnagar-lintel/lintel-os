@@ -3403,7 +3403,8 @@ async function schedBoqItems(p){
   if(!inScope.length) return {error:"The BOQ has no included line items."};
   return {items:inScope};
 }
-// build the full task-level schedule (kick-off -> room x trade x task -> milestones -> handover)
+// build the full task-level schedule. Modular (KWS) splits into factory PRODUCTION
+// (triggered at JIT) and on-site INSTALLATION (after PIV); everything else is site work.
 async function schedCompute(p, komISO, opts){
   const withSpine=!!(opts&&opts.spine);                             // civil/MEP spine is opt-in (full-reno only)
   const bo=await schedBoqItems(p); if(bo.error) return bo;
@@ -3414,6 +3415,15 @@ async function schedCompute(p, komISO, opts){
   const tasks=[], unmapped=new Set(); let seq=0;
   const push=o=>tasks.push(Object.assign({room_seq:0,room_type:null,trade_code:null,source:'boq',kind:'trade',seq:seq++},o));
   const maxD=(arr,fb)=>arr.length?arr.reduce((m,d)=>d>m?d:m,arr[0]):fb;
+  const expand=tr=>{ const tpl=SCHED.taskTpl[tr.code]; return (tpl&&tpl.length)?tpl:[{name:tr.name,dur:tr.exp_tat_days}]; };
+  // schedule a trade's tasks sequentially from a cursor; returns the finish date
+  const runTrade=(startCur, tr, ctx)=>{ let rc=startCur, last=startCur;
+    expand(tr).forEach(tk=>{ const s=schedNextWorkday(rc), f=schedAddWorkdays(s,Math.max(1,tk.dur)-1);
+      push(Object.assign({trade_code:tr.code,trade_name:tr.name,task_name:tk.name,kind:'trade',tat_days:tk.dur,planned_start:s,planned_finish:f},ctx));
+      rc=schedAddDays(f,1); last=f; }); return last; };
+  const phase=(pred)=>SCHED.phases.find(pred);
+  const marker=(x,anchorDate,rseq,kind)=>{ const s=schedNextWorkday(schedAddDays(anchorDate,1)), f=schedAddWorkdays(s,Math.max(1,x.dur)-1);
+    push({room:FULLHOUSE,room_seq:rseq,trade_name:x.trade_label,task_name:x.task_name,kind:kind||'milestone',tat_days:x.dur,planned_start:s,planned_finish:f}); return f; };
 
   // group BOQ by normalized room (merges "Kitchen"/"KITCHEN")
   const roomOrder=[], roomCats={}, roomLabel={};
@@ -3430,45 +3440,52 @@ async function schedCompute(p, komISO, opts){
   });
   const roomStart=schedNextWorkday(cursor);
 
-  // 2) ROOM work: room x trade x task, rooms run in parallel from roomStart
-  let ri=0, projEnd=roomStart; const servicesEnds=[], modularEnds=[];
+  // 2) SITE work per room (non-modular trades) from roomStart, rooms in parallel.
+  //    Modular (KWS) trades are stashed — they install later, after production + PIV.
+  let ri=0, siteEnd=roomStart; const servicesEnds=[]; const roomsMod=[];
   roomOrder.forEach(key=>{
     const boqCodes=new Set();
     roomCats[key].forEach(cn=>{ const hits=SCHED.map[cn]; if(hits&&hits.length) hits.forEach(tc=>boqCodes.add(tc)); else unmapped.add(cn); });
-    if(!boqCodes.size || schedIsNonRoom(key)) return;               // skip phantom / prep-only rooms
+    if(!boqCodes.size || schedIsNonRoom(key)) return;
     const rt=schedClassifyRoom(roomLabel[key]);
     let codes;
     if(withSpine){ const spine=SCHED.defaults[rt]||SCHED.defaults['general']||[]; codes=new Set([...boqCodes,...spine]); }
-    else codes=new Set(boqCodes);                                   // BOQ scope only (default)
+    else codes=new Set(boqCodes);
     const ordered=[...codes].map(tc=>tradeByCode[tc]).filter(Boolean).sort((a,b)=>a.seq-b.seq);
+    const site=ordered.filter(t=>t.scope_group!=='modular'), mod=ordered.filter(t=>t.scope_group==='modular');
     let rc=roomStart;
-    ordered.forEach(tr=>{
-      const tpl=SCHED.taskTpl[tr.code];
-      const list=(tpl&&tpl.length)?tpl:[{name:tr.name,dur:tr.exp_tat_days}];   // fallback: whole trade as one task
-      list.forEach(tk=>{
-        const start=schedNextWorkday(rc), finish=schedAddWorkdays(start,Math.max(1,tk.dur)-1);
-        push({room:roomLabel[key],room_seq:ri,room_type:rt,trade_code:tr.code,trade_name:tr.name,task_name:tk.name,
-          kind:'trade',source:(boqCodes.has(tr.code)?'boq':'spine'),tat_days:tk.dur,planned_start:start,planned_finish:finish});
-        rc=schedAddDays(finish,1);
-        if(tr.scope_group==='services') servicesEnds.push(finish);
-        if(tr.scope_group==='modular'||tr.scope_group==='onsite_carpentry') modularEnds.push(finish);
-        if(finish>projEnd) projEnd=finish;
-      });
-    });
+    site.forEach(tr=>{ const f=runTrade(rc,tr,{room:roomLabel[key],room_seq:ri,room_type:rt,source:(boqCodes.has(tr.code)?'boq':'spine')});
+      rc=schedAddDays(f,1); if(tr.scope_group==='services') servicesEnds.push(f); if(f>siteEnd) siteEnd=f; });
+    if(mod.length) roomsMod.push({room:roomLabel[key],room_seq:ri,rt,mod,boqCodes});
     ri++;
   });
+  const hasMod=roomsMod.length>0;
+  const servicesEnd=maxD(servicesEnds, roomStart);
 
-  // 3) MILESTONES & payments, anchored to when the relevant scope finishes
-  const modularEnd=maxD(modularEnds, projEnd), servicesEnd=maxD(servicesEnds, modularEnd);
-  let msEnd=projEnd;
-  SCHED.phases.filter(x=>x.kind==='milestone').forEach(x=>{
-    const anchor=x.anchor==='services'?servicesEnd:x.anchor==='modular'?modularEnd:projEnd;
-    const start=schedNextWorkday(schedAddDays(anchor,1)), finish=schedAddWorkdays(start,Math.max(1,x.dur)-1);
-    push({room:FULLHOUSE,room_seq:9990,trade_name:x.trade_label,task_name:x.task_name,kind:'milestone',tat_days:x.dur,planned_start:start,planned_finish:finish});
-    if(finish>msEnd) msEnd=finish;
-  });
+  // 3) MODULAR flow (only if there are KWS units): JIT -> Production -> PIV -> Installation
+  let installEnd=siteEnd, productionEnd=null;
+  if(hasMod){
+    const jit=phase(x=>x.kind==='milestone'&&x.task_name==='JIT Trigger');
+    const jitEnd=jit?marker(jit,servicesEnd,9980):servicesEnd;
+    const prod=phase(x=>x.kind==='production');
+    productionEnd=prod?marker(prod,jitEnd,9981,'production'):jitEnd;
+    const piv=phase(x=>x.kind==='milestone'&&x.task_name==='PIV');
+    const pivAnchor=(productionEnd>siteEnd?productionEnd:siteEnd);
+    const pivEnd=piv?marker(piv,pivAnchor,9982):pivAnchor;
+    // per-room KWS installation, rooms in parallel, after PIV
+    installEnd=pivEnd;
+    roomsMod.forEach(rm=>{ let rc=schedNextWorkday(schedAddDays(pivEnd,1));
+      rm.mod.forEach(tr=>{ const f=runTrade(rc,tr,{room:rm.room,room_seq:rm.room_seq,room_type:rm.rt,source:(rm.boqCodes.has(tr.code)?'boq':'spine')});
+        rc=schedAddDays(f,1); if(f>installEnd) installEnd=f; }); });
+  }
 
-  // 4) CLOSING phases (Full House, sequential after all work + milestones)
+  // 4) PAYMENTS + remaining milestones
+  const projEnd=maxD([siteEnd,installEnd],siteEnd); let msEnd=projEnd;
+  const p1=phase(x=>x.kind==='milestone'&&x.task_name==='Services 100% Payment'); if(p1) msEnd=maxD([msEnd,marker(p1,servicesEnd,9983)],msEnd);
+  const p2=phase(x=>x.kind==='milestone'&&x.task_name==='KWS 100% Payment'); if(p2&&hasMod) msEnd=maxD([msEnd,marker(p2,productionEnd||installEnd,9984)],msEnd);
+  SCHED.phases.filter(x=>x.kind==='milestone'&&/Milestone [23] /.test(x.task_name)).forEach(x=>{ msEnd=maxD([msEnd,marker(x,projEnd,9985)],msEnd); });
+
+  // 5) CLOSING phases (Full House, sequential after everything)
   let cc=schedNextWorkday(schedAddDays(projEnd>msEnd?projEnd:msEnd,1));
   SCHED.phases.filter(x=>x.kind==='closing').forEach(x=>{
     const start=schedNextWorkday(cc), finish=schedAddWorkdays(start,Math.max(1,x.dur)-1);
@@ -3532,7 +3549,7 @@ async function schedRenderCard(p, host){
   if(tErr){ host.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load schedule tasks: ${esc(tErr.message)}</div>`; return; }
   const rows=tasks||[];
   const unmapped=await schedUnmapped(p);
-  const kickoff=rows.filter(t=>t.kind==='kickoff'), milestones=rows.filter(t=>t.kind==='milestone'), closing=rows.filter(t=>t.kind==='closing');
+  const kickoff=rows.filter(t=>t.kind==='kickoff'), production=rows.filter(t=>t.kind==='production'), milestones=rows.filter(t=>t.kind==='milestone'), closing=rows.filter(t=>t.kind==='closing');
   const tradeRows=rows.filter(t=>(t.kind||'trade')==='trade');
   const rooms=[], byRoom={};
   tradeRows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
@@ -3553,6 +3570,7 @@ async function schedRenderCard(p, host){
       <tbody>
         ${kickoff.length?shdr('Project Kick-off')+kickoff.map(t=>trow(t,28)).join(""):""}
         ${rooms.map(roomBlock).join("")}
+        ${production.length?shdr('Factory Production (off-site)')+production.map(t=>trow(t,28)).join(""):""}
         ${milestones.length?shdr('Milestones &amp; Payments')+milestones.map(t=>trow(t,28)).join(""):""}
         ${closing.length?shdr('Handover &amp; Finishing')+closing.map(t=>trow(t,28)).join(""):""}
       </tbody></table>
