@@ -3554,29 +3554,59 @@ async function schedRenderCard(p, host){
   const rooms=[], byRoom={};
   tradeRows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
   const end=rows.reduce((m,t)=>(t.planned_finish&&t.planned_finish>m)?t.planned_finish:m,"");
-  // row + header renderers
-  const trow=(t,pad)=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:3px 8px 3px ${pad}px">${esc(t.task_name||t.trade_name||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td><td style="padding:3px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:3px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:3px 8px" class="num">${t.tat_days}</td></tr>`;
-  const shdr=lbl=>`<tr><td colspan="4" style="padding:9px 8px 3px;font-size:11px;font-weight:700;color:var(--brass);letter-spacing:.4px;text-transform:uppercase">${lbl}</td></tr>`;
-  const sub=lbl=>`<tr><td colspan="4" style="padding:5px 8px 2px 14px;font-size:11px;font-weight:600;color:var(--ink)">${esc(lbl)}${' '}</td></tr>`;
+  const doneN=rows.filter(t=>exStatus(t)==='done').length, lateN=rows.filter(t=>exStatus(t)==='late').length;
+  const pct=rows.length?Math.round(doneN/rows.length*100):0;
+  const inp="font-size:11px;border:1px solid var(--line-2);border-radius:5px;padding:2px 4px";
+  // row + section renderers — actual dates / % are editable for writers; status auto-computed
+  const trow=(t,pad)=>{ const st=exStatus(t); const cls=st==='late'?'late':st==='done'?'done':'';
+    return `<tr data-strow="${t.id}" class="${cls}" style="border-top:1px solid var(--line-2)">`+
+      `<td style="padding:3px 8px 3px ${pad}px">${esc(t.task_name||t.trade_name||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td>`+
+      `<td style="padding:3px 8px;white-space:nowrap">${esc(String(t.planned_start||'—'))}</td>`+
+      `<td style="padding:3px 8px;white-space:nowrap">${esc(String(t.planned_finish||'—'))}</td>`+
+      `<td style="padding:3px 8px" class="num">${t.tat_days}</td>`+
+      `<td style="padding:3px 4px">${ro?esc(String(t.actual_start||'—')):`<input type="date" data-sf="actual_start" value="${t.actual_start||''}" style="${inp}">`}</td>`+
+      `<td style="padding:3px 4px">${ro?esc(String(t.actual_finish||'—')):`<input type="date" data-sf="actual_finish" value="${t.actual_finish||''}" style="${inp}">`}</td>`+
+      `<td style="padding:3px 4px" class="num">${ro?((t.percent_complete||0)+'%'):`<input type="number" min="0" max="100" data-sf="percent_complete" value="${t.percent_complete||0}" style="width:48px;${inp}">`}</td>`+
+      `<td style="padding:3px 8px"><span class="ex-st ${st}">${exStatusLabel(st)}</span></td></tr>`; };
+  const shdr=lbl=>`<tr><td colspan="8" style="padding:9px 8px 3px;font-size:11px;font-weight:700;color:var(--brass);letter-spacing:.4px;text-transform:uppercase">${lbl}</td></tr>`;
+  const sub=lbl=>`<tr><td colspan="8" style="padding:5px 8px 2px 14px;font-size:11px;font-weight:600;color:var(--ink)">${esc(lbl)}</td></tr>`;
   const roomBlock=room=>{ const rr=byRoom[room]; const trades=[], byTrade={};
     rr.forEach(t=>{ const k=t.trade_name||t.trade_code||'—'; if(!byTrade[k]){byTrade[k]=[]; trades.push(k);} byTrade[k].push(t); });
     return shdr(esc(room))+trades.map(tn=>sub(tn)+byTrade[tn].map(t=>trow(t,28)).join("")).join(""); };
   host.innerHTML=`<div class="pw-card">
     <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Project schedule <span class="pill">beta</span></div>
       ${ro?'':`<button class="ghost" id="sch-gen">↻ Regenerate</button>`}</div>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) · ${rooms.length} room(s) · 6-day week</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
-      <th style="padding:4px 8px">Task</th><th style="padding:4px 8px">Start</th><th style="padding:4px 8px">Finish</th><th style="padding:4px 8px" class="num">Days</th></tr></thead>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) · ${rooms.length} room(s) · <b style="color:var(--green)">${pct}% done</b>${lateN?` · <b style="color:#d9534f">${lateN} delayed</b>`:''}</div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:660px"><thead><tr style="text-align:left;color:var(--ink-soft)">
+      <th style="padding:4px 8px">Task</th><th style="padding:4px 8px">Plan start</th><th style="padding:4px 8px">Plan finish</th><th style="padding:4px 8px" class="num">Days</th><th style="padding:4px 8px">Actual start</th><th style="padding:4px 8px">Actual finish</th><th style="padding:4px 8px" class="num">%</th><th style="padding:4px 8px">Status</th></tr></thead>
       <tbody>
         ${kickoff.length?shdr('Project Kick-off')+kickoff.map(t=>trow(t,28)).join(""):""}
         ${rooms.map(roomBlock).join("")}
         ${production.length?shdr('Factory Production (off-site)')+production.map(t=>trow(t,28)).join(""):""}
         ${milestones.length?shdr('Milestones &amp; Payments')+milestones.map(t=>trow(t,28)).join(""):""}
         ${closing.length?shdr('Handover &amp; Finishing')+closing.map(t=>trow(t,28)).join(""):""}
-      </tbody></table>
+      </tbody></table></div>
     ${unmapped.length?`<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--clay);border-radius:8px;font-size:12px"><b style="color:var(--clay)">⚠ ${unmapped.length} BOQ ${unmapped.length===1?'category':'categories'} not mapped to any trade</b> — excluded from the schedule, needs review: ${unmapped.map(u=>esc(u)).join(", ")}</div>`:''}
   </div>`;
   if(!ro&&$("#sch-gen")) $("#sch-gen").onclick=()=>schedGenerate(p);
+  if(!ro) bindSchedTasks(p, host);
+}
+// save inline actual-date / % edits on schedule tasks, then re-render (refreshes status + delays)
+function bindSchedTasks(p, host){
+  host.querySelectorAll("[data-strow]").forEach(tr=>{
+    const id=tr.dataset.strow;
+    tr.querySelectorAll("[data-sf]").forEach(inp=>inp.onchange=async()=>{
+      const f=inp.dataset.sf; let val=inp.value;
+      if(f==='percent_complete') val=Math.max(0,Math.min(100,Number(val||0)));
+      if((f.endsWith('_start')||f.endsWith('_finish')) && val==='') val=null;
+      const patch={[f]:val};
+      if(f==='actual_finish' && val) patch.percent_complete=100;   // finishing a task marks it 100%
+      const {error}=await sb.from("schedule_task").update(patch).eq("id",id);
+      if(error) return toast(error.message);
+      schedRenderCard(p, host);
+    });
+  });
 }
 
 function ganttHtml(acts){
