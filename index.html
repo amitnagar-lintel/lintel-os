@@ -3351,7 +3351,7 @@ async function pwExecution(p,body){
 }
 
 /* ---- Slice 1: BOQ-driven schedule (trade-level, dated off KOM) ---- */
-const SCHED={trades:null,map:null,defaults:null};
+const SCHED={trades:null,map:null,defaults:null,taskTpl:null,phases:null};
 function schedNorm(s){ return (s||"").toLowerCase().replace(/\s+/g," ").trim(); }
 function schedAddDays(iso,n){ const d=new Date(iso+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
 // 6-day work week (sensible default): Sundays are non-working. Durations are working days.
@@ -3376,16 +3376,21 @@ function schedTitle(s){ return (s||"").toLowerCase().replace(/\s+/g," ").trim().
 // prep / whole-house line items that are not real construction rooms
 function schedIsNonRoom(key){ return /deep clean|floor protect|floor protector/.test(key); }
 async function schedLoadMaster(){
-  if(SCHED.trades&&SCHED.trades.length&&SCHED.map&&SCHED.defaults) return;
+  if(SCHED.trades&&SCHED.trades.length&&SCHED.map&&SCHED.defaults&&SCHED.taskTpl&&SCHED.phases) return;
   const {data:tr,error:e1}=await sb.from("trade_master").select("code,name,exp_tat_days,seq,scope_group").order("seq").order("id");
   const {data:mp,error:e2}=await sb.from("boq_category_trade_map").select("category_norm,trade_code");
   const {data:rd,error:e3}=await sb.from("room_type_trade_default").select("room_type,trade_code");
-  if(e1||e2||e3){ toast("Could not load schedule master data"); return; }
+  const {data:tt,error:e4}=await sb.from("trade_task_template").select("trade_code,task_name,seq,duration_days").order("seq").order("id");
+  const {data:ph,error:e5}=await sb.from("project_phase_template").select("kind,task_name,trade_label,seq,duration_days,anchor").order("seq").order("id");
+  if(e1||e2||e3||e4||e5){ toast("Could not load schedule master data"); return; }
   SCHED.trades=(tr||[]).map(t=>({code:t.code,name:t.name,exp_tat_days:Number(t.exp_tat_days)||1,seq:Number(t.seq)||0,scope_group:t.scope_group||'other'}));
   const map={}; (mp||[]).forEach(m=>{ (map[m.category_norm]=map[m.category_norm]||[]).push(m.trade_code); });
   SCHED.map=map;
   const def={}; (rd||[]).forEach(r=>{ (def[r.room_type]=def[r.room_type]||[]).push(r.trade_code); });
   SCHED.defaults=def;
+  const tpl={}; (tt||[]).forEach(x=>{ (tpl[x.trade_code]=tpl[x.trade_code]||[]).push({name:x.task_name,seq:Number(x.seq)||0,dur:Number(x.duration_days)||1}); });
+  Object.values(tpl).forEach(a=>a.sort((x,y)=>x.seq-y.seq)); SCHED.taskTpl=tpl;
+  SCHED.phases=(ph||[]).map(x=>({kind:x.kind,task_name:x.task_name,trade_label:x.trade_label,seq:Number(x.seq)||0,dur:Number(x.duration_days)||1,anchor:x.anchor}));
 }
 // latest included BOQ items for a project; returns {items} or {error}
 async function schedBoqItems(p){
@@ -3398,39 +3403,77 @@ async function schedBoqItems(p){
   if(!inScope.length) return {error:"The BOQ has no included line items."};
   return {items:inScope};
 }
-// build the trade-level task list + unmapped categories from BOQ + KOM
+// build the full task-level schedule (kick-off -> room x trade x task -> milestones -> handover)
 async function schedCompute(p, komISO, opts){
   const withSpine=!!(opts&&opts.spine);                             // civil/MEP spine is opt-in (full-reno only)
   const bo=await schedBoqItems(p); if(bo.error) return bo;
   await schedLoadMaster();
-  if(!SCHED.trades||!SCHED.trades.length) return {error:"Schedule master data unavailable — try again."};
+  if(!SCHED.trades||!SCHED.trades.length||!SCHED.phases) return {error:"Schedule master data unavailable — try again."};
   const tradeByCode={}; SCHED.trades.forEach(t=>tradeByCode[t.code]=t);
-  // group by normalized room key (merges "Kitchen"/"KITCHEN"); keep a tidy display label
+  const FULLHOUSE="Full House";
+  const tasks=[], unmapped=new Set(); let seq=0;
+  const push=o=>tasks.push(Object.assign({room_seq:0,room_type:null,trade_code:null,source:'boq',kind:'trade',seq:seq++},o));
+  const maxD=(arr,fb)=>arr.length?arr.reduce((m,d)=>d>m?d:m,arr[0]):fb;
+
+  // group BOQ by normalized room (merges "Kitchen"/"KITCHEN")
   const roomOrder=[], roomCats={}, roomLabel={};
   bo.items.forEach(i=>{ const raw=((i.room||i.room_tag||"General").trim())||"General"; const key=schedNorm(raw);
     if(!roomCats[key]){ roomCats[key]=new Set(); roomLabel[key]=schedTitle(raw); roomOrder.push(key); }
     const c=schedNorm(i.category); if(c) roomCats[key].add(c); });
-  const tasks=[], unmapped=new Set(); let ri=0;
+
+  // 1) KICK-OFF phases (Full House, sequential from KOM)
+  let cursor=schedNextWorkday(komISO);
+  SCHED.phases.filter(x=>x.kind==='kickoff').forEach(x=>{
+    const start=schedNextWorkday(cursor), finish=schedAddWorkdays(start,Math.max(1,x.dur)-1);
+    push({room:FULLHOUSE,room_seq:-1,trade_name:x.trade_label,task_name:x.task_name,kind:'kickoff',tat_days:x.dur,planned_start:start,planned_finish:finish});
+    cursor=schedAddDays(finish,1);
+  });
+  const roomStart=schedNextWorkday(cursor);
+
+  // 2) ROOM work: room x trade x task, rooms run in parallel from roomStart
+  let ri=0, projEnd=roomStart; const servicesEnds=[], modularEnds=[];
   roomOrder.forEach(key=>{
     const boqCodes=new Set();
     roomCats[key].forEach(cn=>{ const hits=SCHED.map[cn]; if(hits&&hits.length) hits.forEach(tc=>boqCodes.add(tc)); else unmapped.add(cn); });
-    // skip pseudo-rooms (deep cleaning / floor protection) and any room with no real BOQ trade —
-    // never fabricate a spine for a room that has no actual scope
-    if(!boqCodes.size || schedIsNonRoom(key)) return;
+    if(!boqCodes.size || schedIsNonRoom(key)) return;               // skip phantom / prep-only rooms
     const rt=schedClassifyRoom(roomLabel[key]);
-    let all;
-    if(withSpine){ const spine=SCHED.defaults[rt]||SCHED.defaults['general']||[]; all=new Set([...boqCodes,...spine]); }
-    else { all=new Set(boqCodes); }                                 // BOQ scope only (default)
-    const ordered=[...all].map(tc=>tradeByCode[tc]).filter(Boolean).sort((a,b)=>a.seq-b.seq);
-    let cursor=schedNextWorkday(komISO);
-    ordered.forEach((t,ti)=>{
-      const start=schedNextWorkday(cursor);
-      const finish=schedAddWorkdays(start, Math.max(1,t.exp_tat_days)-1);
-      tasks.push({room:roomLabel[key], room_seq:ri, room_type:rt, source:(boqCodes.has(t.code)?'boq':'spine'),
-        trade_code:t.code, trade_name:t.name, tat_days:t.exp_tat_days, seq:ti, planned_start:start, planned_finish:finish});
-      cursor=schedAddDays(finish,1);
+    let codes;
+    if(withSpine){ const spine=SCHED.defaults[rt]||SCHED.defaults['general']||[]; codes=new Set([...boqCodes,...spine]); }
+    else codes=new Set(boqCodes);                                   // BOQ scope only (default)
+    const ordered=[...codes].map(tc=>tradeByCode[tc]).filter(Boolean).sort((a,b)=>a.seq-b.seq);
+    let rc=roomStart;
+    ordered.forEach(tr=>{
+      const tpl=SCHED.taskTpl[tr.code];
+      const list=(tpl&&tpl.length)?tpl:[{name:tr.name,dur:tr.exp_tat_days}];   // fallback: whole trade as one task
+      list.forEach(tk=>{
+        const start=schedNextWorkday(rc), finish=schedAddWorkdays(start,Math.max(1,tk.dur)-1);
+        push({room:roomLabel[key],room_seq:ri,room_type:rt,trade_code:tr.code,trade_name:tr.name,task_name:tk.name,
+          kind:'trade',source:(boqCodes.has(tr.code)?'boq':'spine'),tat_days:tk.dur,planned_start:start,planned_finish:finish});
+        rc=schedAddDays(finish,1);
+        if(tr.scope_group==='services') servicesEnds.push(finish);
+        if(tr.scope_group==='modular'||tr.scope_group==='onsite_carpentry') modularEnds.push(finish);
+        if(finish>projEnd) projEnd=finish;
+      });
     });
     ri++;
+  });
+
+  // 3) MILESTONES & payments, anchored to when the relevant scope finishes
+  const modularEnd=maxD(modularEnds, projEnd), servicesEnd=maxD(servicesEnds, modularEnd);
+  let msEnd=projEnd;
+  SCHED.phases.filter(x=>x.kind==='milestone').forEach(x=>{
+    const anchor=x.anchor==='services'?servicesEnd:x.anchor==='modular'?modularEnd:projEnd;
+    const start=schedNextWorkday(schedAddDays(anchor,1)), finish=schedAddWorkdays(start,Math.max(1,x.dur)-1);
+    push({room:FULLHOUSE,room_seq:9990,trade_name:x.trade_label,task_name:x.task_name,kind:'milestone',tat_days:x.dur,planned_start:start,planned_finish:finish});
+    if(finish>msEnd) msEnd=finish;
+  });
+
+  // 4) CLOSING phases (Full House, sequential after all work + milestones)
+  let cc=schedNextWorkday(schedAddDays(projEnd>msEnd?projEnd:msEnd,1));
+  SCHED.phases.filter(x=>x.kind==='closing').forEach(x=>{
+    const start=schedNextWorkday(cc), finish=schedAddWorkdays(start,Math.max(1,x.dur)-1);
+    push({room:FULLHOUSE,room_seq:9999,trade_name:x.trade_label,task_name:x.task_name,kind:'closing',tat_days:x.dur,planned_start:start,planned_finish:finish});
+    cc=schedAddDays(finish,1);
   });
   return {tasks, unmapped:[...unmapped], spine:withSpine};
 }
@@ -3446,7 +3489,7 @@ function schedGenerate(p){
   openModal(`
     <div class="modal-h">Generate schedule from BOQ</div>
     <div class="modal-b">
-      <div class="banner">Builds a room-wise trade schedule from this project's latest BOQ, starting from the KOM (kick-off) date, on a 6-day work week (Sundays off). <b>Beta:</b> trade-level only; regenerating replaces the current BOQ schedule.</div>
+      <div class="banner">Builds a full task-level project schedule from this project's latest BOQ — kick-off, room-wise trade tasks, milestones &amp; payments, and handover — from the KOM date on a 6-day work week (Sundays off). Regenerating replaces the current schedule.</div>
       <div class="field"><label>KOM / project start date</label><input id="sch-kom" type="date" value="${today}"></div>
       <div class="field"><label>Base-build scope</label>
         <select id="sch-spine">
@@ -3464,7 +3507,7 @@ function schedGenerate(p){
       const spine=$("#sch-spine").value==='full';
       const res=await schedCompute(p,kom,{spine});
       if(res.error){ toast(res.error); return; }
-      if(!res.tasks.length){ toast("No trades could be derived from the BOQ — categories may all be unmapped"); return; }
+      if(!res.tasks.filter(t=>(t.kind||'trade')==='trade').length){ toast("No BOQ trades could be scheduled — categories may all be unmapped"); return; }
       const {error}=await sb.rpc("schedule_replace",{p_project_id:p.id,p_kom:kom,p_tasks:res.tasks});
       if(error){ toast(error.message); return; }
       closeModal();
@@ -3488,25 +3531,31 @@ async function schedRenderCard(p, host){
   const {data:tasks,error:tErr}=await sb.from("schedule_task").select("*").eq("schedule_id",active.id).order("room_seq").order("seq").order("id");
   if(tErr){ host.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load schedule tasks: ${esc(tErr.message)}</div>`; return; }
   const rows=tasks||[];
-  const rooms=[], byRoom={};
-  rows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
   const unmapped=await schedUnmapped(p);
-  await schedLoadMaster();
-  const codeGroup={}; (SCHED.trades||[]).forEach(t=>codeGroup[t.code]=t.scope_group||'other');
-  // scope buckets in build order (services shell first, then carpentry/modular, then decor & loose)
-  const BUCKETS=[['services','Services'],['onsite_carpentry','On-site Carpentry'],['modular','Modular / KWS (Factory)'],['decor','Decor'],['loose_furniture','Loose Furniture & Appliances'],['other','Other']];
-  const hasSpine=rows.some(t=>t.source==='spine');
+  const kickoff=rows.filter(t=>t.kind==='kickoff'), milestones=rows.filter(t=>t.kind==='milestone'), closing=rows.filter(t=>t.kind==='closing');
+  const tradeRows=rows.filter(t=>(t.kind||'trade')==='trade');
+  const rooms=[], byRoom={};
+  tradeRows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
   const end=rows.reduce((m,t)=>(t.planned_finish&&t.planned_finish>m)?t.planned_finish:m,"");
+  // row + header renderers
+  const trow=(t,pad)=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:3px 8px 3px ${pad}px">${esc(t.task_name||t.trade_name||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td><td style="padding:3px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:3px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:3px 8px" class="num">${t.tat_days}</td></tr>`;
+  const shdr=lbl=>`<tr><td colspan="4" style="padding:9px 8px 3px;font-size:11px;font-weight:700;color:var(--brass);letter-spacing:.4px;text-transform:uppercase">${lbl}</td></tr>`;
+  const sub=lbl=>`<tr><td colspan="4" style="padding:5px 8px 2px 14px;font-size:11px;font-weight:600;color:var(--ink)">${esc(lbl)}${' '}</td></tr>`;
+  const roomBlock=room=>{ const rr=byRoom[room]; const trades=[], byTrade={};
+    rr.forEach(t=>{ const k=t.trade_name||t.trade_code||'—'; if(!byTrade[k]){byTrade[k]=[]; trades.push(k);} byTrade[k].push(t); });
+    return shdr(esc(room))+trades.map(tn=>sub(tn)+byTrade[tn].map(t=>trow(t,28)).join("")).join(""); };
   host.innerHTML=`<div class="pw-card">
-    <div class="ov-head"><div class="sec-label" style="border:none;padding:0">BOQ-driven schedule <span class="pill">beta</span></div>
+    <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Project schedule <span class="pill">beta</span></div>
       ${ro?'':`<button class="ghost" id="sch-gen">↻ Regenerate</button>`}</div>
-    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) across ${rooms.length} room(s) · 6-day week${hasSpine?` · <span style="border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span> = auto-added civil/MEP spine`:''}</div>
-    ${rooms.map(room=>{const rt=(byRoom[room][0]||{}).room_type;return `<div style="margin-bottom:12px">
-      <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(room)}${rt?` <span style="font-weight:400;color:var(--ink-soft);font-size:11px">· ${esc(rt)}</span>`:''}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
-        <th style="padding:4px 8px">Trade</th><th style="padding:4px 8px">Start</th><th style="padding:4px 8px">Finish</th><th style="padding:4px 8px" class="num">Days</th></tr></thead>
-        <tbody>${BUCKETS.map(([g,glabel])=>{const gt=byRoom[room].filter(t=>(codeGroup[t.trade_code]||'other')===g);if(!gt.length)return '';return `<tr><td colspan="4" style="padding:7px 8px 2px;font-size:11px;font-weight:600;color:var(--brass);letter-spacing:.3px">${glabel}</td></tr>`+gt.map(t=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:4px 8px 4px 16px">${esc(t.trade_name||t.trade_code||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td><td style="padding:4px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:4px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:4px 8px" class="num">${t.tat_days}</td></tr>`).join("");}).join("")}</tbody></table>
-    </div>`;}).join("")}
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px">KOM ${esc(String(active.kom_date))} → est. completion <b style="color:var(--ink)">${esc(String(end||'—'))}</b> · ${rows.length} task(s) · ${rooms.length} room(s) · 6-day week</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
+      <th style="padding:4px 8px">Task</th><th style="padding:4px 8px">Start</th><th style="padding:4px 8px">Finish</th><th style="padding:4px 8px" class="num">Days</th></tr></thead>
+      <tbody>
+        ${kickoff.length?shdr('Project Kick-off')+kickoff.map(t=>trow(t,28)).join(""):""}
+        ${rooms.map(roomBlock).join("")}
+        ${milestones.length?shdr('Milestones &amp; Payments')+milestones.map(t=>trow(t,28)).join(""):""}
+        ${closing.length?shdr('Handover &amp; Finishing')+closing.map(t=>trow(t,28)).join(""):""}
+      </tbody></table>
     ${unmapped.length?`<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--clay);border-radius:8px;font-size:12px"><b style="color:var(--clay)">⚠ ${unmapped.length} BOQ ${unmapped.length===1?'category':'categories'} not mapped to any trade</b> — excluded from the schedule, needs review: ${unmapped.map(u=>esc(u)).join(", ")}</div>`:''}
   </div>`;
   if(!ro&&$("#sch-gen")) $("#sch-gen").onclick=()=>schedGenerate(p);
