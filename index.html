@@ -3775,7 +3775,8 @@ function execClientView(p,acts){
 
 async function pwFiles(p,body,kind){
   const label=kind==="design"?"Design":"Document";
-  const {data:files}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false});
+  const {data:files,error:fErr}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false}).order("id",{ascending:false});
+  if(fErr){ body.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load files: ${esc(fErr.message)}</div>`; return; }
   body.innerHTML=`<div class="pw-card">
     ${canWrite()?`<div class="upbar">
       <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg"':''}>
@@ -3807,10 +3808,11 @@ function bindFileDownloads(){
   });
   document.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     if(!confirm("Delete this file?")) return;
-    await sb.storage.from("project-files").remove([b.dataset.path]);
-    await sb.from("project_files").delete().eq("id",b.dataset.del);
-    drawProjectTab({id:activeProject});
-    // reload current tab
+    // remove the DB row first (so a failed storage cleanup can't orphan a dead pointer)
+    const {error:dErr}=await sb.from("project_files").delete().eq("id",b.dataset.del);
+    if(dErr) return toast(dErr.message);
+    const {error:sErr}=await sb.storage.from("project-files").remove([b.dataset.path]);
+    if(sErr) toast("Record removed; file cleanup failed: "+sErr.message);
     const {data:p}=await sb.from("projects").select("*").eq("id",activeProject).single();
     if(p) drawProjectTab(p);
   });
