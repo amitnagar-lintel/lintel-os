@@ -929,10 +929,10 @@ async function renderDashboard(){
   const tot=k=>bp.reduce((a,r)=>a+(Number(r[k])||0),0);
   $("#dashTeam").innerHTML = bp.length ? `
     <div class="pw-card" style="padding:14px 16px">
-      <div class="sec-label" style="border:none;padding:0;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— added / meetings / quotes / converted are this month · assigned &amp; value are current totals</span></div>
+      <div class="sec-label" style="border:none;padding:0;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— added / meetings / quotes / converted / value are this month · assigned is current pipeline</span></div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
         <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px">
-          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value</th></tr></thead>
+          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value (mo)</th></tr></thead>
         <tbody>${bp.map(r=>`<tr style="border-top:1px solid var(--line-2)">
           <td style="padding:6px 8px">${r.cid?`<a href="#" data-cid="${r.cid}" data-name="${esc(r.name)}" style="color:var(--brass);text-decoration:none;font-weight:600">${esc(r.name)}</a>`:`<span style="color:var(--ink-soft)">${esc(r.name)}</span>`}</td>
           <td style="padding:6px 8px" class="num">${r.leads_assigned}</td>
@@ -948,7 +948,7 @@ async function renderDashboard(){
             <td class="num" style="padding:6px 8px">${S.meetings_month||0}</td>
             <td class="num" style="padding:6px 8px">${S.quotes_month||0}</td>
             <td class="num" style="padding:6px 8px">${S.converted_month||0}</td>
-            <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_total||0)}</td></tr>
+            <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_month||0)}</td></tr>
         </tbody></table></div>
     </div>` : "";
   $("#dashTeam").querySelectorAll("[data-cid]").forEach(a=>a.onclick=e=>{ e.preventDefault(); dashConsultantProjects(Number(a.dataset.cid), a.dataset.name); });
