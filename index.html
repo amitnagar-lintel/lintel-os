@@ -3377,11 +3377,11 @@ function schedTitle(s){ return (s||"").toLowerCase().replace(/\s+/g," ").trim().
 function schedIsNonRoom(key){ return /deep clean|floor protect|floor protector/.test(key); }
 async function schedLoadMaster(){
   if(SCHED.trades&&SCHED.trades.length&&SCHED.map&&SCHED.defaults) return;
-  const {data:tr,error:e1}=await sb.from("trade_master").select("code,name,exp_tat_days,seq").order("seq").order("id");
+  const {data:tr,error:e1}=await sb.from("trade_master").select("code,name,exp_tat_days,seq,scope_group").order("seq").order("id");
   const {data:mp,error:e2}=await sb.from("boq_category_trade_map").select("category_norm,trade_code");
   const {data:rd,error:e3}=await sb.from("room_type_trade_default").select("room_type,trade_code");
   if(e1||e2||e3){ toast("Could not load schedule master data"); return; }
-  SCHED.trades=(tr||[]).map(t=>({code:t.code,name:t.name,exp_tat_days:Number(t.exp_tat_days)||1,seq:Number(t.seq)||0}));
+  SCHED.trades=(tr||[]).map(t=>({code:t.code,name:t.name,exp_tat_days:Number(t.exp_tat_days)||1,seq:Number(t.seq)||0,scope_group:t.scope_group||'other'}));
   const map={}; (mp||[]).forEach(m=>{ (map[m.category_norm]=map[m.category_norm]||[]).push(m.trade_code); });
   SCHED.map=map;
   const def={}; (rd||[]).forEach(r=>{ (def[r.room_type]=def[r.room_type]||[]).push(r.trade_code); });
@@ -3491,6 +3491,10 @@ async function schedRenderCard(p, host){
   const rooms=[], byRoom={};
   rows.forEach(t=>{ if(!byRoom[t.room]){ byRoom[t.room]=[]; rooms.push(t.room); } byRoom[t.room].push(t); });
   const unmapped=await schedUnmapped(p);
+  await schedLoadMaster();
+  const codeGroup={}; (SCHED.trades||[]).forEach(t=>codeGroup[t.code]=t.scope_group||'other');
+  // scope buckets in build order (services shell first, then carpentry/modular, then decor & loose)
+  const BUCKETS=[['services','Services'],['onsite_carpentry','On-site Carpentry'],['modular','Modular / KWS (Factory)'],['decor','Decor'],['loose_furniture','Loose Furniture & Appliances'],['other','Other']];
   const hasSpine=rows.some(t=>t.source==='spine');
   const end=rows.reduce((m,t)=>(t.planned_finish&&t.planned_finish>m)?t.planned_finish:m,"");
   host.innerHTML=`<div class="pw-card">
@@ -3501,7 +3505,7 @@ async function schedRenderCard(p, host){
       <div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(room)}${rt?` <span style="font-weight:400;color:var(--ink-soft);font-size:11px">· ${esc(rt)}</span>`:''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--ink-soft)">
         <th style="padding:4px 8px">Trade</th><th style="padding:4px 8px">Start</th><th style="padding:4px 8px">Finish</th><th style="padding:4px 8px" class="num">Days</th></tr></thead>
-        <tbody>${byRoom[room].map(t=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:4px 8px">${esc(t.trade_name||t.trade_code||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td><td style="padding:4px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:4px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:4px 8px" class="num">${t.tat_days}</td></tr>`).join("")}</tbody></table>
+        <tbody>${BUCKETS.map(([g,glabel])=>{const gt=byRoom[room].filter(t=>(codeGroup[t.trade_code]||'other')===g);if(!gt.length)return '';return `<tr><td colspan="4" style="padding:7px 8px 2px;font-size:11px;font-weight:600;color:var(--brass);letter-spacing:.3px">${glabel}</td></tr>`+gt.map(t=>`<tr style="border-top:1px solid var(--line-2)"><td style="padding:4px 8px 4px 16px">${esc(t.trade_name||t.trade_code||'—')}${t.source==='spine'?' <span style="font-size:10px;color:var(--ink-soft);border:1px solid var(--line-2);border-radius:4px;padding:0 4px">default</span>':''}</td><td style="padding:4px 8px">${esc(String(t.planned_start||'—'))}</td><td style="padding:4px 8px">${esc(String(t.planned_finish||'—'))}</td><td style="padding:4px 8px" class="num">${t.tat_days}</td></tr>`).join("");}).join("")}</tbody></table>
     </div>`;}).join("")}
     ${unmapped.length?`<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--clay);border-radius:8px;font-size:12px"><b style="color:var(--clay)">⚠ ${unmapped.length} BOQ ${unmapped.length===1?'category':'categories'} not mapped to any trade</b> — excluded from the schedule, needs review: ${unmapped.map(u=>esc(u)).join(", ")}</div>`:''}
   </div>`;
