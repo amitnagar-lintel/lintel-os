@@ -1653,7 +1653,7 @@ async function lwBoq(l, body){
 function refreshLeadBoqFlow(){ if(_leadBoqCtx) renderLeadBoqFlow(); }
 
 async function leadBoqTotal(l){
-  const {data}=await sb.from("boq_versions").select("total").eq("lead_id",l.id).order("version",{ascending:false}).limit(1);
+  const {data}=await sb.from("boq_versions").select("total").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   return data&&data[0]?Number(data[0].total)||0:0;
 }
 
@@ -1756,14 +1756,15 @@ async function leadBoqGenerator(l, host){
   G.projectId=null; G.leadId=l.id;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,id:r.id}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id}));
   }
-  const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false});
+  const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
     host.innerHTML=`<div class="pw-card">${emptyState("No BOQ for this lead yet","Build the BOQ here, then mark the proposal sent above.")}
       ${canWrite()?`<div style="text-align:center"><button class="primary" id="lwNewBoq">+ Start BOQ</button></div>`:""}</div>`;
     if(canWrite()) $("#lwNewBoq").onclick=async()=>{
       const id=await newBoqFor({lead_id:l.id,title:l.name});
+      if(!id) return;
       await sb.from("boq_versions").update({client_name:l.name,client_phone:l.phone,client_email:l.email,project_name:l.name,property:l.site_address||l.locality,quote_date:new Date().toISOString().slice(0,10)}).eq("id",id);
       leadBoqGenerator(l,host);
     };
@@ -1776,6 +1777,7 @@ async function leadBoqGenerator(l, host){
     unit:r.uom||"", rate:Number(r.rate)||0, originalRate:Number(r.rate)||0,
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
     amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
+    cost:Number(r.cost_rate)||0,
     scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
   }));
   G.uid=G.rows.length;
@@ -1784,7 +1786,7 @@ async function leadBoqGenerator(l, host){
 
 async function convertLead(l){
   await ensureStaff();
-  const {data:bv}=await sb.from("boq_versions").select("id,total").eq("lead_id",l.id).order("version",{ascending:false}).limit(1);
+  const {data:bv}=await sb.from("boq_versions").select("id,total").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   const total=bv&&bv[0]?bv[0].total:0;
   openModal(`
     <div class="modal-h">Convert lead to project</div>
@@ -1845,25 +1847,36 @@ async function renderBOQ(){
 }
 
 async function newBoqFor(seed){
-  // version number per lead/project
-  let q=sb.from("boq_versions").select("version").order("version",{ascending:false}).limit(1);
-  if(seed.lead_id) q=q.eq("lead_id",seed.lead_id);
-  const {data:prev}=await q;
-  const version=(prev&&prev[0]?prev[0].version:0)+1;
-  const d=new Date();
-  const vlabel="v"+d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
-  const {data,error}=await sb.from("boq_versions").insert({
-    lead_id:seed.lead_id||null, project_id:seed.project_id||null,
-    title:seed.title||"New BOQ", version, version_label:vlabel, status:"draft",
-    created_by:me.id, last_edited_by:me.id, last_edited_at:new Date().toISOString()
-  }).select().single();
-  if(error) return toast(error.message);
-  activeBoq=data.id; toast("BOQ created");
-  // log creation to lead activity timeline
-  if(seed.lead_id){
-    try{ await sb.from("lead_activities").insert({lead_id:seed.lead_id,type:"Note",text:"BOQ created · "+vlabel,by_user:me.id}); }catch(e){}
-  }
-  return data.id;
+  if(newBoqFor._busy) return null;
+  newBoqFor._busy=true;
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      // version number per lead/project
+      let q=sb.from("boq_versions").select("version").order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+      if(seed.lead_id) q=q.eq("lead_id",seed.lead_id);
+      else if(seed.project_id) q=q.eq("project_id",seed.project_id);
+      const {data:prev}=await q;
+      const version=(prev&&prev[0]?prev[0].version:0)+1;
+      const d=new Date();
+      const vlabel="v"+d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+      const {data,error}=await sb.from("boq_versions").insert({
+        lead_id:seed.lead_id||null, project_id:seed.project_id||null,
+        title:seed.title||"New BOQ", version, version_label:vlabel, status:"draft",
+        created_by:me.id, last_edited_by:me.id, last_edited_at:new Date().toISOString()
+      }).select().single();
+      if(error){
+        if(error.code==="23505"&&attempt===0) continue; // version taken by a concurrent create — recompute and retry once
+        toast(error.message); return null;
+      }
+      activeBoq=data.id; toast("BOQ created");
+      // log creation to lead activity timeline
+      if(seed.lead_id){
+        try{ await sb.from("lead_activities").insert({lead_id:seed.lead_id,type:"Note",text:"BOQ created · "+vlabel,by_user:me.id}); }catch(e){}
+      }
+      return data.id;
+    }
+    return null;
+  }finally{ newBoqFor._busy=false; }
 }
 
 async function loadSheet(id){
@@ -2416,7 +2429,7 @@ async function createRazorpayLink(p, milestone){
 /* ---- Generate / view Proforma Invoice ---- */
 async function generateProforma(p, milestone){
   // get latest BOQ for ref
-  const {data:bv}=await sb.from("boq_versions").select("version,version_label").eq("project_id",p.id).order("version",{ascending:false}).limit(1);
+  const {data:bv}=await sb.from("boq_versions").select("version,version_label").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   const boqRef=`BOQ/${p.code||'LSA'}${bv&&bv[0]?'/v'+bv[0].version:''}`;
   let piNumber=milestone.pi_number;
   // generate PI number if not already set
@@ -2638,7 +2651,7 @@ async function pwOrders(p,body){
 
 async function generatePOs(p,body){
   // load the project's latest BOQ + its items
-  const {data:vers}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).limit(1);
+  const {data:vers}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   if(!vers||!vers.length) return toast("No BOQ on this project yet — build one first");
   const ver=vers[0];
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
@@ -3605,15 +3618,16 @@ async function pwBoq(p, body){
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,id:r.id}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id}));
   }
   // find or offer to create a BOQ version for this project
-  const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false});
+  const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
     body.innerHTML=`<div class="pw-card">${emptyState("No BOQ on this project yet","Start the full BOQ generator for this project.")}
       ${canWrite()?`<div style="text-align:center"><button class="primary" id="pwNewBoq">+ Start project BOQ</button></div>`:""}</div>`;
     if(canWrite()) $("#pwNewBoq").onclick=async()=>{
       const id=await newBoqFor({project_id:p.id,title:p.name});
+      if(!id) return;
       // seed meta from project
       await sb.from("boq_versions").update({client_name:p.client_name||p.name,client_phone:p.client_phone,client_email:p.client_email,project_name:p.name,property:p.site_address,quote_date:new Date().toISOString().slice(0,10)}).eq("id",id);
       pwBoq(p,body);
@@ -3629,6 +3643,7 @@ async function pwBoq(p, body){
     unit:r.uom||"", rate:Number(r.rate)||0, originalRate:Number(r.rate)||0,
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
     amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
+    cost:Number(r.cost_rate)||0,
     scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
   }));
   G.uid=G.rows.length;
@@ -3842,14 +3857,14 @@ function gBindTable(ro){
         r.cat=inp.value;
         // reset item to first in new category + update rate/unit
         const catItems=G.rates.filter(x=>x.cat===r.cat);
-        if(catItems.length){ r.item=catItems[0].item; r.unit=catItems[0].unit; r.rate=catItems[0].rate; r.originalRate=r.rate; r.amount=r.rate*r.qty; }
+        if(catItems.length){ r.item=catItems[0].item; r.unit=catItems[0].unit; r.rate=catItems[0].rate; r.originalRate=r.rate; r.amount=r.rate*r.qty; r.cost=catItems[0].cost||0; }
         G.dirty=true; gDrawTable(ro); gTotals();
       }
       else if(f==='item'){
         r.item=inp.value;
         // auto-fill rate and unit from library
         const lib=G.rates.find(x=>x.item===r.item&&x.cat===r.cat);
-        if(lib){ r.unit=lib.unit; r.rate=lib.rate; r.originalRate=lib.rate; r.amount=r.rate*r.qty; }
+        if(lib){ r.unit=lib.unit; r.rate=lib.rate; r.originalRate=lib.rate; r.amount=r.rate*r.qty; r.cost=lib.cost||0; }
         G.dirty=true; gDrawTable(ro); gTotals();
       }
       else if(f==='scope'){ r.scope=(inp.value==='excluded'||inp.value==='optional')?inp.value:'included'; G.dirty=true; gDrawTable(ro); gTotals(); }
@@ -3876,7 +3891,7 @@ function gBindTable(ro){
     // ensure uid counter is valid (guard against undefined/collision)
     if(typeof G.uid!=="number"||!G.uid){ G.uid=(G.rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0))+1; }
     src.forEach(r=>{
-      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom,scope:gScope(r)});
+      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom,cost:r.cost||0,scope:gScope(r)});
     });
     G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+finalName);
   });
@@ -3885,20 +3900,20 @@ function gAddLib(){
   const room=$("#in-room").value.trim(),cat=$("#in-cat").value,item=$("#in-item").value,qty=parseFloat($("#in-qty").value)||0,w=parseFloat($("#in-w").value)||0,h=parseFloat($("#in-h").value)||0;
   if(!room||!cat||!item||!qty) return toast("Fill Room, Category, Item and Qty");
   const f=G.rates.find(r=>r.item===item&&r.cat===cat); const rate=f?f.rate:0,unit=f?f.unit:'';
-  G.rows.push({id:G.uid++,room,cat,item,unit,rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:false});
+  G.rows.push({id:G.uid++,room,cat,item,unit,rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:false,cost:f?f.cost:0});
   G.dirty=true; $("#in-qty").value='';$("#in-w").value='';$("#in-h").value='';
   gDrawTable(false); gTotals(); refreshRoomDL();
 }
 function gAddCustom(){
   const room=$("#ci-room").value.trim(),cat=$("#ci-cat").value.trim()||'Custom',item=$("#ci-item").value.trim(),rate=parseFloat($("#ci-rate").value)||0,qty=parseFloat($("#ci-qty").value)||0,w=parseFloat($("#ci-w").value)||0,h=parseFloat($("#ci-h").value)||0;
   if(!room||!item||!qty) return toast("Fill Room, Item and Qty");
-  G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true});
+  G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true,cost:0});
   G.dirty=true; ["ci-room","ci-cat","ci-item","ci-rate","ci-w","ci-h","ci-qty"].forEach(i=>$("#"+i).value='');
   gDrawTable(false); gTotals(); refreshRoomDL();
   // Feature 4: auto-save to rate library if not already there
   if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
     sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true}).select().single().then(({data,error})=>{
-      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,id:data.id}); toast("Added to rate library: "+item); }
+      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id}); toast("Added to rate library: "+item); }
       else if(error) console.error("Library add error:",error.message);
     });
   }
@@ -3906,7 +3921,7 @@ function gAddCustom(){
 
 /* ---- Feature 2: Import room or full BOQ from another project ---- */
 async function gImportFrom(p,fullBoq){
-  const {data:boqs}=await sb.from("boq_versions").select("id,project_id,lead_id,project_name,client_name,version").order("version",{ascending:false});
+  const {data:boqs}=await sb.from("boq_versions").select("id,project_id,lead_id,project_name,client_name,version").order("version",{ascending:false}).order("id",{ascending:false});
   if(!boqs||!boqs.length) return toast("No other BOQs found");
   // exclude current BOQ
   const others=boqs.filter(b=>b.id!==G.boqId);
@@ -3952,7 +3967,7 @@ async function gImportFrom(p,fullBoq){
   $("#imp-go").onclick=()=>{
     if(!importItems.length) return;
     importItems.forEach(it=>{
-      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom,scope:(it.scope==='excluded'||it.scope==='optional')?it.scope:'included'});
+      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom,cost:Number(it.cost_rate)||0,scope:(it.scope==='excluded'||it.scope==='optional')?it.scope:'included'});
     });
     G.dirty=true; closeModal(); gDrawTable(false); gTotals(); refreshRoomDL();
     toast("Imported "+importItems.length+" items");
@@ -4132,7 +4147,7 @@ function gRates(p){
     if(G.rates.find(r=>r.item===item&&r.cat===cat)) return toast("This item already exists in the library");
     const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true}).select().single();
     if(error) return toast(error.message);
-    G.rates.push({cat,item,unit,rate,id:data.id}); 
+    G.rates.push({cat,item,unit,rate,cost:0,id:data.id});
     ["rl-cat","rl-item","rl-unit","rl-rate"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
     draw(); toast("Added to library: "+item);
   };
@@ -4152,20 +4167,21 @@ async function gSave(p, silent){
     const vl=$("#m-version"); if(vl) vl.value=v.version_label;
   }
   try{
-    await sb.from("boq_versions").update({
+    const {error:vErr}=await sb.from("boq_versions").update({
       client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
       quote_date:v.quote_date||null,fee_pct:Number(v.fee_pct)||0,gst_pct:Number(v.gst_pct)||0,disc_pct:Number(v.disc_pct)||0,boost_pct:Number(v.boost_pct)||0,
       consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
       total:gFin().total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
     }).eq("id",G.boqId);
-    // replace items
-    await sb.from("boq_items").delete().eq("boq_version_id",G.boqId);
-    if(G.rows.length){
-      const payload=G.rows.map((r,i)=>({boq_version_id:G.boqId,room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r)}));
-      const {error}=await sb.from("boq_items").insert(payload);
-      if(error){ G._saving=false; if(!silent) toast(error.message); return; }
+    if(vErr) throw vErr;
+    // replace items atomically via RPC — a mid-save failure can no longer wipe the sheet
+    const payload=G.rows.map((r,i)=>({room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,cost_rate:(r.cost==null?0:Number(r.cost)||0),width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r)}));
+    const {error:iErr}=await sb.rpc("boq_replace_items",{p_version_id:G.boqId,p_items:payload});
+    if(iErr) throw iErr;
+    if(G.projectId){
+      const {error:pErr}=await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
+      if(pErr) throw pErr;
     }
-    if(G.projectId) await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
     G.dirty=false;
     // update the autosave indicator
     const ind=$("#g-autosave"); if(ind){ ind.textContent="✓ Saved "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); ind.style.color="var(--green)"; }
@@ -4175,8 +4191,10 @@ async function gSave(p, silent){
       gLogActivity(p, "BOQ saved · "+v.version_label);
     }
     if(G.leadId && typeof refreshLeadBoqFlow==="function" && !silent) refreshLeadBoqFlow();
-  }catch(e){ if(!silent) toast("Save failed: "+e.message); }
-  G._saving=false;
+  }catch(e){
+    const ind=$("#g-autosave"); if(ind){ ind.textContent="⚠ Not saved — "+(e.message||"error"); ind.style.color="#d9534f"; }
+    if(!silent) toast("Save failed: "+(e.message||e));
+  }finally{ G._saving=false; }
 }
 
 // log BOQ activity to the right timeline (lead_activities or project)
