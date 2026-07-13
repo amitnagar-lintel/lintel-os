@@ -899,29 +899,50 @@ async function renderDashboard(){
       <div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div>
       <div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div>
     </section>
+    <section class="dash-team" id="dashTeam" style="margin:4px 0"></section>
     <section class="dash-recent">
       <div class="dash-recent-head"><h3>Recent leads</h3><button class="ghost sm" id="dashAllLeads">View all \u2192</button></div>
       <div id="dashRecentBody"><div class="empty" style="padding:24px">Loading\u2026</div></div>
     </section>`;
 
-  const {data:leads,error}=await sb.from("leads").select("*").order("updated_at",{ascending:false});
-  const L = leads||[];
-  const openL = L.filter(l=>l.stage!=="won" && l.stage!=="lost");
-  const pipeline = openL.reduce((a,l)=>a+(Number(l.expected_value)||0),0);
-  const t=todayISO();
-  const dueToday = openL.filter(l=>l.next_follow_up && l.next_follow_up<=t).length;
-  const ym=t.slice(0,7);
-  const wonMonth = L.filter(l=>l.stage==="won" && (l.updated_at||"").slice(0,7)===ym).length;
+  // aggregates come from the server (no more fetching the entire leads table client-side);
+  // recent leads is a small, capped query for the list below
+  const [{data:stats,error:sErr},{data:leads,error}]=await Promise.all([
+    sb.rpc("dashboard_stats"),
+    sb.from("leads").select("*").order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(8)
+  ]);
+  if(sErr) toast("Couldn't load dashboard stats");
+  const S = stats||{}; const L = leads||[];
 
   const kpi=(label,val,view,accent)=>`
     <div class="kpi" data-goto="${view||""}" style="--kc:${accent}">
       <div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div>
     </div>`;
   $("#dashKpis").innerHTML =
-      kpi("Open leads", openL.length, "leads", "#5b86b3")
-    + kpi("Pipeline value", fmt(pipeline), "leads", "#B08433")
-    + kpi("Follow-ups due today", dueToday, "leads", "#c0692d")
-    + kpi("Won this month", wonMonth, "leads", "#4f7d52");
+      kpi("Open leads", S.open_leads||0, "leads", "#5b86b3")
+    + kpi("Pipeline value", fmt(S.pipeline_value||0), "leads", "#B08433")
+    + kpi("Follow-ups due today", S.due_today||0, "leads", "#c0692d")
+    + kpi("Converted this month", S.converted_month||0, "projects", "#4f7d52");
+
+  // name-wise team summary for the current month
+  const bp = S.by_person||[];
+  $("#dashTeam").innerHTML = bp.length ? `
+    <div class="pw-card" style="padding:14px 16px">
+      <div class="sec-label" style="border:none;padding:0;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— open leads now · conversions &amp; project value this month</span></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:460px">
+        <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px">
+          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Leads assigned</th><th style="padding:5px 8px" class="num">Converted (mo)</th><th style="padding:5px 8px" class="num">Project value (mo)</th></tr></thead>
+        <tbody>${bp.map(r=>`<tr style="border-top:1px solid var(--line-2)">
+          <td style="padding:6px 8px">${esc(r.name)}</td>
+          <td style="padding:6px 8px" class="num">${r.leads_assigned}</td>
+          <td style="padding:6px 8px" class="num">${r.converted_month}</td>
+          <td style="padding:6px 8px" class="num mono">${fmt(r.project_value_month)}</td></tr>`).join("")}
+          <tr style="border-top:2px solid var(--line-2);font-weight:600">
+            <td style="padding:6px 8px">Total</td><td class="num" style="padding:6px 8px">—</td>
+            <td class="num" style="padding:6px 8px">${S.converted_month||0}</td>
+            <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_month||0)}</td></tr>
+        </tbody></table></div>
+    </div>` : "";
   $("#dashKpis").querySelectorAll(".kpi[data-goto]").forEach(c=>{
     if(c.dataset.goto) c.onclick=()=>gotoTab(c.dataset.goto);
   });
