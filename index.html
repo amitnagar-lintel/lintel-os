@@ -2252,7 +2252,7 @@ async function pwOverview(p,body){
 /* ---- Payments / Client Wallet ---- */
 async function pwPayments(p,body){
   const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
-  const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx");
+  const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx").order("id");
   const list=pays||[];
   const mlist=miles||[];
   const received=list.reduce((s,r)=>s+Number(r.amount||0),0);
@@ -2322,7 +2322,8 @@ async function pwPayments(p,body){
     });
     body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
       if(!confirm("Delete this payment entry?")) return;
-      await sb.from("project_payments").delete().eq("id",b.dataset.pid);
+      const {error}=await sb.from("project_payments").delete().eq("id",b.dataset.pid);
+      if(error) return toast(error.message);
       pwPayments(p,body);
     });
   }
@@ -2331,18 +2332,24 @@ async function pwPayments(p,body){
 /* ---- Milestone schedule setup ---- */
 function milestoneSetup(p, existing){
   const contractVal=Number(p.contract_value)||0;
-  const def=existing.length?existing:[
+  // a milestone with an issued PI, a payment link, or any payment progress is immutable
+  const isLocked=m=>!!(m.pi_number||m.razorpay_link||(m.status&&m.status!=='pending'));
+  const stripPct=s=>(s||'').replace(/\s*\(\d+(\.\d+)?%\)$/,'');
+  const def=existing.length?existing.map(m=>({...m,label:stripPct(m.label)})):[
     {label:"Advance",percent:10},
     {label:"On design sign-off",percent:40},
     {label:"On material procurement",percent:30},
     {label:"On handover",percent:20}
   ];
-  const rowHtml=(m,i)=>`<div class="mom-action-edit" data-mrow="${i}">
-    <input class="ms-label" placeholder="Milestone" value="${esc(m.label||'')}">
-    <input class="ms-pct" type="number" placeholder="%" value="${m.percent||0}" style="width:80px">
-    <span class="ms-amt mono" style="font-size:12px;color:var(--ink-soft)">${fmt(Math.round(contractVal*(m.percent||0)/100))}</span>
-    <button class="linkbtn del" onclick="this.parentElement.remove();window._recalcMile&&window._recalcMile()">×</button>
-  </div>`;
+  const rowHtml=(m,i)=>{
+    const lk=m.id&&isLocked(m);
+    return `<div class="mom-action-edit" data-mrow="${i}"${m.id?` data-msid="${m.id}"`:''}${lk?' data-locked="1"':''}>
+    <input class="ms-label" placeholder="Milestone" value="${esc(m.label||'')}"${lk?' disabled':''}>
+    <input class="ms-pct" type="number" placeholder="%" value="${m.percent||0}" style="width:80px"${lk?' disabled':''}>
+    <span class="ms-amt mono" style="font-size:12px;color:var(--ink-soft)">${fmt(lk?(Number(m.amount)||0):Math.round(contractVal*(m.percent||0)/100))}</span>
+    ${lk?`<span style="font-size:11px;color:var(--ink-soft);white-space:nowrap" title="Locked — this milestone has an issued PI, a payment link, or a payment">🔒 ${m.status==='paid'?'Paid':m.pi_number?esc(m.pi_number):'Link created'}</span>`
+        :`<button class="linkbtn del" onclick="this.parentElement.remove();window._recalcMile&&window._recalcMile()">×</button>`}
+  </div>`;};
   openModal(`
     <div class="modal-h">Payment schedule</div>
     <div class="modal-b">
@@ -2356,7 +2363,7 @@ function milestoneSetup(p, existing){
     let totPct=0;
     document.querySelectorAll("#ms-rows .mom-action-edit").forEach(r=>{
       const pct=Number(r.querySelector(".ms-pct").value)||0; totPct+=pct;
-      r.querySelector(".ms-amt").textContent=fmt(Math.round(contractVal*pct/100));
+      if(r.dataset.locked!=="1") r.querySelector(".ms-amt").textContent=fmt(Math.round(contractVal*pct/100));
     });
     const el=$("#ms-total");
     el.innerHTML=`Total: <b style="color:${totPct===100?'var(--green)':'var(--clay)'}">${totPct}%</b>${totPct!==100?' — should be 100%':' ✓'}`;
@@ -2366,18 +2373,50 @@ function milestoneSetup(p, existing){
   $("#ms-add").onclick=()=>{ $("#ms-rows").insertAdjacentHTML("beforeend",rowHtml({label:"",percent:0},Date.now())); recalc(); };
   recalc();
   $("#ms-save").onclick=async()=>{
-    const rows=Array.from(document.querySelectorAll("#ms-rows .mom-action-edit")).map((r,i)=>({
-      label:r.querySelector(".ms-label").value.trim(),
-      percent:Number(r.querySelector(".ms-pct").value)||0,
-      idx:i
-    })).filter(x=>x.label&&x.percent);
-    if(!rows.length) return toast("Add at least one milestone");
-    // clear existing and re-insert
-    await sb.from("payment_milestones").delete().eq("project_id",p.id);
-    const payload=rows.map(r=>({project_id:p.id,label:`${r.label} (${r.percent}%)`,percent:r.percent,amount:Math.round(contractVal*r.percent/100),sort_idx:r.idx,status:"pending"}));
-    const {error}=await sb.from("payment_milestones").insert(payload);
-    if(error) return toast(error.message);
-    closeModal(); toast("Schedule saved"); pwPayments(p,$("#pwBody"));
+    const btn=$("#ms-save"); if(btn.disabled) return; btn.disabled=true;
+    try{
+      const rows=Array.from(document.querySelectorAll("#ms-rows .mom-action-edit")).map((r,i)=>({
+        id:r.dataset.msid?Number(r.dataset.msid):null,
+        locked:r.dataset.locked==="1",
+        label:r.querySelector(".ms-label").value.trim(),
+        percent:Number(r.querySelector(".ms-pct").value)||0,
+        idx:i
+      })).filter(x=>x.locked||(x.label&&x.percent));
+      if(!rows.length){ toast("Add at least one milestone"); return; }
+      // rounded amounts; when % total is exactly 100, the last editable row absorbs
+      // the rounding remainder so the schedule sums to the contract value to the rupee
+      const totPct=rows.reduce((s,r)=>s+r.percent,0);
+      const amounts=rows.map(r=>Math.round(contractVal*r.percent/100));
+      if(totPct===100){
+        const li=rows.map(r=>r.locked).lastIndexOf(false);
+        if(li>=0) amounts[li]=contractVal-amounts.reduce((s,a,j)=>j===li?s:s+a,0);
+      }
+      // diff against fresh DB state — never delete or rewrite a milestone that carries
+      // an issued PI, a payment link, or payment progress (even if it got one since the modal opened)
+      const {data:freshAll,error:fErr}=await sb.from("payment_milestones").select("id,pi_number,razorpay_link,status").eq("project_id",p.id);
+      if(fErr){ toast(fErr.message); return; }
+      const keptIds=new Set(rows.filter(r=>r.id).map(r=>r.id));
+      const lockedNow=new Set((freshAll||[]).filter(m=>isLocked(m)).map(m=>m.id));
+      const toDelete=(freshAll||[]).filter(m=>!keptIds.has(m.id)&&!lockedNow.has(m.id)).map(m=>m.id);
+      for(let j=0;j<rows.length;j++){
+        const r=rows[j];
+        if(r.id&&(r.locked||lockedNow.has(r.id))){
+          const {error}=await sb.from("payment_milestones").update({sort_idx:r.idx}).eq("id",r.id);
+          if(error){ toast(error.message); return; }
+        }else if(r.id){
+          const {error}=await sb.from("payment_milestones").update({label:`${r.label} (${r.percent}%)`,percent:r.percent,amount:amounts[j],sort_idx:r.idx}).eq("id",r.id);
+          if(error){ toast(error.message); return; }
+        }else{
+          const {error}=await sb.from("payment_milestones").insert({project_id:p.id,label:`${r.label} (${r.percent}%)`,percent:r.percent,amount:amounts[j],sort_idx:r.idx,status:"pending"});
+          if(error){ toast(error.message); return; }
+        }
+      }
+      if(toDelete.length){
+        const {error}=await sb.from("payment_milestones").delete().in("id",toDelete);
+        if(error){ toast(error.message); return; }
+      }
+      closeModal(); toast("Schedule saved"); pwPayments(p,$("#pwBody"));
+    }finally{ btn.disabled=false; }
   };
 }
 
@@ -2398,6 +2437,8 @@ async function createRazorpayLink(p, milestone){
     }
     return;
   }
+  if(createRazorpayLink._busy) return;
+  createRazorpayLink._busy=true;
   toast("Creating payment link…");
   // ensure a PI number exists for reference
   let boqRef=`BOQ/${p.code||'LSA'}`;
@@ -2414,6 +2455,9 @@ async function createRazorpayLink(p, milestone){
     const data=await r.json();
     if(data.error){ toast("Razorpay: "+data.error); return; }
     if(data.short_url){
+      // persist the link ourselves — don't rely on the payment server writing it back
+      const {error:uErr}=await sb.from("payment_milestones").update({razorpay_link:data.short_url,status:"link_sent"}).eq("id",milestone.id);
+      if(uErr) toast("Link created but not saved to milestone: "+uErr.message);
       milestone.razorpay_link=data.short_url; milestone.status="link_sent";
       toast("Payment link created");
       navigator.clipboard?.writeText(data.short_url);
@@ -2424,28 +2468,38 @@ async function createRazorpayLink(p, milestone){
       }
     }
   }catch(e){ toast("Could not reach payment server"); }
+  finally{ createRazorpayLink._busy=false; }
 }
 
 /* ---- Generate / view Proforma Invoice ---- */
 async function generateProforma(p, milestone){
-  // get latest BOQ for ref
-  const {data:bv}=await sb.from("boq_versions").select("version,version_label").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
-  const boqRef=`BOQ/${p.code||'LSA'}${bv&&bv[0]?'/v'+bv[0].version:''}`;
-  let piNumber=milestone.pi_number;
-  // generate PI number if not already set
-  if(!piNumber){
-    const {data:proj}=await sb.from("projects").select("pi_counter").eq("id",p.id).single();
-    const next=((proj&&proj.pi_counter)||0)+1;
-    piNumber=`${p.code||'LSA-2026'}/PI-${next}`;
-    await sb.from("projects").update({pi_counter:next}).eq("id",p.id);
-    await sb.from("payment_milestones").update({pi_number:piNumber,status:milestone.status==='pending'?'link_sent':milestone.status}).eq("id",milestone.id);
-    await sb.from("proforma_invoices").insert({
-      project_id:p.id, milestone_id:milestone.id, pi_number:piNumber, boq_ref:boqRef,
-      amount:milestone.amount, remark:`Refer to final ${boqRef} shared for details.`,
-      client_name:p.client_name||p.name, client_phone:p.client_phone, client_email:p.client_email, created_by:me.id
-    });
-  }
-  showProformaDoc(p, milestone, piNumber, boqRef);
+  if(generateProforma._busy) return;
+  generateProforma._busy=true;
+  try{
+    // get latest BOQ for ref
+    const {data:bv}=await sb.from("boq_versions").select("version,version_label").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+    const boqRef=`BOQ/${p.code||'LSA'}${bv&&bv[0]?'/v'+bv[0].version:''}`;
+    let piNumber=milestone.pi_number;
+    // generate PI number if not already set — counter increments atomically server-side
+    if(!piNumber){
+      const {data:next,error:cErr}=await sb.rpc("next_pi_counter",{p_project_id:p.id});
+      if(cErr||!next){ toast("Could not reserve a PI number"+(cErr?": "+cErr.message:"")); return; }
+      // fallback prefix includes the project id — pi_counter is per-project, so a shared
+      // fallback would collide across code-less projects on the global unique index
+      piNumber=`${p.code||('LSA-P'+p.id)}/PI-${next}`;
+      // insert the PI record first; only a successfully recorded PI gets stamped on the milestone
+      const {error:iErr}=await sb.from("proforma_invoices").insert({
+        project_id:p.id, milestone_id:milestone.id, pi_number:piNumber, boq_ref:boqRef,
+        amount:milestone.amount, remark:`Refer to final ${boqRef} shared for details.`,
+        client_name:p.client_name||p.name, client_phone:p.client_phone, client_email:p.client_email, created_by:me.id
+      });
+      if(iErr){ toast("PI record failed: "+iErr.message); return; }
+      const {error:mErr}=await sb.from("payment_milestones").update({pi_number:piNumber,status:milestone.status==='pending'?'link_sent':milestone.status}).eq("id",milestone.id);
+      if(mErr){ toast("PI "+piNumber+" recorded but not stamped on the milestone: "+mErr.message); return; }
+      milestone.pi_number=piNumber;
+    }
+    showProformaDoc(p, milestone, piNumber, boqRef);
+  }finally{ generateProforma._busy=false; }
 }
 
 function showProformaDoc(p, milestone, piNumber, boqRef){
@@ -2645,7 +2699,7 @@ async function pwOrders(p,body){
   body.querySelectorAll("[data-po]").forEach(b=>b.onclick=()=>{ activePO=Number(b.dataset.po); poDetail(p,body,activePO); });
   if(!ro){
     if($("#genPO")) $("#genPO").onclick=()=>generatePOs(p,body);
-    body.querySelectorAll("[data-pod]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this work order?"))return; await sb.from("purchase_orders").delete().eq("id",b.dataset.pod); pwOrders(p,body); });
+    body.querySelectorAll("[data-pod]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this work order?"))return; const {error}=await sb.from("purchase_orders").delete().eq("id",b.dataset.pod); if(error) return toast(error.message); pwOrders(p,body); });
   }
 }
 
@@ -2681,26 +2735,29 @@ async function generatePOs(p,body){
   const picked=new Set(catNames);
   $("#po_cats").querySelectorAll(".tgopt").forEach(el=>el.onclick=()=>{ const c=el.dataset.c; if(picked.has(c)){picked.delete(c);el.classList.remove("on");}else{picked.add(c);el.classList.add("on");} });
   $("#po_go").onclick=async()=>{
-    const basis=$("#po_basis").value;
-    const sel=[...picked]; if(!sel.length) return toast("Pick at least one scope");
-    const {count}=await sb.from("purchase_orders").select("*",{count:"exact",head:true});
-    let n=(count||0);
-    const rows=[];
-    sel.forEach(cat=>{
-      const its=cats[cat].map(r=>{
-        const baseRate=Number(r.rate)||0;
-        const rate=basis==="client"?Math.round(baseRate*(1+boost/100)):baseRate;
-        const qty=Number(r.qty)||0;
-        return {room:r.room||"",item:r.item_name||r.description||"",unit:r.uom||"",qty,rate,amount:Math.round(rate*qty)};
+    const btn=$("#po_go"); if(btn.disabled) return; btn.disabled=true;
+    try{
+      const basis=$("#po_basis").value;
+      const sel=[...picked]; if(!sel.length){ toast("Pick at least one scope"); return; }
+      // WO numbers come from a server-side sequence — race-safe, year not hardcoded
+      const {data:nums,error:nErr}=await sb.rpc("next_wo_numbers",{p_n:sel.length});
+      if(nErr||!nums||nums.length!==sel.length){ toast("Could not reserve WO numbers"+(nErr?": "+nErr.message:"")); return; }
+      const rows=[];
+      sel.forEach((cat,k)=>{
+        const its=cats[cat].map(r=>{
+          const baseRate=Number(r.rate)||0;
+          const rate=basis==="client"?Math.round(baseRate*(1+boost/100)):baseRate;
+          const qty=Number(r.qty)||0;
+          return {room:r.room||"",item:r.item_name||r.description||"",unit:r.uom||"",qty,rate,amount:Math.round(rate*qty)};
+        });
+        const subtotal=its.reduce((s,x)=>s+x.amount,0);
+        rows.push({ project_id:p.id, boq_version_id:ver.id, po_number:nums[k],
+          category:cat, rate_basis:basis, status:"draft", items:its, subtotal, created_by:me.id });
       });
-      const subtotal=its.reduce((s,x)=>s+x.amount,0);
-      n++;
-      rows.push({ project_id:p.id, boq_version_id:ver.id, po_number:`LSA-WO-2026-${String(n).padStart(3,"0")}`,
-        category:cat, rate_basis:basis, status:"draft", items:its, subtotal, created_by:me.id });
-    });
-    const {error}=await sb.from("purchase_orders").insert(rows);
-    if(error) return toast(error.message);
-    closeModal(); toast(`${rows.length} work order(s) created`); pwOrders(p,body);
+      const {error}=await sb.from("purchase_orders").insert(rows);
+      if(error){ toast(error.message); return; }
+      closeModal(); toast(`${rows.length} work order(s) created`); pwOrders(p,body);
+    }finally{ btn.disabled=false; }
   };
 }
 
