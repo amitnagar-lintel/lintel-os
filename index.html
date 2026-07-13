@@ -799,10 +799,18 @@ function waOpen(phone,message){
   const url="https://wa.me/"+n+(message?("?text="+encodeURIComponent(message)):"");
   window.open(url,"_blank");
 }
-// default first-touch message for a lead
+// log to a lead's activity timeline (writers only); surface failures so nothing silently drops
+function logAct(leadId,type,text){
+  if(!canWrite()) return;
+  sb.from("lead_activities").insert({lead_id:leadId,type,text,by_user:me.id})
+    .then(({error})=>{ if(error) toast("Couldn't log to activity timeline"); })
+    .catch(()=>toast("Couldn't log to activity timeline"));
+}
+// default first-touch message for a lead — PLAIN TEXT for WhatsApp (no HTML escaping;
+// callers that render it into HTML wrap it with esc() themselves)
 function waLeadMsg(l){
   const first=(l.name||"there").trim().split(/\s+/)[0];
-  return `Hi ${first}, this is ${(me&&me.email?me.email.split("@")[0]:"Lintel Space Atelier")} from Lintel Space Atelier — Where Luxury Meets Functionality. Thank you for your interest in interior design for your ${esc(l.property_type||"home")}. I'd love to understand your requirements and share how we can help. When would be a good time for a quick call?`;
+  return `Hi ${first}, this is ${(me&&me.email?me.email.split("@")[0]:"Lintel Space Atelier")} from Lintel Space Atelier — Where Luxury Meets Functionality. Thank you for your interest in interior design for your ${l.property_type||"home"}. I'd love to understand your requirements and share how we can help. When would be a good time for a quick call?`;
 }
 // template library for the lead-card WhatsApp menu
 function waTemplates(l){
@@ -834,7 +842,7 @@ function waMenu(l, anchorEl){
     const i=b.dataset.i;
     if(i==="edit"){ m.remove(); waCustomDialog(l); return; }
     waOpen(l.phone, tpls[Number(i)][1]);
-    if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Sent: "+tpls[Number(i)][0],by_user:me.id});
+    logAct(l.id,"WhatsApp","WhatsApp opened · "+tpls[Number(i)][0]);
     m.remove();
   });
   // close on outside click
@@ -849,7 +857,7 @@ function waCustomDialog(l){
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="wa_send">Open in WhatsApp →</button></div>`);
   $("#wa_send").onclick=()=>{ waOpen(l.phone,$("#wa_text").value); closeModal();
-    if(canWrite()) sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id}); };
+    logAct(l.id,"WhatsApp","WhatsApp opened · custom message"); };
 }
 function closeModal(){$("#scrim").classList.remove("open");$("#scrim").innerHTML="";}
 function openModal(html){$("#scrim").innerHTML=`<div class="modal">${html}</div>`;$("#scrim").classList.add("open");
@@ -1624,7 +1632,7 @@ function bindLeadCommon(l){
   const wl=$("#waLead");
   if(wl) wl.onclick=()=>{
     waOpen(l.phone, waLeadMsg(l));
-    sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id});
+    logAct(l.id,"WhatsApp","WhatsApp opened · intro message");
   };
   const wle=$("#waLeadEdit");
   if(wle) wle.onclick=()=>{
@@ -1636,7 +1644,7 @@ function bindLeadCommon(l){
       </div>
       <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="wa_send">Open in WhatsApp →</button></div>`);
     $("#wa_send").onclick=()=>{ waOpen(l.phone,$("#wa_text").value); closeModal();
-      sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:"Opened WhatsApp chat",by_user:me.id}); };
+      logAct(l.id,"WhatsApp","WhatsApp opened · custom message"); };
   };
 }
 
@@ -1742,12 +1750,12 @@ function shareAdvance(l,total,advance){
   catch(e){ $("#adv_qr").innerHTML='<div style="font-size:12px;color:var(--ink-soft);width:150px">QR unavailable</div>'; }
   if($("#adv_wa")) $("#adv_wa").onclick=()=>{
     waOpen(l.phone,msg);
-    sb.from("lead_activities").insert({lead_id:l.id,type:"WhatsApp",text:`Shared 10% advance request · ${fmt(advance)}`,by_user:me.id});
+    logAct(l.id,"WhatsApp",`WhatsApp opened · 10% advance request · ${fmt(advance)}`);
   };
   if($("#adv_email")) $("#adv_email").onclick=()=>{
     const subj=`Advance payment to begin your project — Lintel Space Atelier`;
     location.href=`mailto:${encodeURIComponent(l.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(msg)}`;
-    sb.from("lead_activities").insert({lead_id:l.id,type:"Email",text:`Emailed 10% advance request · ${fmt(advance)}`,by_user:me.id});
+    logAct(l.id,"Email",`Email drafted · 10% advance request · ${fmt(advance)}`);
   };
 }
 
@@ -2422,9 +2430,14 @@ function milestoneSetup(p, existing){
 
 /* ---- Razorpay: create / copy single-use payment link ---- */
 const PRIYA_SERVER="https://lintel-crm-production.up.railway.app";
-/* Tell Priya the moment a lead is assigned → instant WhatsApp to the owner */
+/* Tell Priya the moment a lead is assigned → instant WhatsApp to the owner.
+   Failures are surfaced (previously swallowed) so a dropped assignment alert is visible. */
 function pingAssignment(payload){
-  try{ fetch(PRIYA_SERVER+"/notify/assignment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).catch(()=>{}); }catch(_){}
+  try{
+    fetch(PRIYA_SERVER+"/notify/assignment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(r=>{ if(!r.ok) toast("Assignment alert may not have reached the team (server "+r.status+")"); })
+      .catch(()=>toast("Assignment alert didn't reach the team — check your connection"));
+  }catch(_){ toast("Assignment alert failed to send"); }
 }
 async function createRazorpayLink(p, milestone){
   // if already exists, just copy it
