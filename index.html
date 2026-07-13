@@ -920,29 +920,38 @@ async function renderDashboard(){
     </div>`;
   $("#dashKpis").innerHTML =
       kpi("Open leads", S.open_leads||0, "leads", "#5b86b3")
-    + kpi("Pipeline value", fmt(S.pipeline_value||0), "leads", "#B08433")
-    + kpi("Follow-ups due today", S.due_today||0, "leads", "#c0692d")
-    + kpi("Converted this month", S.converted_month||0, "projects", "#4f7d52");
+    + kpi("Leads added · mo", S.leads_added_month||0, "leads", "#B08433")
+    + kpi("Quotes shared · mo", S.quotes_month||0, "leads", "#c0692d")
+    + kpi("Converted · mo", S.converted_month||0, "projects", "#4f7d52");
 
-  // name-wise team summary for the current month
+  // name-wise team performance (this month for activity; assigned & value are current totals)
   const bp = S.by_person||[];
+  const tot=k=>bp.reduce((a,r)=>a+(Number(r[k])||0),0);
   $("#dashTeam").innerHTML = bp.length ? `
     <div class="pw-card" style="padding:14px 16px">
-      <div class="sec-label" style="border:none;padding:0;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— open leads now · conversions &amp; project value this month</span></div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:460px">
+      <div class="sec-label" style="border:none;padding:0;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— added / meetings / quotes / converted are this month · assigned &amp; value are current totals</span></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
         <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px">
-          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Leads assigned</th><th style="padding:5px 8px" class="num">Converted (mo)</th><th style="padding:5px 8px" class="num">Project value (mo)</th></tr></thead>
+          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value</th></tr></thead>
         <tbody>${bp.map(r=>`<tr style="border-top:1px solid var(--line-2)">
-          <td style="padding:6px 8px">${esc(r.name)}</td>
+          <td style="padding:6px 8px">${r.cid?`<a href="#" data-cid="${r.cid}" data-name="${esc(r.name)}" style="color:var(--brass);text-decoration:none;font-weight:600">${esc(r.name)}</a>`:`<span style="color:var(--ink-soft)">${esc(r.name)}</span>`}</td>
           <td style="padding:6px 8px" class="num">${r.leads_assigned}</td>
-          <td style="padding:6px 8px" class="num">${r.converted_month}</td>
-          <td style="padding:6px 8px" class="num mono">${fmt(r.project_value_month)}</td></tr>`).join("")}
+          <td style="padding:6px 8px" class="num">${r.leads_added}</td>
+          <td style="padding:6px 8px" class="num">${r.meetings}</td>
+          <td style="padding:6px 8px" class="num">${r.quotes}</td>
+          <td style="padding:6px 8px" class="num">${r.converted}</td>
+          <td style="padding:6px 8px" class="num mono">${fmt(r.project_value)}</td></tr>`).join("")}
           <tr style="border-top:2px solid var(--line-2);font-weight:600">
-            <td style="padding:6px 8px">Total</td><td class="num" style="padding:6px 8px">—</td>
+            <td style="padding:6px 8px">Total</td>
+            <td class="num" style="padding:6px 8px">${tot('leads_assigned')}</td>
+            <td class="num" style="padding:6px 8px">${S.leads_added_month||0}</td>
+            <td class="num" style="padding:6px 8px">${S.meetings_month||0}</td>
+            <td class="num" style="padding:6px 8px">${S.quotes_month||0}</td>
             <td class="num" style="padding:6px 8px">${S.converted_month||0}</td>
-            <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_month||0)}</td></tr>
+            <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_total||0)}</td></tr>
         </tbody></table></div>
     </div>` : "";
+  $("#dashTeam").querySelectorAll("[data-cid]").forEach(a=>a.onclick=e=>{ e.preventDefault(); dashConsultantProjects(Number(a.dataset.cid), a.dataset.name); });
   $("#dashKpis").querySelectorAll(".kpi[data-goto]").forEach(c=>{
     if(c.dataset.goto) c.onclick=()=>gotoTab(c.dataset.goto);
   });
@@ -984,6 +993,28 @@ async function renderDashboard(){
     tr.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(tr.dataset.open)),40); };
   });
   const av=$("#dashAllLeads"); if(av) av.onclick=()=>gotoTab("leads");
+}
+// drill-down: a consultant's projects (from the team-performance table)
+async function dashConsultantProjects(cid, name){
+  const {data:projs,error}=await sb.from("projects").select("id,code,name,client_name,contract_value,status,current_stage")
+    .eq("consultant_id",cid).order("created_at",{ascending:false}).order("id",{ascending:false});
+  if(error) return toast(error.message);
+  const list=projs||[];
+  openModal(`<div class="modal-h">${esc(name)} · Projects (${list.length})</div>
+    <div class="modal-b">${list.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Code</th><th style="padding:5px 8px">Project</th><th style="padding:5px 8px">Stage</th><th style="padding:5px 8px" class="num">Value</th></tr></thead>
+      <tbody>${list.map(pr=>`<tr data-proj="${pr.id}" style="border-top:1px solid var(--line-2);cursor:pointer">
+        <td style="padding:6px 8px" class="mono">${esc(pr.code||'—')}</td>
+        <td style="padding:6px 8px">${esc(pr.name||pr.client_name||'—')}</td>
+        <td style="padding:6px 8px">${esc(pr.current_stage||pr.status||'—')}</td>
+        <td style="padding:6px 8px" class="num mono">${fmt(pr.contract_value)}</td></tr>`).join("")}</tbody></table></div>`
+      :'<div class="empty" style="padding:16px">No projects for this consultant yet.</div>'}</div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Close</button></div>`);
+  document.querySelectorAll("[data-proj]").forEach(tr=>tr.onclick=()=>{
+    closeModal(); activeProject=Number(tr.dataset.proj); projectTab="overview"; activeLead=null; render("projects");
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    setTimeout(()=>renderProjectWorkspace(Number(tr.dataset.proj)),60);
+  });
 }
 
 
@@ -1836,7 +1867,8 @@ async function convertLead(l){
     const {data:proj,error}=await sb.from("projects").insert({
       code, name:l.name, client_name:l.name, client_phone:l.phone, client_email:l.email, property_type:l.property_type,
       site_address:l.site_address||l.locality, lead_id:l.id, contract_value:Number($("#cv_val").value||total||0),
-      consultant_id:l.consultant_id||null, designer_id:designer, pm_id:pm||me.id, status:"active", current_stage:"Briefing"
+      consultant_id:l.consultant_id||null, designer_id:designer, pm_id:pm||me.id, status:"active", current_stage:"Briefing",
+      converted_at:new Date().toISOString()
     }).select().single();
     if(error) return toast(error.message);
     if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
@@ -2013,7 +2045,7 @@ function newProjectForm(){
       code, name, client_name:name, client_phone:$("#np_phone").value.trim()||null,
       client_email:$("#np_email").value.trim()||null, property_type:$("#np_ptype").value,
       site_address:$("#np_site").value.trim()||null, contract_value:Number($("#np_val").value||0),
-      status:$("#np_status").value, current_stage:"Briefing"
+      status:$("#np_status").value, current_stage:"Briefing", converted_at:new Date().toISOString()
     }).select().single();
     if(error) return toast(error.message);
     // seed the 6 standard milestones
