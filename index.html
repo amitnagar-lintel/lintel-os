@@ -1249,7 +1249,7 @@ async function dashConsultantProjects(cid, name){
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
 let activeLead = null, leadTab = "overview";
-const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["activity","Activity"],["notes","Notes"]];
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Presentations"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -1648,8 +1648,31 @@ function drawLeadTab(l){
   if(leadTab==="briefing") return lwBriefing(l,body);
   if(leadTab==="boq")      return lwBoq(l,body);
   if(leadTab==="meetings") return lwMeetings(l,body);
+  if(leadTab==="presentations") return lwPresentations(l,body);
   if(leadTab==="activity") return lwActivity(l,body);
   if(leadTab==="notes")    return lwNotes(l,body);
+}
+
+/* ---- Client presentations (LSA Studio decks, keyed by lead) ---- */
+const LSA_STUDIO_URL = "https://amitnagar-lintel.github.io/lintel-studio/";
+async function lwPresentations(l,body){
+  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client presentations</h3><div id="presInner">Loading…</div></div>`;
+  const w=canWrite();
+  const {data:pres,error}=await sb.from("studio_presentations")
+    .select("id,title,client,created_by,updated_at").eq("lead_id",l.id).order("updated_at",{ascending:false});
+  if(error){ $("#presInner").innerHTML=`<div class="tl-empty">Could not load presentations: ${esc(error.message)}</div>`; return; }
+  $("#presInner").innerHTML=`
+    ${w?`<div class="actadd" style="margin-bottom:14px"><button class="primary" onclick="window.open('${LSA_STUDIO_URL}?lead=${l.id}','_blank')">✦ New presentation in Studio ↗</button></div>`:""}
+    <div class="timeline">${(pres||[]).map(p=>{
+        const dt=new Date(p.updated_at);
+        const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+        const who=p.created_by?staffNameByProfile(p.created_by):"";
+        return `<div class="tl-item2"><div class="tl-ic">🎞️</div>
+          <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(p.title||"Untitled")}</span><span class="tl-when2 mono">${when}</span></div>
+          <div class="tl-text2">${esc(p.client||"—")}${who?` · by ${esc(who)}`:""}</div>
+          <div style="margin-top:8px"><button onclick="window.open('${LSA_STUDIO_URL}?open=${p.id}','_blank')">Open in Studio ↗</button></div>
+          </div></div>`;
+      }).join("")||`<div class="tl-empty">No presentations yet. Open the Studio to build a client moodboard &amp; proposal — every deck saved there appears here automatically.</div>`}</div>`;
 }
 
 /* ---- Lead Meetings & MoM (mirrors project Design tab, keyed by lead) ---- */
