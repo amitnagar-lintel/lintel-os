@@ -1656,7 +1656,7 @@ function drawLeadTab(l){
 /* ---- Client presentations (LSA Studio decks, keyed by lead) ---- */
 const LSA_STUDIO_URL = "https://amitnagar-lintel.github.io/lintel-studio/";
 async function lwPresentations(l,body){
-  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client presentations</h3><div id="presInner">Loading…</div></div>`;
+  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client presentations <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· Lead #${l.id}</span></h3><div id="presInner">Loading…</div></div>`;
   const w=canWrite();
   const {data:pres,error}=await sb.from("studio_presentations")
     .select("id,title,client,created_by,updated_at").eq("lead_id",l.id).order("updated_at",{ascending:false});
