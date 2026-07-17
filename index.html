@@ -1678,6 +1678,29 @@ async function moodboardPanel(leadId, body, headerSuffix){
 async function lwPresentations(l,body){ return moodboardPanel(l.id, body, "Lead #"+l.id); }
 async function pwMoodboard(p,body){ return moodboardPanel(p.lead_id, body, (p.code||p.name||"Project")+" · Lead #"+(p.lead_id||"—")); }
 
+/* ---- Lintel Canvas boards (LSA Studio sketch boards, keyed by lead; shown in project) ---- */
+async function canvasPanel(leadId, body, headerSuffix){
+  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Design canvases <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· ${esc(headerSuffix||"")}</span></h3><div style="font-size:12.5px;color:var(--ink-soft);margin:-4px 0 14px">Live layout sketches drawn in Lintel Canvas — kitchen, wardrobe &amp; TV-unit plans explained to the client. Every board saved in the Studio appears here.</div><div id="canvInner">Loading…</div></div>`;
+  const w=canWrite();
+  if(!leadId){ $("#canvInner").innerHTML=`<div class="tl-empty">This project isn't linked to a lead yet, so canvases can't be listed here. Boards are keyed to the lead record.</div>`; return; }
+  const {data:rows,error}=await sb.from("studio_canvases")
+    .select("id,title,created_by,updated_at").eq("lead_id",leadId).order("updated_at",{ascending:false});
+  if(error){ $("#canvInner").innerHTML=`<div class="tl-empty">Could not load canvases: ${esc(error.message)}</div>`; return; }
+  $("#canvInner").innerHTML=`
+    ${w?`<div class="actadd" style="margin-bottom:14px"><button class="primary" onclick="window.open('${LSA_STUDIO_URL}?newcanvas=${leadId}','_blank')">✎ New canvas in Studio ↗</button></div>`:""}
+    <div class="timeline">${(rows||[]).map(r=>{
+        const dt=new Date(r.updated_at);
+        const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+        const who=r.created_by?staffNameByProfile(r.created_by):"";
+        return `<div class="tl-item2"><div class="tl-ic">✎</div>
+          <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(r.title||"Untitled canvas")}</span><span class="tl-when2 mono">${when}</span></div>
+          <div class="tl-text2">${who?`by ${esc(who)}`:"—"}</div>
+          <div style="margin-top:8px"><button onclick="window.open('${LSA_STUDIO_URL}?canvas=${r.id}','_blank')">Open in Studio ↗</button></div>
+          </div></div>`;
+      }).join("")||`<div class="tl-empty">No canvases yet. Open the Studio to sketch a layout live for the client — every board saved there appears here automatically.</div>`}</div>`;
+}
+async function pwCanvas(p,body){ return canvasPanel(p.lead_id, body, (p.code||p.name||"Project")+" · Lead #"+(p.lead_id||"—")); }
+
 /* ---- Lead Meetings & MoM (mirrors project Design tab, keyed by lead) ---- */
 async function lwMeetings(l,body){
   const w=canWrite();
@@ -2366,7 +2389,7 @@ async function renderProjects(){
   });
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Project Design"],["moodboard","Moodboard"],["execution","Execution"],["documents","Project Documents"],["team","Project Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Project Design"],["moodboard","Moodboard"],["canvas","Design Canvas"],["execution","Execution"],["documents","Project Documents"],["team","Project Team"]];
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
@@ -2405,6 +2428,7 @@ async function drawProjectTab(p){
   if(projectTab==="orders")     return pwOrders(p,body);
   if(projectTab==="design")     return pwDesign(p,body);
   if(projectTab==="moodboard")  return pwMoodboard(p,body);
+  if(projectTab==="canvas")     return pwCanvas(p,body);
   if(projectTab==="execution")  return pwExecution(p,body);
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
