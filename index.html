@@ -1249,7 +1249,7 @@ async function dashConsultantProjects(cid, name){
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
 let activeLead = null, leadTab = "overview";
-const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Presentations"],["activity","Activity"],["notes","Notes"]];
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Moodboard"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -1653,27 +1653,30 @@ function drawLeadTab(l){
   if(leadTab==="notes")    return lwNotes(l,body);
 }
 
-/* ---- Client presentations (LSA Studio decks, keyed by lead) ---- */
+/* ---- Client moodboards (LSA Studio decks, keyed by lead; shown in lead + project) ---- */
 const LSA_STUDIO_URL = "https://amitnagar-lintel.github.io/lintel-studio/";
-async function lwPresentations(l,body){
-  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client presentations <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· Lead #${l.id}</span></h3><div id="presInner">Loading…</div></div>`;
+async function moodboardPanel(leadId, body, headerSuffix){
+  body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client moodboards <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· ${esc(headerSuffix||"")}</span></h3><div id="presInner">Loading…</div></div>`;
   const w=canWrite();
+  if(!leadId){ $("#presInner").innerHTML=`<div class="tl-empty">This project isn't linked to a lead yet, so moodboards can't be listed here. Moodboards are keyed to the lead record.</div>`; return; }
   const {data:pres,error}=await sb.from("studio_presentations")
-    .select("id,title,client,created_by,updated_at").eq("lead_id",l.id).order("updated_at",{ascending:false});
-  if(error){ $("#presInner").innerHTML=`<div class="tl-empty">Could not load presentations: ${esc(error.message)}</div>`; return; }
+    .select("id,title,client,created_by,updated_at").eq("lead_id",leadId).order("updated_at",{ascending:false});
+  if(error){ $("#presInner").innerHTML=`<div class="tl-empty">Could not load moodboards: ${esc(error.message)}</div>`; return; }
   $("#presInner").innerHTML=`
-    ${w?`<div class="actadd" style="margin-bottom:14px"><button class="primary" onclick="window.open('${LSA_STUDIO_URL}?lead=${l.id}','_blank')">✦ New presentation in Studio ↗</button></div>`:""}
+    ${w?`<div class="actadd" style="margin-bottom:14px"><button class="primary" onclick="window.open('${LSA_STUDIO_URL}?lead=${leadId}','_blank')">✦ New moodboard in Studio ↗</button></div>`:""}
     <div class="timeline">${(pres||[]).map(p=>{
         const dt=new Date(p.updated_at);
         const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
         const who=p.created_by?staffNameByProfile(p.created_by):"";
-        return `<div class="tl-item2"><div class="tl-ic">🎞️</div>
+        return `<div class="tl-item2"><div class="tl-ic">🎨</div>
           <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(p.title||"Untitled")}</span><span class="tl-when2 mono">${when}</span></div>
           <div class="tl-text2">${esc(p.client||"—")}${who?` · by ${esc(who)}`:""}</div>
           <div style="margin-top:8px"><button onclick="window.open('${LSA_STUDIO_URL}?open=${p.id}','_blank')">Open in Studio ↗</button></div>
           </div></div>`;
-      }).join("")||`<div class="tl-empty">No presentations yet. Open the Studio to build a client moodboard &amp; proposal — every deck saved there appears here automatically.</div>`}</div>`;
+      }).join("")||`<div class="tl-empty">No moodboards yet. Open the Studio to build a client moodboard &amp; proposal — every deck saved there appears here automatically.</div>`}</div>`;
 }
+async function lwPresentations(l,body){ return moodboardPanel(l.id, body, "Lead #"+l.id); }
+async function pwMoodboard(p,body){ return moodboardPanel(p.lead_id, body, (p.code||p.name||"Project")+" · Lead #"+(p.lead_id||"—")); }
 
 /* ---- Lead Meetings & MoM (mirrors project Design tab, keyed by lead) ---- */
 async function lwMeetings(l,body){
@@ -2100,7 +2103,7 @@ async function leadBoqGenerator(l, host){
   G.projectId=null; G.leadId=l.id;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null}));
   }
   const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
@@ -2122,7 +2125,8 @@ async function leadBoqGenerator(l, host){
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
     amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
     cost:Number(r.cost_rate)||0,
-    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
+    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included',
+    stream:normStream(r.stream||classifyStream(r.category)), lineDisc:Number(r.line_disc_pct)||0
   }));
   G.uid=G.rows.length;
   gRender(l, host); // generator uses l like a project; gSave guards the project-only write
@@ -2362,7 +2366,7 @@ async function renderProjects(){
   });
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Project Design"],["execution","Execution"],["documents","Project Documents"],["team","Project Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Project Design"],["moodboard","Moodboard"],["execution","Execution"],["documents","Project Documents"],["team","Project Team"]];
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
@@ -2400,6 +2404,7 @@ async function drawProjectTab(p){
   if(projectTab==="payments")   return pwPayments(p,body);
   if(projectTab==="orders")     return pwOrders(p,body);
   if(projectTab==="design")     return pwDesign(p,body);
+  if(projectTab==="moodboard")  return pwMoodboard(p,body);
   if(projectTab==="execution")  return pwExecution(p,body);
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
@@ -4288,7 +4293,7 @@ async function pwBoq(p, body){
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null}));
   }
   // find or offer to create a BOQ version for this project
   const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
@@ -4314,32 +4319,78 @@ async function pwBoq(p, body){
     w:Number(r.width)||0, h:Number(r.height)||0, qty:Number(r.qty)||0,
     amount:(Number(r.rate)||0)*(Number(r.qty)||0), remarks:r.remarks||"", custom:!!r.is_custom,
     cost:Number(r.cost_rate)||0,
-    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included'
+    scope:(r.scope==='excluded'||r.scope==='optional')?r.scope:'included',
+    stream:normStream(r.stream||classifyStream(r.category)), lineDisc:Number(r.line_disc_pct)||0
   }));
   G.uid=G.rows.length;
   gRender(p, body);
 }
 
-/* ---- boosted + financials (exact logic from generator) ---- */
-function gBoost(){ return Number(G.ver?.boost_pct)||0; }
-function gBoosted(r){ const base=r.originalRate!==undefined?r.originalRate:r.rate; return Math.round(base*r.qty*(1+gBoost()/100)); }
+/* ---- BOQ sections (streams) + per-section financials ---- */
+const STREAMS=[['modular','Modular / KWS'],['carpentry','Lintel — On-site Carpentry'],['services','Lintel — Services'],['furnishing','Loose Furniture, Decor & Appliances']];
+const STREAM_KEYS=STREAMS.map(s=>s[0]);
+const STREAM_LABEL=Object.fromEntries(STREAMS);
+const STREAM_DEFAULTS={fee:9,gst:18,disc:0,boost:0}; // owner default: 9% fee / 18% GST on every section
+const FURNISHING='furnishing'; // the only section with per-line discount
+function normStream(s){ return STREAM_KEYS.indexOf(s)>=0?s:'modular'; }
+// Classify a category into a section: rate-library tag first, then keyword fallback (mirrors boq_category_trade_map).
+function classifyStream(cat){
+  if(!cat) return 'modular';
+  const c=String(cat).trim().toLowerCase();
+  const hit=(G.rates||[]).find(r=>r.cat&&r.cat.trim().toLowerCase()===c&&r.stream);
+  if(hit) return normStream(hit.stream);
+  if(/wallpaper|mural|mirror|glass|curtain|sofa|console|dining|appliance|chimney|hob|decor|furnish|furniture/.test(c)) return 'furnishing';
+  if(/civil|demolition|demolish|plumb|electric|false ?ceiling|ceiling|paint|texture|tile|tiling|stone|granite|quartz|marble|water ?proof|plaster|masonry|brick|\bpop\b|pelmet|window|partition|dado|counter|flooring/.test(c)) return 'services';
+  if(/panel|panelling|paneling|trim|carpentry|\bdoor/.test(c)) return 'carpentry';
+  return 'modular';
+}
+// Resolved section for a row: persisted stream wins; else classify from its category.
+function rowStream(r){ return normStream(r&&r.stream?r.stream:classifyStream(r&&r.cat)); }
+// Per-section financial settings (boq_versions.stream_settings jsonb; falls back to the legacy single columns, then defaults).
+function gStreamSettings(stream){
+  const ss=(G.ver&&G.ver.stream_settings)||{}, s=ss[stream]||{};
+  const lg={fee:G.ver&&G.ver.fee_pct,gst:G.ver&&G.ver.gst_pct,disc:G.ver&&G.ver.disc_pct,boost:G.ver&&G.ver.boost_pct};
+  const pick=(a,b,d)=>{ const v=(a!==undefined&&a!==null&&a!=='')?a:((b!==undefined&&b!==null&&b!=='')?b:d); return Number(v)||0; };
+  return {fee:pick(s.fee,lg.fee,STREAM_DEFAULTS.fee),gst:pick(s.gst,lg.gst,STREAM_DEFAULTS.gst),disc:pick(s.disc,lg.disc,STREAM_DEFAULTS.disc),boost:pick(s.boost,lg.boost,STREAM_DEFAULTS.boost)};
+}
+function gSetStreamSetting(stream,key,val){
+  G.ver=G.ver||{}; const ss=(G.ver.stream_settings=G.ver.stream_settings||{});
+  ss[stream]=ss[stream]||{}; ss[stream][key]=Number(val)||0; G.dirty=true;
+}
 function gScope(r){ const s=r&&r.scope; return (s==='excluded'||s==='optional')?s:'included'; }
 function gIncluded(){ return G.rows.filter(r=>gScope(r)==='included'); }
 function gScopeTag(r){ const s=gScope(r); return s==='excluded'?'<span class="gtag gtag-exc">Excluded</span>':s==='optional'?'<span class="gtag gtag-opt">Optional</span>':''; }
-function gFin(){
-  const mPct=Number(G.ver?.boost_pct)||0, mul=1+mPct/100;
-  const inc=gIncluded(); // A2: only scope==='included' lines sum into totals
-  const sub=inc.reduce((s,r)=>s+r.amount,0);
-  const subM=inc.reduce((s,r)=>s+gBoosted(r),0);
-  const fPct=Number(G.ver?.fee_pct)||0, gPct=Number(G.ver?.gst_pct)||0, dPct=Number(G.ver?.disc_pct)||0;
-  const fee=Math.round(subM*fPct/100);
-  const disc=Math.round((subM+fee)*dPct/100);
+// Per-line discount % (only meaningful in the furnishing section).
+function gLineDisc(r){ return rowStream(r)===FURNISHING?(Number(r.lineDisc)||0):0; }
+// Line value before section boost, after any per-line discount.
+function gLineBase(r){ const base=r.originalRate!==undefined?r.originalRate:r.rate; return (Number(base)||0)*(Number(r.qty)||0)*(1-gLineDisc(r)/100); }
+// Boosted line amount using THIS row's section boost.
+function gBoosted(r){ const b=gStreamSettings(rowStream(r)).boost; return Math.round(gLineBase(r)*(1+b/100)); }
+function gBoost(){ return 0; } // legacy shim — per-section boost now lives in gStreamSettings()
+// Financials for one section.
+function gStreamFin(stream){
+  const cfg=gStreamSettings(stream);
+  const rows=gIncluded().filter(r=>rowStream(r)===stream); // A2: excluded/optional never sum
+  const sub=rows.reduce((s,r)=>s+gLineBase(r),0);
+  const subM=rows.reduce((s,r)=>s+gBoosted(r),0);
+  const fee=Math.round(subM*cfg.fee/100);
+  const disc=Math.round((subM+fee)*cfg.disc/100);
   const base=subM+fee-disc;
-  const gst=Math.round(base*gPct/100);
-  return {sub,subM,fee,disc,base,gst,total:base+gst,fPct,gPct,dPct,mPct};
+  const gst=Math.round(base*cfg.gst/100);
+  return {stream,cfg,n:rows.length,sub,subM,fee,disc,base,gst,total:base+gst};
 }
+// Grand total across all sections (also the shape gFin() used to return).
+function gGrand(){
+  const per=STREAM_KEYS.map(gStreamFin);
+  const S=k=>per.reduce((s,f)=>s+f[k],0);
+  return {per,sub:S('sub'),subM:S('subM'),fee:S('fee'),disc:S('disc'),base:S('base'),gst:S('gst'),total:S('base')+S('gst')};
+}
+function gFin(){ return gGrand(); } // back-compat: callers using .subM/.fee/.disc/.gst/.total still work
 function gFmt(n){ return '₹'+Math.round(n).toLocaleString('en-IN'); }
 function gRooms(){ const o=[]; G.rows.forEach(r=>{ if(o.indexOf(r.room)===-1)o.push(r.room); }); return o; }
+function gRoomsIn(stream){ const o=[]; G.rows.forEach(r=>{ if(rowStream(r)===stream&&o.indexOf(r.room)===-1)o.push(r.room); }); return o; }
+// Sections that actually contain rows, in canonical order.
+function gActiveStreams(){ return STREAM_KEYS.filter(k=>G.rows.some(r=>rowStream(r)===k)); }
 
 /* ---- main render with sub-tabs ---- */
 function gRender(p, body){
@@ -4377,9 +4428,14 @@ function gBody(p){
 }
 
 /* ================= ESTIMATOR ================= */
+function catsForStream(stream){ return [...new Set(G.rates.filter(r=>normStream(r.stream||classifyStream(r.cat))===stream).map(r=>r.cat))]; }
 function gEstimator(p){
   const v=G.ver||{}, ro=!canWrite();
-  const cats=[...new Set(G.rates.map(r=>r.cat))];
+  G.ctx=p;                                   // remember context so add/import can fully re-render
+  if(!G.section) G.section='all';
+  const addSec=(G.section!=='all')?G.section:'modular';   // section the add forms target
+  const addCats=catsForStream(addSec);
+  const secOpts=STREAMS.map(s=>`<option value="${s[0]}"${s[0]===addSec?' selected':''}>${esc(s[1])}</option>`).join("");
   const b=$("#gBody");
   const createdBy=v.created_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.created_by):""):"";
   const editedBy=v.last_edited_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.last_edited_by):""):"";
@@ -4399,24 +4455,20 @@ function gEstimator(p){
       <div class="field"><label>Date</label><input id="m-date" type="date" value="${v.quote_date||''}"></div>
     </div>
     <div class="grid4" style="margin-top:10px">
-      <div class="field"><label>Design fee %</label><input id="m-fee" type="number" step="0.5" value="${v.fee_pct??9}"></div>
-      <div class="field"><label>GST %</label><input id="m-gst" type="number" value="${v.gst_pct??18}"></div>
-      <div class="field"><label style="color:var(--brass-deep)">Discount %</label><input id="m-disc" type="number" step="0.5" value="${v.disc_pct??0}"></div>
-      <div class="field"><label style="color:var(--brass-deep)">Price Boost % · INTERNAL</label><input id="m-markup" type="number" step="0.5" value="${v.boost_pct??0}"></div>
-    </div>
-    <div class="grid4" style="margin-top:10px">
       <div class="field"><label>Design Consultant</label><input id="m-consultant" value="${esc(v.consultant||'')}"></div>
       <div class="field"><label>Consultant Phone</label><input id="m-consultant-phone" value="${esc(v.consultant_phone||'')}"></div>
       <div class="field"><label>Quote valid till</label><input id="m-validity" type="date" value="${v.validity_date||''}"></div>
       <div class="field"><label>Quote version</label><input id="m-version" value="${esc(v.version_label||'')}" placeholder="auto: date + time"></div>
     </div>
+    <div class="hint" style="margin-top:8px">Design fee, discount, GST &amp; price-boost are set <b>per section</b> — see each section's footer below.</div>
   </div>
 
   ${ro?'':`<div class="pw-card">
     <div class="sec-label" style="border:none;padding-top:0">Add from rate library</div>
     <div class="addgrid">
+      <div class="field"><label>Section</label><select id="in-stream">${secOpts}</select></div>
       <div class="field"><label>Room</label><input id="in-room" list="roomdl" placeholder="Living Room"><datalist id="roomdl">${gRooms().map(r=>`<option value="${esc(r)}">`).join("")}</datalist></div>
-      <div class="field"><label>Category</label><select id="in-cat"><option value="">— select —</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
+      <div class="field"><label>Category</label><select id="in-cat"><option value="">— select —</option>${addCats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
       <div class="field"><label>Item</label><select id="in-item"><option value="">— select category —</option></select></div>
       <div class="field"><label>W</label><input id="in-w" type="number" step="0.1"></div>
       <div class="field"><label>H</label><input id="in-h" type="number" step="0.1"></div>
@@ -4424,12 +4476,13 @@ function gEstimator(p){
       <div class="field"><label>Unit</label><input id="in-unit" readonly></div>
       <button class="primary" id="addLib">+ Add</button>
     </div>
-    <div class="hint">Rate auto-fills · Qty = W × H if both given · rate editable inline after adding</div>
+    <div class="hint">Category list follows the chosen section · Rate auto-fills · Qty = W × H if both given · rate editable inline after adding</div>
   </div>
 
   <div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add custom item (not in library)</div>
     <div class="addgrid">
+      <div class="field"><label>Section</label><select id="ci-stream">${secOpts}</select></div>
       <div class="field"><label>Room</label><input id="ci-room" list="roomdl" placeholder="Terrace"></div>
       <div class="field"><label>Category</label><input id="ci-cat" placeholder="Special Work"></div>
       <div class="field"><label>Item</label><input id="ci-item" placeholder="MS railing"></div>
@@ -4439,7 +4492,7 @@ function gEstimator(p){
       <div class="field"><label>Qty</label><input id="ci-qty" type="number" step="0.5"></div>
       <button class="ghost" id="addCustom">+ Add</button>
     </div>
-    <div class="hint">Custom items are auto-saved to the rate library for future use.</div>
+    <div class="hint">Custom items are auto-saved to the rate library (tagged to the chosen section) for future use.</div>
   </div>
 
   <div class="pw-card">
@@ -4450,9 +4503,12 @@ function gEstimator(p){
     </div>
   </div>`}
 
-  <div class="table-wrap"><table><thead><tr>
-    <th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th><th>Amount</th><th>Remarks</th><th>Scope</th>${ro?'':'<th></th>'}
-  </tr></thead><tbody id="gbody">${gTableRows(ro)}</tbody></table></div>
+  <div class="gsecbar" style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px">
+    <button data-sec="all" class="ghost" style="${G.section==='all'?'border-color:var(--brass);color:var(--brass-deep);font-weight:600':''}">All sections</button>
+    ${STREAMS.map(s=>{const n=G.rows.filter(r=>rowStream(r)===s[0]).length;return `<button data-sec="${s[0]}" class="ghost" style="${G.section===s[0]?'border-color:var(--brass);color:var(--brass-deep);font-weight:600':''}">${esc(s[1])}${n?` <span style="opacity:.6">(${n})</span>`:''}</button>`;}).join("")}
+  </div>
+
+  <div id="gsecs">${gSectionsHtml(ro)}</div>
 
   <div class="totbar">
     <div class="tcell"><div class="tl">Work subtotal</div><div class="tv" id="t-sub">₹0</div></div>
@@ -4462,11 +4518,16 @@ function gEstimator(p){
     <div class="tcell thi"><div class="tl">Total project value</div><div class="tv" id="t-total">₹0</div></div>
   </div>`;
 
-  // meta -> state bindings
-  const metaMap={'m-client':'client_name','m-project':'project_name','m-property':'property','m-date':'quote_date','m-fee':'fee_pct','m-gst':'gst_pct','m-disc':'disc_pct','m-markup':'boost_pct','m-consultant':'consultant','m-consultant-phone':'consultant_phone','m-validity':'validity_date','m-version':'version_label'};
-  Object.keys(metaMap).forEach(id=>{ const e=$("#"+id); if(e) e.oninput=()=>{ G.ver=G.ver||{}; let val=e.value; if(['fee_pct','gst_pct','disc_pct','boost_pct'].includes(metaMap[id])) val=Number(val)||0; G.ver[metaMap[id]]=val; G.dirty=true; gTotals(); if(metaMap[id]==='boost_pct') gDrawTable(ro); }; });
+  // meta -> state bindings (fee/GST/disc/boost now live per-section in the footers)
+  const metaMap={'m-client':'client_name','m-project':'project_name','m-property':'property','m-date':'quote_date','m-consultant':'consultant','m-consultant-phone':'consultant_phone','m-validity':'validity_date','m-version':'version_label'};
+  Object.keys(metaMap).forEach(id=>{ const e=$("#"+id); if(e) e.oninput=()=>{ G.ver=G.ver||{}; G.ver[metaMap[id]]=e.value; G.dirty=true; }; });
+
+  // section switcher
+  $$(".gsecbar button").forEach(bt=>bt.onclick=()=>{ G.section=bt.dataset.sec; gEstimator(p); });
 
   if(!ro){
+    const fillCats=()=>{ const st=$("#in-stream").value; const cs=catsForStream(st); $("#in-cat").innerHTML='<option value="">— select —</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join(""); $("#in-item").innerHTML='<option value="">— select category —</option>'; $("#in-unit").value=''; };
+    if($("#in-stream")) $("#in-stream").onchange=fillCats;
     $("#in-cat").onchange=()=>{ const c=$("#in-cat").value; const items=G.rates.filter(r=>r.cat===c); $("#in-item").innerHTML='<option value="">— select item —</option>'+items.map(r=>`<option>${esc(r.item)}</option>`).join(""); $("#in-unit").value=''; };
     $("#in-item").onchange=()=>{ const f=G.rates.find(r=>r.item===$("#in-item").value&&r.cat===$("#in-cat").value); $("#in-unit").value=f?f.unit:''; };
     const aq=(w,h,q)=>{ const W=parseFloat($(w).value)||0,H=parseFloat($(h).value)||0; if(W&&H)$(q).value=Math.round(W*H*10)/10; };
@@ -4475,54 +4536,100 @@ function gEstimator(p){
     $("#addLib").onclick=gAddLib; $("#addCustom").onclick=gAddCustom;
     if($("#importRoom")) $("#importRoom").onclick=()=>gImportFrom(p,false);
     if($("#importFull")) $("#importFull").onclick=()=>gImportFrom(p,true);
+    gBindTable(ro);   // bind section tables + per-section setting inputs on first render
   }
   gTotals();
 }
 
-function gTableRows(ro){
-  const span = ro?11:12;
-  if(!G.rows.length) return `<tr><td colspan="${span}" class="empty">No items yet — add from the library or custom above</td></tr>`;
-  let html='';
-  gRooms().forEach(room=>{
-    const rr=G.rows.filter(r=>r.room===room);
-    const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0); // A2: excluded/optional never sum
-    html+=`<tr class="roomhdr"><td colspan="${ro?span:span-1}">${esc(room)}</td>${ro?'':`<td style="text-align:right"><button class="linkbtn" data-copyroom="${esc(room)}" title="Duplicate this room">⧉ Copy</button></td>`}</tr>`;
-    rr.forEach(r=>{
-      const catItems=G.rates.filter(x=>x.cat===r.cat);
-      const itemOpts=catItems.map(x=>`<option value="${esc(x.item)}" ${x.item===r.item?"selected":""}>${esc(x.item)}</option>`).join("");
-      const hasInLib=catItems.some(x=>x.item===r.item);
-      const sc=gScope(r);
-      let cells;
-      if(ro){
-        cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td><td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td><td>${gScopeTag(r)||'—'}</td>`;
-      } else {
-        cells=`<td><input class="ii" style="width:90px" value="${esc(r.room)}" data-id="${r.id}" data-f="room"></td>`+
-          `<td><select class="ii" style="width:100px" data-id="${r.id}" data-f="cat">${[...new Set(G.rates.map(x=>x.cat))].map(c=>`<option ${c===r.cat?"selected":""}>${esc(c)}</option>`).join("")}<option value="${esc(r.cat)}" ${!G.rates.some(x=>x.cat===r.cat)?"selected":""}>${esc(r.cat)}</option></select></td>`+
-          `<td><select class="ii gitem-sel" style="width:160px" data-id="${r.id}" data-f="item">${itemOpts}${!hasInLib?`<option value="${esc(r.item)}" selected>${esc(r.item)} (custom)</option>`:""}</select></td>`+
-          `<td><input class="ii" style="width:42px" value="${esc(r.unit)}" data-id="${r.id}" data-f="unit"></td>`+
-          `<td><input class="ii" style="width:70px" type="number" value="${r.rate}" data-id="${r.id}" data-f="rate"></td>`+
-          `<td><input class="ii" style="width:42px" type="number" value="${r.w||0}" data-id="${r.id}" data-f="w"></td>`+
-          `<td><input class="ii" style="width:42px" type="number" value="${r.h||0}" data-id="${r.id}" data-f="h"></td>`+
-          `<td><input class="ii" style="width:52px" type="number" value="${r.qty}" data-id="${r.id}" data-f="qty"></td>`+
-          `<td style="font-weight:600">${gFmt(gBoosted(r))}</td>`+
-          `<td><input class="ii" style="width:80px" value="${esc(r.remarks||'')}" data-id="${r.id}" data-f="remarks" placeholder="note"></td>`+
-          `<td><select class="ii gscope-sel" style="width:92px" data-id="${r.id}" data-f="scope"><option value="included"${sc==='included'?' selected':''}>Included</option><option value="optional"${sc==='optional'?' selected':''}>Optional</option><option value="excluded"${sc==='excluded'?' selected':''}>Excluded</option></select></td>`+
-          `<td><button class="linkbtn del" data-del="${r.id}">×</button></td>`;
-      }
-      html+=`<tr${sc==='excluded'?' class="g-exc"':sc==='optional'?' class="g-opt"':''}>${cells}</tr>`;
-    });
-    html+=`<tr class="roomsub"><td colspan="8" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td><td colspan="${ro?2:3}"></td></tr>`;
-  });
-  return html;
+// Render all visible section cards (one per BOQ stream).
+function gSectionsHtml(ro){
+  if(!G.rows.length) return `<div class="pw-card"><div class="empty">No items yet — add from the rate library or a custom item above.</div></div>`;
+  const secs=(G.section==='all')?gActiveStreams():[G.section];
+  if(!secs.length) return `<div class="pw-card"><div class="empty">No items yet.</div></div>`;
+  return secs.map(st=>gSectionCard(st,ro)).join("");
 }
-function gDrawTable(ro){ const t=$("#gbody"); if(t) t.innerHTML=gTableRows(ro); gBindTable(ro); }
+function gSectionCard(st,ro){
+  const fin=gStreamFin(st), label=STREAM_LABEL[st], showDisc=(st===FURNISHING);
+  const secRows=G.rows.filter(r=>rowStream(r)===st);
+  const colCount=(ro?11:13)+(showDisc?1:0);
+  const subCols=ro?(showDisc?9:8):(showDisc?10:9);   // columns before the Amount cell
+  const head=ro
+    ? `<th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th><th>Remarks</th><th>Scope</th>`
+    : `<th>Section</th><th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th><th>Remarks</th><th>Scope</th><th></th>`;
+  let body='';
+  if(!secRows.length){
+    body=`<tr><td colspan="${colCount}" class="empty">No items in this section yet.</td></tr>`;
+  } else {
+    const rooms=[]; secRows.forEach(r=>{ if(rooms.indexOf(r.room)===-1)rooms.push(r.room); });
+    rooms.forEach(room=>{
+      const rr=secRows.filter(r=>r.room===room);
+      const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
+      body+=`<tr class="roomhdr"><td colspan="${ro?colCount:colCount-1}">${esc(room)}</td>${ro?'':`<td style="text-align:right"><button class="linkbtn" data-copyroom="${esc(room)}" data-sec="${st}" title="Duplicate this room">⧉ Copy</button></td>`}</tr>`;
+      rr.forEach(r=>{ body+=gRowHtml(r,ro,showDisc); });
+      body+=`<tr class="roomsub"><td colspan="${subCols}" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td><td colspan="${colCount-subCols-1}"></td></tr>`;
+    });
+  }
+  return `<div class="pw-card gsec" data-sec="${st}">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="font-weight:700;color:var(--brass-deep)">${esc(label)}</div>
+      <div style="font-size:12px;color:var(--ink-soft)">${fin.n} item${fin.n===1?'':'s'} · section total <b>${gFmt(fin.total)}</b></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+    ${gSectionFooter(st,ro,fin)}
+  </div>`;
+}
+function gRowHtml(r,ro,showDisc){
+  const sc=gScope(r), st=rowStream(r);
+  if(ro){
+    const discCell=showDisc?`<td>${(Number(r.lineDisc)||0)?((Number(r.lineDisc)||0)+'%'):'—'}</td>`:'';
+    const cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td>${discCell}<td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td><td>${gScopeTag(r)||'—'}</td>`;
+    return `<tr${sc==='excluded'?' class="g-exc"':sc==='optional'?' class="g-opt"':''}>${cells}</tr>`;
+  }
+  const catItems=G.rates.filter(x=>x.cat===r.cat);
+  const itemOpts=catItems.map(x=>`<option value="${esc(x.item)}" ${x.item===r.item?"selected":""}>${esc(x.item)}</option>`).join("");
+  const hasInLib=catItems.some(x=>x.item===r.item);
+  const discCell=showDisc?`<td><input class="ii" style="width:52px" type="number" step="0.5" value="${Number(r.lineDisc)||0}" data-id="${r.id}" data-f="linedisc" title="Line discount %"></td>`:'';
+  const cells=`<td><select class="ii" style="width:120px" data-id="${r.id}" data-f="stream">${STREAMS.map(s=>`<option value="${s[0]}"${s[0]===st?' selected':''}>${esc(s[1])}</option>`).join("")}</select></td>`+
+    `<td><input class="ii" style="width:90px" value="${esc(r.room)}" data-id="${r.id}" data-f="room"></td>`+
+    `<td><select class="ii" style="width:100px" data-id="${r.id}" data-f="cat">${[...new Set(G.rates.map(x=>x.cat))].map(c=>`<option ${c===r.cat?"selected":""}>${esc(c)}</option>`).join("")}<option value="${esc(r.cat)}" ${!G.rates.some(x=>x.cat===r.cat)?"selected":""}>${esc(r.cat)}</option></select></td>`+
+    `<td><select class="ii gitem-sel" style="width:160px" data-id="${r.id}" data-f="item">${itemOpts}${!hasInLib?`<option value="${esc(r.item)}" selected>${esc(r.item)} (custom)</option>`:""}</select></td>`+
+    `<td><input class="ii" style="width:42px" value="${esc(r.unit)}" data-id="${r.id}" data-f="unit"></td>`+
+    `<td><input class="ii" style="width:70px" type="number" value="${r.rate}" data-id="${r.id}" data-f="rate"></td>`+
+    `<td><input class="ii" style="width:42px" type="number" value="${r.w||0}" data-id="${r.id}" data-f="w"></td>`+
+    `<td><input class="ii" style="width:42px" type="number" value="${r.h||0}" data-id="${r.id}" data-f="h"></td>`+
+    `<td><input class="ii" style="width:52px" type="number" value="${r.qty}" data-id="${r.id}" data-f="qty"></td>`+
+    discCell+
+    `<td style="font-weight:600">${gFmt(gBoosted(r))}</td>`+
+    `<td><input class="ii" style="width:80px" value="${esc(r.remarks||'')}" data-id="${r.id}" data-f="remarks" placeholder="note"></td>`+
+    `<td><select class="ii gscope-sel" style="width:92px" data-id="${r.id}" data-f="scope"><option value="included"${sc==='included'?' selected':''}>Included</option><option value="optional"${sc==='optional'?' selected':''}>Optional</option><option value="excluded"${sc==='excluded'?' selected':''}>Excluded</option></select></td>`+
+    `<td><button class="linkbtn del" data-del="${r.id}">×</button></td>`;
+  return `<tr${sc==='excluded'?' class="g-exc"':sc==='optional'?' class="g-opt"':''}>${cells}</tr>`;
+}
+function gSectionFooter(st,ro,fin){
+  const cfg=fin.cfg;
+  const inField=(k,lab,step)=>`<div class="field" style="min-width:110px"><label${k==='disc'||k==='boost'?' style="color:var(--brass-deep)"':''}>${lab} %</label><input class="ii-sec" type="number" step="${step}" value="${cfg[k]}" data-sec="${st}" data-k="${k}"></div>`;
+  const settings=ro?'':`<div class="addgrid" style="margin-bottom:8px">${inField('fee','Design fee','0.5')}${inField('disc','Discount','0.5')}${inField('gst','GST','1')}${inField('boost','Price Boost · INTERNAL','0.5')}</div>`;
+  return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+    ${settings}
+    <div class="finrow">
+      <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(fin.subM)}</div></div>
+      <div class="fcell"><div class="fl">Design fee (${cfg.fee}%)</div><div class="fv">${gFmt(fin.fee)}</div></div>
+      <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
+      <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
+      <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
+    </div>
+  </div>`;
+}
+function gDrawTable(ro){ const t=$("#gsecs"); if(t) t.innerHTML=gSectionsHtml(ro); gBindTable(ro); }
 function gBindTable(ro){
   if(ro) return;
-  $$("#gbody .ii").forEach(inp=>{
+  $$("#gsecs .ii").forEach(inp=>{
     inp.onchange=()=>{
       const r=G.rows.find(x=>x.id==inp.dataset.id), f=inp.dataset.f;
       if(!r) return;
       if(['rate','w','h','qty'].includes(f)){ r[f]=parseFloat(inp.value)||0; if(f==='rate')r.originalRate=r.rate; if((f==='w'||f==='h')&&r.w&&r.h)r.qty=Math.round(r.w*r.h*10)/10; r.amount=r.rate*r.qty; gDrawTable(ro); gTotals(); }
+      else if(f==='linedisc'){ r.lineDisc=Math.max(0,Math.min(100,parseFloat(inp.value)||0)); gDrawTable(ro); gTotals(); }
+      else if(f==='stream'){ r.stream=normStream(inp.value); G.dirty=true; gDrawTable(ro); gTotals(); }
       else if(f==='cat'){
         r.cat=inp.value;
         // reset item to first in new category + update rate/unit
@@ -4542,18 +4649,22 @@ function gBindTable(ro){
       G.dirty=true;
     };
   });
-  $$("#gbody [data-del]").forEach(btn=>btn.onclick=(e)=>{
+  // per-section financial settings (fee / discount / GST / boost)
+  $$("#gsecs .ii-sec").forEach(inp=>{
+    inp.onchange=()=>{ gSetStreamSetting(inp.dataset.sec, inp.dataset.k, inp.value); gDrawTable(ro); gTotals(); };
+  });
+  $$("#gsecs [data-del]").forEach(btn=>btn.onclick=(e)=>{
     e.preventDefault(); e.stopPropagation();
     const delId=btn.dataset.del;
     const before=G.rows.length;
     G.rows=G.rows.filter(r=>String(r.id)!==String(delId));
     if(G.rows.length<before){ G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Item removed"); }
   });
-  // Feature 3: Copy room
-  $$("#gbody [data-copyroom]").forEach(btn=>btn.onclick=(e)=>{
+  // Feature 3: Copy room (within its section)
+  $$("#gsecs [data-copyroom]").forEach(btn=>btn.onclick=(e)=>{
     e.preventDefault(); e.stopPropagation();
-    const srcRoom=btn.dataset.copyroom;
-    const src=G.rows.filter(r=>r.room===srcRoom);
+    const srcRoom=btn.dataset.copyroom, srcSec=btn.dataset.sec;
+    const src=G.rows.filter(r=>r.room===srcRoom && rowStream(r)===srcSec);
     if(!src.length) return toast("No items in this room to copy");
     const newName=prompt("New room name (copy of "+srcRoom+"):",srcRoom+" 2");
     if(newName===null) return; // user cancelled
@@ -4561,29 +4672,34 @@ function gBindTable(ro){
     // ensure uid counter is valid (guard against undefined/collision)
     if(typeof G.uid!=="number"||!G.uid){ G.uid=(G.rows.reduce((m,r)=>Math.max(m,Number(r.id)||0),0))+1; }
     src.forEach(r=>{
-      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom,cost:r.cost||0,scope:gScope(r)});
+      G.rows.push({id:G.uid++,room:finalName,cat:r.cat,item:r.item,unit:r.unit,rate:r.rate,originalRate:r.originalRate,w:r.w,h:r.h,qty:r.qty,amount:r.amount,remarks:r.remarks,custom:r.custom,cost:r.cost||0,scope:gScope(r),stream:rowStream(r),lineDisc:Number(r.lineDisc)||0});
     });
     G.dirty=true; gDrawTable(ro); gTotals(); refreshRoomDL(); toast("Copied "+src.length+" items to "+finalName);
   });
 }
+function gReRenderEst(){ if(G.ctx){ gEstimator(G.ctx); } else { gDrawTable(false); gTotals(); refreshRoomDL(); } }
 function gAddLib(){
+  const stream=normStream($("#in-stream")?$("#in-stream").value:'modular');
   const room=$("#in-room").value.trim(),cat=$("#in-cat").value,item=$("#in-item").value,qty=parseFloat($("#in-qty").value)||0,w=parseFloat($("#in-w").value)||0,h=parseFloat($("#in-h").value)||0;
   if(!room||!cat||!item||!qty) return toast("Fill Room, Category, Item and Qty");
   const f=G.rates.find(r=>r.item===item&&r.cat===cat); const rate=f?f.rate:0,unit=f?f.unit:'';
-  G.rows.push({id:G.uid++,room,cat,item,unit,rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:false,cost:f?f.cost:0});
+  G.rows.push({id:G.uid++,room,cat,item,unit,rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:false,cost:f?f.cost:0,stream,lineDisc:0});
   G.dirty=true; $("#in-qty").value='';$("#in-w").value='';$("#in-h").value='';
-  gDrawTable(false); gTotals(); refreshRoomDL();
+  if(G.section!=='all') G.section=stream;   // keep the added line in view
+  gReRenderEst();
 }
 function gAddCustom(){
+  const stream=normStream($("#ci-stream")?$("#ci-stream").value:'modular');
   const room=$("#ci-room").value.trim(),cat=$("#ci-cat").value.trim()||'Custom',item=$("#ci-item").value.trim(),rate=parseFloat($("#ci-rate").value)||0,qty=parseFloat($("#ci-qty").value)||0,w=parseFloat($("#ci-w").value)||0,h=parseFloat($("#ci-h").value)||0;
   if(!room||!item||!qty) return toast("Fill Room, Item and Qty");
-  G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true,cost:0});
+  G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true,cost:0,stream,lineDisc:0});
   G.dirty=true; ["ci-room","ci-cat","ci-item","ci-rate","ci-w","ci-h","ci-qty"].forEach(i=>$("#"+i).value='');
-  gDrawTable(false); gTotals(); refreshRoomDL();
-  // Feature 4: auto-save to rate library if not already there
+  if(G.section!=='all') G.section=stream;
+  gReRenderEst();
+  // Feature 4: auto-save to rate library if not already there (tagged to the chosen section)
   if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
-    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true}).select().single().then(({data,error})=>{
-      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id}); toast("Added to rate library: "+item); }
+    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream}).select().single().then(({data,error})=>{
+      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id,stream:stream}); toast("Added to rate library: "+item); }
       else if(error) console.error("Library add error:",error.message);
     });
   }
@@ -4637,16 +4753,16 @@ async function gImportFrom(p,fullBoq){
   $("#imp-go").onclick=()=>{
     if(!importItems.length) return;
     importItems.forEach(it=>{
-      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom,cost:Number(it.cost_rate)||0,scope:(it.scope==='excluded'||it.scope==='optional')?it.scope:'included'});
+      G.rows.push({id:G.uid++,room:it.room||it.room_tag||"General",cat:it.category||"",item:it.item_name||it.description||"",unit:it.uom||"",rate:Number(it.rate)||0,originalRate:Number(it.rate)||0,w:Number(it.width)||0,h:Number(it.height)||0,qty:Number(it.qty)||0,amount:(Number(it.rate)||0)*(Number(it.qty)||0),remarks:it.remarks||"",custom:!!it.is_custom,cost:Number(it.cost_rate)||0,scope:(it.scope==='excluded'||it.scope==='optional')?it.scope:'included',stream:normStream(it.stream||classifyStream(it.category)),lineDisc:Number(it.line_disc_pct)||0});
     });
-    G.dirty=true; closeModal(); gDrawTable(false); gTotals(); refreshRoomDL();
+    G.dirty=true; closeModal(); gReRenderEst();
     toast("Imported "+importItems.length+" items");
   };
 }
 function refreshRoomDL(){ const dl=$("#roomdl"); if(dl) dl.innerHTML=gRooms().map(r=>`<option value="${esc(r)}">`).join(""); }
 function gTotals(){
-  const f=gFin();
-  if($("#t-sub")) $("#t-sub").innerHTML=gFmt(f.subM)+(f.mPct>0?` <span style="font-size:10px;color:var(--brass-deep)">+${f.mPct}%</span>`:'');
+  const f=gGrand();
+  if($("#t-sub")) $("#t-sub").textContent=gFmt(f.subM);
   if($("#t-fee")) $("#t-fee").textContent=gFmt(f.fee);
   if($("#t-disc")) $("#t-disc").textContent='−'+gFmt(f.disc);
   if($("#t-gst")) $("#t-gst").textContent=gFmt(f.gst);
@@ -4655,42 +4771,72 @@ function gTotals(){
 
 /* ================= SUMMARY ================= */
 function gSummary(){
-  const f=gFin(), b=$("#gBody");
-  const rooms=gRooms();
-  const catTot={}; gIncluded().forEach(r=>catTot[r.cat]=(catTot[r.cat]||0)+r.amount);
+  const g=gGrand(), b=$("#gBody");
+  const active=gActiveStreams();
+  const secCards=active.map(st=>{
+    const fin=gStreamFin(st), cfg=fin.cfg;
+    return `<div class="pw-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;color:var(--brass-deep)">${esc(STREAM_LABEL[st])}</div>
+        <div style="font-size:12px;color:var(--ink-soft)">${fin.n} item${fin.n===1?'':'s'}</div>
+      </div>
+      <div class="finrow">
+        <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(fin.subM)}</div></div>
+        <div class="fcell"><div class="fl">Design fee (${cfg.fee}%)</div><div class="fv">${gFmt(fin.fee)}</div></div>
+        <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
+        <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
+        <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
+      </div>
+    </div>`;
+  }).join("")||'<div class="pw-card"><div class="empty">No items yet</div></div>';
+  const secSplit=active.map(st=>{const fin=gStreamFin(st);const pct=g.total?Math.round(fin.total/g.total*100):0;return `<div class="rowitem"><span>${esc(STREAM_LABEL[st])}</span><span>${pct}% · ${gFmt(fin.total)}</span></div><div class="rbar"><div style="width:${pct}%;height:100%;background:var(--brass);border-radius:2px"></div></div>`;}).join("")||'<div class="empty">No items</div>';
+  const catTot={}; gIncluded().forEach(r=>catTot[r.cat]=(catTot[r.cat]||0)+gBoosted(r));
   const ents=Object.entries(catTot).sort((a,b)=>b[1]-a[1]);
-  b.innerHTML=`<div class="finrow">
-    <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(f.sub)}</div></div>
-    <div class="fcell"><div class="fl">Design fee (${f.fPct}%)</div><div class="fv">${gFmt(f.fee)}</div></div>
-    <div class="fcell fgold"><div class="fl">Discount (${f.dPct}%)</div><div class="fv">−${gFmt(f.disc)}</div></div>
-    <div class="fcell"><div class="fl">GST (${f.gPct}%)</div><div class="fv">${gFmt(f.gst)}</div></div>
-    <div class="fcell facc"><div class="fl">Total project value</div><div class="fv">${gFmt(f.total)}</div></div>
+  const catSplit=ents.map(e=>{const pct=g.subM?Math.round(e[1]/g.subM*100):0;return `<div class="rowitem"><span>${esc(e[0])}</span><span>${pct}% · ${gFmt(e[1])}</span></div>`;}).join("")||'<div class="empty">No items</div>';
+  b.innerHTML=`
+  <div class="finrow" style="margin-bottom:16px">
+    <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(g.subM)}</div></div>
+    <div class="fcell"><div class="fl">Design fee</div><div class="fv">${gFmt(g.fee)}</div></div>
+    <div class="fcell fgold"><div class="fl">Discount</div><div class="fv">−${gFmt(g.disc)}</div></div>
+    <div class="fcell"><div class="fl">GST</div><div class="fv">${gFmt(g.gst)}</div></div>
+    <div class="fcell facc"><div class="fl">Total project value</div><div class="fv">${gFmt(g.total)}</div></div>
   </div>
+  ${secCards}
   <div class="grid2" style="margin-top:16px">
-    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Room-wise cost</div>${rooms.map(room=>{const rsub=gIncluded().filter(r=>r.room===room).reduce((s,r)=>s+r.amount,0);const pct=f.sub?Math.round(rsub/f.sub*100):0;return `<div class="rowitem"><span>${esc(room)}</span><span>${gFmt(rsub)}</span></div><div class="rbar"><div style="width:${pct}%;height:100%;background:var(--brass);border-radius:2px"></div></div>`;}).join("")||'<div class="empty">No items</div>'}</div>
-    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Category split</div>${ents.map(e=>{const pct=f.sub?Math.round(e[1]/f.sub*100):0;return `<div class="rowitem"><span>${esc(e[0])}</span><span>${pct}% · ${gFmt(e[1])}</span></div>`;}).join("")||'<div class="empty">No items</div>'}</div>
+    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Section split</div>${secSplit}</div>
+    <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Category split</div>${catSplit}</div>
   </div>`;
 }
 
 /* ================= CLIENT VIEW (branded sheet) ================= */
 function gClient(p){
-  const v=G.ver||{}, f=gFin(), rooms=gRooms();
+  const v=G.ver||{}, f=gGrand();
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
   const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
-  const roomSummary=rooms.map(room=>{const rsub=gIncluded().filter(r=>r.room===room).reduce((s,r)=>s+gBoosted(r),0);return `<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:6px 10px">${esc(room)}</td><td style="padding:6px 10px;text-align:right;font-weight:500">${gFmt(rsub)}</td></tr>`;}).join("")+`<tr style="background:#0D0D27"><td style="padding:8px 10px;font-weight:600;color:#fff">Grand Total</td><td style="padding:8px 10px;text-align:right;font-weight:700;color:#DFB05E">${gFmt(f.subM)}</td></tr>`;
+  const active=gActiveStreams();
+  // Section-wise summary (each section's all-in total) + grand total
+  const roomSummary=active.map(st=>{const fin=gStreamFin(st);return `<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:6px 10px">${esc(STREAM_LABEL[st])}</td><td style="padding:6px 10px;text-align:right;font-weight:500">${gFmt(fin.total)}</td></tr>`;}).join("")+`<tr style="background:#0D0D27"><td style="padding:8px 10px;font-weight:600;color:#fff">Grand Total</td><td style="padding:8px 10px;text-align:right;font-weight:700;color:#DFB05E">${gFmt(f.total)}</td></tr>`;
+  // Detailed BOQ grouped by SECTION -> room
   let detailed='';
-  rooms.forEach(room=>{
-    const rr=G.rows.filter(r=>r.room===room), rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
-    detailed+=`<tr><td colspan="8" style="padding:8px 12px;font-size:10px;font-weight:700;color:#DFB05E;letter-spacing:1.5px;text-transform:uppercase;background:#0D0D27;border-bottom:1px solid #DFB05E">${esc(room)}</td></tr>`;
-    rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
-      const tag=exc?` <span style="font-size:8px;font-weight:700;color:#A33C3C;letter-spacing:1px;text-transform:uppercase;border:1px solid #DBB0B0;border-radius:8px;padding:0 5px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8px;font-weight:700;color:#946F33;letter-spacing:1px;text-transform:uppercase;border:1px solid #D4B06A;border-radius:8px;padding:0 5px;vertical-align:middle">Optional</span>`:'';
-      const itemCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${tag}`;
-      const amtCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA;font-weight:400">${gFmt(gBoosted(r))}</span>`:opt?`<span style="color:#946F33;font-weight:500">${gFmt(gBoosted(r))}*</span>`:`${gFmt(gBoosted(r))}`;
-      const dim=exc?'color:#B8B2AA':'';
-      detailed+=`<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:7px 10px;color:#6B6560;font-size:11px;${dim}">${esc(r.room)}</td><td style="padding:7px 10px">${itemCell}</td><td style="padding:7px 10px;color:#9A9490;font-size:10px">${esc(r.cat)}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.w||'—'}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.h||'—'}</td><td style="padding:7px 10px;text-align:right;${dim}">${r.qty}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${esc(r.unit)}</td><td style="padding:7px 10px;text-align:right;font-weight:500">${amtCell}</td></tr>`; });
-    detailed+=`<tr style="background:#F5EDD8"><td colspan="7" style="padding:7px 12px;text-align:right;font-weight:600;color:#946F33;font-size:11px">Subtotal — ${esc(room)}</td><td style="padding:7px 10px;text-align:right;font-weight:700;color:#946F33">${gFmt(rsub)}</td></tr>`;
+  active.forEach(st=>{
+    const fin=gStreamFin(st), secRows=G.rows.filter(r=>rowStream(r)===st);
+    detailed+=`<tr><td colspan="8" style="padding:10px 12px;font-size:11px;font-weight:800;color:#0D0D27;letter-spacing:1.5px;text-transform:uppercase;background:#DFB05E">${esc(STREAM_LABEL[st])}</td></tr>`;
+    const rooms=[]; secRows.forEach(r=>{ if(rooms.indexOf(r.room)===-1)rooms.push(r.room); });
+    rooms.forEach(room=>{
+      const rr=secRows.filter(r=>r.room===room), rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
+      detailed+=`<tr><td colspan="8" style="padding:7px 12px;font-size:10px;font-weight:700;color:#DFB05E;letter-spacing:1.2px;text-transform:uppercase;background:#0D0D27;border-bottom:1px solid #DFB05E">${esc(room)}</td></tr>`;
+      rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
+        const tag=exc?` <span style="font-size:8px;font-weight:700;color:#A33C3C;letter-spacing:1px;text-transform:uppercase;border:1px solid #DBB0B0;border-radius:8px;padding:0 5px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8px;font-weight:700;color:#946F33;letter-spacing:1px;text-transform:uppercase;border:1px solid #D4B06A;border-radius:8px;padding:0 5px;vertical-align:middle">Optional</span>`:'';
+        const disc=gLineDisc(r), discNote=disc>0?` <span style="font-size:9px;color:#946F33">(${disc}% off)</span>`:'';
+        const itemCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${discNote}${tag}`;
+        const amtCell=exc?`<span style="text-decoration:line-through;color:#B8B2AA;font-weight:400">${gFmt(gBoosted(r))}</span>`:opt?`<span style="color:#946F33;font-weight:500">${gFmt(gBoosted(r))}*</span>`:`${gFmt(gBoosted(r))}`;
+        const dim=exc?'color:#B8B2AA':'';
+        detailed+=`<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:7px 10px;color:#6B6560;font-size:11px;${dim}">${esc(r.room)}</td><td style="padding:7px 10px">${itemCell}</td><td style="padding:7px 10px;color:#9A9490;font-size:10px">${esc(r.cat)}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.w||'—'}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${r.h||'—'}</td><td style="padding:7px 10px;text-align:right;${dim}">${r.qty}</td><td style="padding:7px 10px;text-align:right;color:#9A9490">${esc(r.unit)}</td><td style="padding:7px 10px;text-align:right;font-weight:500">${amtCell}</td></tr>`; });
+      detailed+=`<tr style="background:#F5EDD8"><td colspan="7" style="padding:7px 12px;text-align:right;font-weight:600;color:#946F33;font-size:11px">Subtotal — ${esc(room)}</td><td style="padding:7px 10px;text-align:right;font-weight:700;color:#946F33">${gFmt(rsub)}</td></tr>`;
+    });
+    detailed+=`<tr style="background:#EFE7D2"><td colspan="7" style="padding:8px 12px;text-align:right;font-weight:800;color:#0D0D27;font-size:11px;text-transform:uppercase;letter-spacing:.5px">${esc(STREAM_LABEL[st])} — work subtotal</td><td style="padding:8px 10px;text-align:right;font-weight:800;color:#0D0D27">${gFmt(fin.subM)}</td></tr>`;
   });
-  const discRow=f.dPct>0?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4;color:#946F33"><span>Discount (${f.dPct}%)</span><span style="font-weight:600">−${gFmt(f.disc)}</span></div>`:'';
+  const discRow=f.disc>0?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4;color:#946F33"><span>Discount</span><span style="font-weight:600">−${gFmt(f.disc)}</span></div>`:'';
   const hasOpt=G.rows.some(r=>gScope(r)==='optional'), hasExc=G.rows.some(r=>gScope(r)==='excluded');
   const scopeNote=(hasOpt||hasExc)?`<div style="font-size:10px;color:#9A9490;line-height:1.7;margin:-20px 0 28px">${hasOpt?'* Items marked <b style="color:#946F33">Optional</b> are quoted for reference and are not included in the totals above; they can be added on request. ':''}${hasExc?'Items marked <b style="color:#A33C3C">Excluded</b> are outside the scope of this quotation and are not included in the totals.':''}</div>`:'';
   $("#gBody").innerHTML=`
@@ -4721,8 +4867,8 @@ function gClient(p){
         <div><div class="cpl">Warranty</div><div class="cpv" style="color:#0D0D27">10 Years ✓</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px">
-        <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Room-wise Summary</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:2px solid #E0DCD4"><th style="text-align:left;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Room</th><th style="text-align:right;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Total</th></tr></thead><tbody>${roomSummary}</tbody></table></div>
+        <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Section Summary</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:2px solid #E0DCD4"><th style="text-align:left;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Section</th><th style="text-align:right;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Total</th></tr></thead><tbody>${roomSummary}</tbody></table></div>
         <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Cost Summary</div>
           <div style="font-size:12px">
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4"><span style="color:#6B6560">Work total</span><span>${gFmt(f.subM)}</span></div>
@@ -4788,7 +4934,7 @@ function gRates(p){
   b.innerHTML=`<div class="pw-card">
     <div class="mrcbar"><input id="rsearch" placeholder="Search items…" class="lf-in" style="max-width:240px">
       <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
-    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
+    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
     <div class="hint">Editing a rate updates the shared library for future items. Existing line items keep their rate.</div>
   </div>
   ${canWrite()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
@@ -4804,7 +4950,7 @@ function gRates(p){
   const draw=()=>{
     const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value;
     const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q)));
-    $("#rbody").innerHTML=rows.map(r=>`<tr><td><span class="tg">${esc(r.cat)}</span></td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`).join("")||'<tr><td colspan="5" class="empty">No items match</td></tr>';
+    $("#rbody").innerHTML=rows.map(r=>`<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`).join("")||'<tr><td colspan="6" class="empty">No items match</td></tr>';
     if(canWrite()){
       $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.rate=nr; toast("Rate updated"); });
       $$("#rbody [data-rldel]").forEach(btn=>btn.onclick=async()=>{ if(!confirm("Remove this item from the library?")) return; await sb.from("rate_library").update({is_active:false}).eq("id",btn.dataset.rldel); G.rates=G.rates.filter(x=>x.id!=btn.dataset.rldel); draw(); toast("Removed from library"); });
@@ -4815,9 +4961,10 @@ function gRates(p){
     const cat=$("#rl-cat").value.trim(), item=$("#rl-item").value.trim(), unit=$("#rl-unit").value.trim()||'nos', rate=parseFloat($("#rl-rate").value)||0;
     if(!cat||!item) return toast("Category and Item name needed");
     if(G.rates.find(r=>r.item===item&&r.cat===cat)) return toast("This item already exists in the library");
-    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true}).select().single();
+    const stream=classifyStream(cat);
+    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true,stream:stream}).select().single();
     if(error) return toast(error.message);
-    G.rates.push({cat,item,unit,rate,cost:0,id:data.id});
+    G.rates.push({cat,item,unit,rate,cost:0,id:data.id,stream:stream});
     ["rl-cat","rl-item","rl-unit","rl-rate"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
     draw(); toast("Added to library: "+item);
   };
@@ -4836,20 +4983,22 @@ async function gSave(p, silent){
     G.ver=v;
     const vl=$("#m-version"); if(vl) vl.value=v.version_label;
   }
+  const grand=gGrand(), modCfg=gStreamSettings('modular');   // legacy columns mirror the modular section
   try{
     const {error:vErr}=await sb.from("boq_versions").update({
       client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
-      quote_date:v.quote_date||null,fee_pct:Number(v.fee_pct)||0,gst_pct:Number(v.gst_pct)||0,disc_pct:Number(v.disc_pct)||0,boost_pct:Number(v.boost_pct)||0,
+      quote_date:v.quote_date||null,fee_pct:modCfg.fee,gst_pct:modCfg.gst,disc_pct:modCfg.disc,boost_pct:modCfg.boost,
+      stream_settings:(G.ver&&G.ver.stream_settings)||{},
       consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
-      total:gFin().total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
+      total:grand.total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
     }).eq("id",G.boqId);
     if(vErr) throw vErr;
     // replace items atomically via RPC — a mid-save failure can no longer wipe the sheet
-    const payload=G.rows.map((r,i)=>({room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,cost_rate:(r.cost==null?0:Number(r.cost)||0),width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r)}));
+    const payload=G.rows.map((r,i)=>({room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,cost_rate:(r.cost==null?0:Number(r.cost)||0),width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r),stream:rowStream(r),line_disc_pct:(rowStream(r)===FURNISHING?(Number(r.lineDisc)||0):0)}));
     const {error:iErr}=await sb.rpc("boq_replace_items",{p_version_id:G.boqId,p_items:payload});
     if(iErr) throw iErr;
     if(G.projectId){
-      const {error:pErr}=await sb.from("projects").update({contract_value:gFin().total}).eq("id",G.projectId);
+      const {error:pErr}=await sb.from("projects").update({contract_value:grand.total}).eq("id",G.projectId);
       if(pErr) throw pErr;
     }
     G.dirty=false;
@@ -4886,13 +5035,24 @@ function gStartAutosave(p){
 function gStopAutosave(){ if(G._autosaveTimer){ clearInterval(G._autosaveTimer); G._autosaveTimer=null; } }
 function gExportCSV(){
   if(!G.rows.length) return toast("No items to export");
-  const f=gFin(); let csv='Room,Category,Item,Unit,Rate,W,H,Qty,Amount,Remarks,Scope\n';
-  G.rows.forEach(r=>{ csv+=`"${r.room}","${r.cat}","${r.item}","${r.unit}",${r.originalRate},${r.w||''},${r.h||''},${r.qty},${gBoosted(r)},"${r.remarks||''}","${gScope(r)}"\n`; });
-  csv+=`\n,,,,,,,,Work Subtotal,${Math.round(f.subM)}`;
-  csv+=`\n,,,,,,,,Design Fee (${f.fPct}%),${Math.round(f.fee)}`;
-  if(f.dPct>0) csv+=`\n,,,,,,,,Discount (${f.dPct}%),-${Math.round(f.disc)}`;
-  csv+=`\n,,,,,,,,GST (${f.gPct}%),${Math.round(f.gst)}`;
-  csv+=`\n,,,,,,,,TOTAL,${Math.round(f.total)}`;
+  const g=gGrand();
+  let csv='Section,Room,Category,Item,Unit,Rate,W,H,Qty,Disc%,Amount,Remarks,Scope\n';
+  gActiveStreams().forEach(st=>{
+    const fin=gStreamFin(st), cfg=fin.cfg, label=STREAM_LABEL[st];
+    G.rows.filter(r=>rowStream(r)===st).forEach(r=>{
+      csv+=`"${label}","${r.room}","${r.cat}","${r.item}","${r.unit}",${r.originalRate},${r.w||''},${r.h||''},${r.qty},${gLineDisc(r)||''},${gBoosted(r)},"${(r.remarks||'').replace(/"/g,'""')}","${gScope(r)}"\n`;
+    });
+    csv+=`\n,,,,,,,,,,Work subtotal — ${label},${Math.round(fin.subM)}`;
+    csv+=`\n,,,,,,,,,,Design Fee (${cfg.fee}%),${Math.round(fin.fee)}`;
+    if(cfg.disc>0) csv+=`\n,,,,,,,,,,Discount (${cfg.disc}%),-${Math.round(fin.disc)}`;
+    csv+=`\n,,,,,,,,,,GST (${cfg.gst}%),${Math.round(fin.gst)}`;
+    csv+=`\n,,,,,,,,,,${label} TOTAL,${Math.round(fin.total)}\n`;
+  });
+  csv+=`\n,,,,,,,,,,GRAND — Work subtotal,${Math.round(g.subM)}`;
+  csv+=`\n,,,,,,,,,,GRAND — Design fee,${Math.round(g.fee)}`;
+  if(g.disc>0) csv+=`\n,,,,,,,,,,GRAND — Discount,-${Math.round(g.disc)}`;
+  csv+=`\n,,,,,,,,,,GRAND — GST,${Math.round(g.gst)}`;
+  csv+=`\n,,,,,,,,,,GRAND TOTAL,${Math.round(g.total)}`;
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='Lintel_BOQ_'+((G.ver?.client_name)||'Client').replace(/\s/g,'_')+'.csv'; a.click();
 }
