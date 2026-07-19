@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Lintel OS — Google Calendar</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;background:#0D0D27;color:#fff;
+       display:grid;place-items:center;height:100vh;margin:0}
+  .card{text-align:center;max-width:440px;padding:28px;line-height:1.65;font-size:15px}
+  a{color:#C9A227}
+  b{color:#C9A227}
+</style>
+</head>
+<body>
+<div class="card" id="msg">Finishing up…</div>
+<script>
+/* Landing page for the google-calendar edge function's OAuth callback redirect.
+   Params arrive in the hash (never sent to the server): #ok=1&email=… or #err=… */
+(function(){
+  var h = new URLSearchParams(location.hash.slice(1));
+  var ok = h.get("ok") === "1";
+  var esc = function(s){ return String(s||"").replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
+  document.getElementById("msg").innerHTML = ok
+    ? "✅ Google Calendar connected" + (h.get("email") ? " as <b>" + esc(h.get("email")) + "</b>" : "") +
+      ".<br>This window will close by itself — you're all set in Lintel OS."
+    : "⚠️ " + esc(h.get("err") || "Something went wrong.") +
+      "<br><br><a href=\"/\">Back to Lintel OS</a>";
+  try{ if(window.opener) window.opener.postMessage({type: ok ? "gcal-connected" : "gcal-error"}, "*"); }catch(e){}
+  if(ok) setTimeout(function(){ window.close(); }, 1500);
+})();
+</script>
+</body>
+</html>
