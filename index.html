@@ -77,9 +77,10 @@
   .view-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;gap:16px;flex-wrap:wrap}
   .view-head h2{font-family:'Bricolage Grotesque';font-weight:600;font-size:26px;margin:0;letter-spacing:-.02em}
   .view-head .sub{color:var(--ink-soft);font-size:13px;margin-top:3px}
-  .primary{background:var(--brass);color:#fff;border:none;padding:10px 16px;border-radius:9px;font-weight:600;box-shadow:var(--shadow)}
-  .primary:hover{background:var(--brass-deep)}
+  .primary{background:var(--brass);color:var(--navy);border:none;padding:10px 16px;border-radius:9px;font-weight:600;box-shadow:var(--shadow)}
+  .primary:hover{background:var(--brass-deep);color:var(--navy)}
   .primary:disabled{opacity:.4;cursor:not-allowed}
+  button:focus-visible,a:focus-visible{outline:2px solid var(--brass-deep);outline-offset:2px}
 
   /* ---- kanban ------------------------------------------------------ */
   .board{display:grid;grid-template-columns:repeat(6,minmax(180px,1fr));gap:14px;align-items:start;overflow-x:auto;padding-bottom:8px}
@@ -236,8 +237,10 @@
   .pw-title h2{margin:0;font-size:24px}
   .pw-code{font-size:12px;color:var(--brass-deep);background:var(--paper-2);padding:3px 8px;border-radius:6px}
   .pw-val{margin-left:auto;font-size:18px;font-weight:500}
-  .pw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
-  .pw-tabs button{border:none;background:none;padding:10px 16px;font-weight:600;font-size:13.5px;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .pw-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .pw-tabs::-webkit-scrollbar{display:none}
+  .pw-tabs button{border:none;background:none;padding:10px 16px;font-weight:600;font-size:13.5px;color:var(--ink-soft);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;flex:none;border-radius:8px 8px 0 0}
+  .pw-tabs button:hover{color:var(--ink);background:var(--paper-2)}
   .pw-tabs button.active{color:var(--ink);border-bottom-color:var(--brass)}
   .pw-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:14px}
   .upbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
@@ -324,7 +327,7 @@
   .mini-list{display:flex;flex-direction:column;gap:7px}
   .mini-item{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:7px 0;border-bottom:1px solid var(--line)}
   .mini-item:last-child{border-bottom:none}
-  .mini-item .mi-due{margin-left:auto;font-size:11px;color:var(--ink-soft)} .mini-item .mi-due.over{color:var(--clay);font-weight:600}
+  .mini-item .mi-due{margin-left:auto;font-size:11px;color:var(--ink-soft);white-space:nowrap;flex:none} .mini-item .mi-due.over{color:var(--clay);font-weight:600}
   @media(max-width:880px){.cc-grid{grid-template-columns:1fr 1fr}.gantt-row{grid-template-columns:140px 1fr}.g-name{font-size:12px}}
   /* ---- lead BOQ workflow strip ---- */
   .wf-bar{display:flex;align-items:center;gap:0;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;flex-wrap:wrap}
@@ -385,6 +388,7 @@
   }
   /* ---- overview / timeline ---- */
   .ov-grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+  .ov-main{display:flex;flex-direction:column;gap:16px}
   /* ---- lead workspace ---- */
   .lw-grid{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
   .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px}
@@ -869,6 +873,7 @@ function s2lRenderDashKpis(s){
   const cpmCard=$("#dashCpm"); if(cpmCard) cpmCard.onclick=()=>s2lSpendDialog(cpm);
 }
 // prioritised call queue: SLA breach → awaiting 1st call → cadence due → possession hot
+let s2lShowAllCalls=false; // collapsed by default so the dashboard KPIs stay above the fold
 function s2lRenderTodayCalls(calls){
   const host=$("#dashS2lCalls"); if(!host) return;
   if(!calls.length){ host.innerHTML=""; return; }
@@ -879,15 +884,18 @@ function s2lRenderTodayCalls(calls){
     return `<div class="s2l-call" data-open="${c.id}">
       <span class="s2l-call-p" style="--c:${pc}">${plabel}</span>
       <div class="s2l-call-main"><div class="s2l-call-nm">${esc(c.name||"—")}</div>
-        <div class="s2l-call-sub">${esc(c.locality||"")}${c.budget_band?" · "+esc(c.budget_band):""}</div></div>
+        <div class="s2l-call-sub">${esc(c.locality||"")}${c.budget_band?" · "+esc(fmtBand(c.budget_band)):""}</div></div>
       ${tel?`<a class="s2l-call-btn" href="tel:${esc(tel)}" onclick="event.stopPropagation()">☎ Call</a>`:""}
       <button class="s2l-call-btn log" data-logcall="${c.id}">Log</button>
     </div>`;
   };
+  const shown=s2lShowAllCalls?calls:calls.slice(0,5);
   host.innerHTML=`<div class="pw-card" style="padding:14px 16px">
     <div class="sec-label" style="border:none;padding:0;margin-bottom:10px">📞 Today's Calls <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— ${calls.length} in priority order</span></div>
-    <div class="s2l-call-list">${calls.map(rowHtml).join("")}</div>
+    <div class="s2l-call-list">${shown.map(rowHtml).join("")}</div>
+    ${calls.length>5?`<button class="linkbtn" id="s2lCallsToggle" style="margin-top:10px">${s2lShowAllCalls?"Show top 5 only":`View all ${calls.length} →`}</button>`:""}
   </div>`;
+  const tog=$("#s2lCallsToggle"); if(tog) tog.onclick=()=>{ s2lShowAllCalls=!s2lShowAllCalls; s2lRenderTodayCalls(calls); };
   host.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(el.dataset.open)),40); });
   host.querySelectorAll("[data-logcall]").forEach(b=>b.onclick=async(e)=>{
     e.stopPropagation();
@@ -1271,6 +1279,15 @@ async function loadProfileNames(){
 function staffOpts(sel){ return `<option value="" ${!sel?"selected":""}>— unassigned —</option>`+STAFF.map(s=>`<option value="${s.id}" ${String(s.id)===String(sel)?"selected":""}>${esc(s.full_name||s.email)}${s.designation?" · "+esc(s.designation):""}</option>`).join(""); }
 function initials(n){ return (n||"?").split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
+/* short display date for ISO strings: "2026-07-15" → "15 Jul" (falls back to "—") */
+function dShort(iso){ if(!iso) return "—"; const d=new Date(iso); return isNaN(d)?esc(String(iso)):d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}); }
+/* normalize budget bands for display: "₹_7_to_₹_15_lakhs" → "₹7–15 L"; clean values pass through */
+function fmtBand(b){
+  if(!b) return "";
+  const s=String(b).replace(/_/g," ").replace(/\s+/g," ").trim();
+  const m=s.match(/^₹\s*(\d+(?:\.\d+)?)\s*to\s*₹\s*(\d+(?:\.\d+)?)\s*lakhs?$/i);
+  return m?`₹${m[1]}–${m[2]} L`:s;
+}
 function dueClass(d){ if(!d) return ""; const t=todayISO(); return d<t?"overdue":d===t?"today":""; }
 
 async function renderLeads(){
@@ -1883,7 +1900,7 @@ function lwBriefing(l,body){
         <div class="kv"><span class="k">Configuration</span><span class="v">${esc(l.p_config||"—")}</span></div>
         <div class="kv"><span class="k">Carpet area</span><span class="v">${esc(l.p_carpet_area||"—")}</span></div>
         <div class="kv"><span class="k">Builder</span><span class="v">${esc(l.p_builder||"—")}</span></div>
-        <div class="kv"><span class="k">Budget band</span><span class="v">${esc(l.budget_band||"—")}</span></div>
+        <div class="kv"><span class="k">Budget band</span><span class="v">${esc(fmtBand(l.budget_band)||"—")}</span></div>
       </div>
     </div>
     <div>
@@ -2403,7 +2420,7 @@ async function renderProjects(){
   });
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client Details"],["boq","Project BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Project Design"],["moodboard","Moodboard"],["canvas","Design Canvas"],["execution","Execution"],["documents","Project Documents"],["team","Project Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["execution","Execution"],["documents","Documents"],["team","Team"]];
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
@@ -2560,12 +2577,16 @@ async function pwOverview(p,body){
                       <option value="done" ${s.status==="done"?"selected":""}>Done</option></select>`}
                   </div>
                   <div class="tl2-meta">
-                    ${s.done_date?`Completed ${s.done_date}`:s.target_date?`Target ${s.target_date}`:`<span style="color:var(--ink-soft)">No date set</span>`}
+                    ${s.done_date?`Completed ${dShort(s.done_date)}`:s.target_date?`Target ${dShort(s.target_date)}`:`<span style="color:var(--ink-soft)">No date set</span>`}
                     ${ro?"":`<input type="date" class="tl2-date" data-msd="${s.id}" value="${s.target_date||''}" title="Target date">`}
                   </div>
                 </div></div>`;
             }).join("")}
           </div>
+        </div>
+        <div class="pw-card">
+          <div class="sec-label" style="border:none;padding:0">Activity & client notes</div>
+          <div id="pjAct" style="margin-top:10px">Loading…</div>
         </div>
       </div>
       <div class="ov-side">
@@ -2575,7 +2596,7 @@ async function pwOverview(p,body){
             const over=a.deadline&&a.deadline<today;
             return `<div class="mini-item">${a.assignee_id?`<span class="av" title="${esc(staffName(a.assignee_id))}">${initials(staffName(a.assignee_id))}</span>`:"•"}
               <span>${esc(a.item)}</span>
-              <span class="mi-due ${over?"over":""}">${a.deadline||"—"}</span></div>`;
+              <span class="mi-due ${over?"over":""}">${dShort(a.deadline)}</span></div>`;
           }).join("")}</div>${openActions.length>5?`<button class="linkbtn" data-go="design" style="margin-top:8px">+${openActions.length-5} more in MoM →</button>`:""}`
           :`<div style="font-size:13px;color:var(--ink-soft)">No open action items.</div>`}
         </div>
@@ -2608,10 +2629,6 @@ async function pwOverview(p,body){
             <button class="linkbtn" data-go="design">Design & meetings →</button>
           </div>
         </div>
-      </div>
-      <div class="pw-card" style="margin-top:14px">
-        <div class="sec-label" style="border:none;padding:0">Activity & client notes</div>
-        <div id="pjAct" style="margin-top:10px">Loading…</div>
       </div>
     </div>`;
   // wire quick links + team
