@@ -1716,8 +1716,11 @@ async function lwMeetings(l,body){
 }
 
 async function lwMeetList(l,body,w){
+  await gcalStatus();
+  const rerender=()=>lwMeetList(l,body,w);
   const {data:meets}=await sb.from("design_meetings").select("*").eq("lead_id",l.id).order("scheduled_at",{ascending:false});
   body.innerHTML=`
+  ${w?gcalBarHtml():""}
   ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Schedule a client meeting</h3>
     <div class="grid2">
       <div class="field"><label>Title</label><input id="lm_title" placeholder="e.g. Requirement discussion" value="Discovery meeting"></div>
@@ -1728,6 +1731,7 @@ async function lwMeetList(l,body,w){
       <div class="field"><label>Duration (min)</label><input type="number" id="lm_dur" value="30" min="15" step="15"></div>
     </div>
     <div class="field"><label>Agenda</label><textarea id="lm_agenda" rows="2" placeholder="What will be discussed"></textarea></div>
+    ${gcalConn.connected?`<label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px;cursor:pointer"><input type="checkbox" id="lm_gcal" checked style="width:auto;margin:0"> Create Google Calendar event + Meet link (invites the client by email)</label>`:""}
     <button class="primary" id="lm_add">Save meeting</button>
   </div>`:""}
   <div id="lm_list">${meetsHtml(meets||[],w)}</div>`;
@@ -1735,24 +1739,34 @@ async function lwMeetList(l,body,w){
     $("#lm_add").onclick=async()=>{
       const title=$("#lm_title").value.trim(); const when=$("#lm_when").value;
       if(!title||!when) return toast("Title and date/time needed");
-      const {error}=await sb.from("design_meetings").insert({
+      const {data:row,error}=await sb.from("design_meetings").insert({
         lead_id:l.id, title, scheduled_at:new Date(when).toISOString(),
         duration_min:Number($("#lm_dur").value)||30, client_email:$("#lm_email").value.trim()||null,
-        agenda:$("#lm_agenda").value.trim()||null });
+        agenda:$("#lm_agenda").value.trim()||null }).select().single();
       if(error) return toast(error.message);
       await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:"Meeting scheduled: "+title,by_user:me.id});
-      toast("Meeting saved"); lwMeetList(l,body,w);
+      toast("Meeting saved");
+      if(row && gcalConn.connected && $("#lm_gcal")?.checked){
+        try{ await gcalSyncMeeting(row.id); }
+        catch(e){ toast("Meeting saved, but Google Calendar failed: "+e.message); }
+      }
+      rerender();
     };
   }
   // reuse the same meeting action bindings, but re-render via lwMeetList
+  bindGcalBar(body,rerender);
   body.querySelectorAll("[data-gcal]").forEach(b=>b.onclick=async()=>{
     const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.gcal).single();
     if(mt) window.open(gcalUrl(mt),"_blank");
   });
-  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Remove this meeting?")) return;
-    await sb.from("design_meetings").delete().eq("id",b.dataset.mdel); lwMeetList(l,body,w);
+  body.querySelectorAll("[data-msync]").forEach(b=>b.onclick=async()=>{
+    try{ await gcalSyncMeeting(b.dataset.msync); rerender(); }catch(e){ toast(e.message); }
   });
+  body.querySelectorAll("[data-medit]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.medit).single();
+    if(mt) meetEditModal(mt,rerender);
+  });
+  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>meetDelete(b.dataset.mdel,rerender));
   body.querySelectorAll("[data-mlink]").forEach(b=>b.onclick=async()=>{
     const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mlink).single();
     openModal(`<div class="modal-h">Google Meet link</div>
@@ -1763,7 +1777,7 @@ async function lwMeetList(l,body,w){
       <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="ml_save">Save link</button></div>`);
     $("#ml_save").onclick=async()=>{
       await sb.from("design_meetings").update({meet_link:$("#ml_in").value.trim()||null}).eq("id",b.dataset.mlink);
-      closeModal(); toast("Meet link saved"); lwMeetList(l,body,w);
+      closeModal(); toast("Meet link saved"); rerender();
     };
   });
   body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>momForm("lead",l,{},body));
@@ -3089,7 +3103,9 @@ async function generatePOs(p,body){
   const ver=vers[0];
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
   if(!items||!items.length) return toast("The BOQ has no line items");
-  const boost=Number(ver.boost_pct)||0;
+  // per-section boost from stream_settings (legacy boost_pct retired by BOQ-STREAMS-02)
+  const ssAll=ver.stream_settings||{};
+  const boostFor=st=>Number((ssAll[normStream(st)]||{}).boost)||0;
   // group by category (A2: excluded/optional lines are outside contracted scope — never in work orders)
   const inScope=items.filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
   if(!inScope.length) return toast("The BOQ has no included line items");
@@ -3102,7 +3118,7 @@ async function generatePOs(p,body){
       <div style="font-size:13px;color:var(--ink-soft);margin-bottom:12px">One work order will be created per selected scope from BOQ <b>${esc(ver.version_label||('v'+ver.version))}</b>. Assign people and dates after creating.</div>
       <div class="field"><label>Value basis</label>
         <select id="po_basis">
-          <option value="client">Project value (client-facing, +${boost}%)</option>
+          <option value="client">Project value (client-facing, per-section boost applied)</option>
           <option value="internal">Internal cost (before boost)</option>
         </select>
         <div style="font-size:11px;color:var(--ink-soft);margin-top:4px">Internal tracking — project value is the usual choice.</div>
@@ -3125,7 +3141,7 @@ async function generatePOs(p,body){
       sel.forEach((cat,k)=>{
         const its=cats[cat].map(r=>{
           const baseRate=Number(r.rate)||0;
-          const rate=basis==="client"?Math.round(baseRate*(1+boost/100)):baseRate;
+          const rate=basis==="client"?Math.round(baseRate*(1+boostFor(r.stream)/100)):baseRate;
           const qty=Number(r.qty)||0;
           return {room:r.room||"",item:r.item_name||r.description||"",unit:r.uom||"",qty,rate,amount:Math.round(rate*qty)};
         });
@@ -3336,8 +3352,10 @@ function tasksHtml(tasks,w){
 /* ---- Meetings (with Google Calendar + Meet) ---- */
 async function dsMeetings(p,body){
   const w=canWrite();
+  await gcalStatus();
   const {data:meets}=await sb.from("design_meetings").select("*").eq("project_id",p.id).order("scheduled_at",{ascending:false});
   body.innerHTML=`
+  ${w?gcalBarHtml():""}
   ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Schedule a client design meeting</h3>
     <div class="grid2">
       <div class="field"><label>Title</label><input id="dm_title" placeholder="e.g. 3D design review" value="Design review"></div>
@@ -3348,6 +3366,7 @@ async function dsMeetings(p,body){
       <div class="field"><label>Duration (min)</label><input type="number" id="dm_dur" value="30" min="15" step="15"></div>
     </div>
     <div class="field"><label>Agenda</label><textarea id="dm_agenda" rows="2" placeholder="What will be discussed"></textarea></div>
+    ${gcalConn.connected?`<label style="display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:13px;cursor:pointer"><input type="checkbox" id="dm_gcal" checked style="width:auto;margin:0"> Create Google Calendar event + Meet link (invites the client by email)</label>`:""}
     <button class="primary" id="dm_add">Save meeting</button>
   </div>`:""}
   <div id="dm_list">${meetsHtml(meets||[],w)}</div>`;
@@ -3355,14 +3374,20 @@ async function dsMeetings(p,body){
     $("#dm_add").onclick=async()=>{
       const title=$("#dm_title").value.trim(); const when=$("#dm_when").value;
       if(!title||!when) return toast("Title and date/time needed");
-      const {error}=await sb.from("design_meetings").insert({
+      const {data:row,error}=await sb.from("design_meetings").insert({
         project_id:p.id, title, scheduled_at:new Date(when).toISOString(),
         duration_min:Number($("#dm_dur").value)||30, client_email:$("#dm_email").value.trim()||null,
-        agenda:$("#dm_agenda").value.trim()||null });
+        agenda:$("#dm_agenda").value.trim()||null }).select().single();
       if(error) return toast(error.message);
-      toast("Meeting saved"); dsMeetings(p,body);
+      toast("Meeting saved");
+      if(row && gcalConn.connected && $("#dm_gcal")?.checked){
+        try{ await gcalSyncMeeting(row.id); }
+        catch(e){ toast("Meeting saved, but Google Calendar failed: "+e.message); }
+      }
+      dsMeetings(p,body);
     };
   }
+  bindGcalBar(body,()=>dsMeetings(p,body));
   bindMeetActions(p,body);
 }
 function meetsHtml(meets,w){
@@ -3376,13 +3401,18 @@ function meetsHtml(meets,w){
       <div class="dm-date"><div class="d">${day}</div><div class="mo">${mo}</div></div>
       <div class="dm-main">
         <div class="dm-t">${esc(mt.title)} ${mt.status==="done"?'<span class="ds-stat done">done</span>':mt.status==="cancelled"?'<span class="ds-stat todo">cancelled</span>':""}</div>
-        <div class="dm-sub">${time}${mt.duration_min?" · "+mt.duration_min+" min":""}${mt.client_email?" · "+esc(mt.client_email):""}</div>
+        <div class="dm-sub">${time}${mt.duration_min?" · "+mt.duration_min+" min":""}${mt.client_email?" · "+esc(mt.client_email):""}${mt.gcal_event_id?' · <span title="Synced to Google Calendar — edits and cancellations notify guests">📆 synced</span>':""}</div>
         ${mt.agenda?`<div class="dm-sub">📋 ${esc(mt.agenda)}</div>`:""}
       </div>
       <div class="dm-act">
         ${mt.meet_link?`<a class="wa-btn alt" href="${esc(mt.meet_link)}" target="_blank" style="text-decoration:none">▶ Join Meet</a>`:""}
-        <button class="ghost" data-gcal="${mt.id}">📅 Calendar + Meet</button>
-        ${w?`<button class="ghost" data-mlink="${mt.id}">${mt.meet_link?"Edit link":"+ Meet link"}</button>
+        ${mt.gcal_event_id
+          ?(mt.gcal_link?`<a class="ghost" href="${esc(mt.gcal_link)}" target="_blank" style="text-decoration:none;display:inline-block">📅 Open in Calendar</a>`:"")
+          :(w&&gcalConn.connected
+            ?`<button class="ghost" data-msync="${mt.id}">📅 Add to Google Calendar</button>`
+            :`<button class="ghost" data-gcal="${mt.id}">📅 Calendar + Meet</button>`)}
+        ${w?`<button class="ghost" data-medit="${mt.id}">✎ Edit</button>
+            ${mt.gcal_event_id?"":`<button class="ghost" data-mlink="${mt.id}">${mt.meet_link?"Edit link":"+ Meet link"}</button>`}
             <button class="primary" data-mom="${mt.id}" data-momtitle="${esc(mt.title)}">Write MoM</button>
             <button class="linkbtn del" data-mdel="${mt.id}">✕</button>`:""}
       </div>
@@ -3401,15 +3431,125 @@ function gcalUrl(mt){
   });
   return "https://calendar.google.com/calendar/render?"+params.toString();
 }
+
+/* ---- Google Calendar sync (edge function: google-calendar) ----
+   Per-user OAuth: each staff member connects their own Google account once.
+   Events are created on the connecting user's primary calendar with an
+   auto-generated Meet link; the client email is invited as a guest. */
+const GCAL_FN = SUPABASE_URL + "/functions/v1/google-calendar";
+let gcalConn = { checked:false, connected:false, email:"" };
+async function gcalFetch(path, payload){
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session) throw new Error("Not signed in");
+  const r = await fetch(GCAL_FN+path,{
+    method: payload?"POST":"GET",
+    headers:{ "Content-Type":"application/json", Authorization:"Bearer "+session.access_token },
+    body: payload?JSON.stringify(payload):undefined
+  });
+  let d={}; try{ d=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(d.error||("Calendar service error ("+r.status+")"));
+  return d;
+}
+async function gcalStatus(force){
+  if(gcalConn.checked && !force) return gcalConn;
+  try{
+    const {data}=await sb.from("google_calendar_accounts").select("google_email,connected_at").eq("user_id",me.id).maybeSingle();
+    gcalConn={checked:true,connected:!!data,email:data?.google_email||""};
+  }catch(e){ gcalConn={checked:true,connected:false,email:""}; }
+  return gcalConn;
+}
+function gcalBarHtml(){
+  if(!gcalConn.checked) return "";
+  return gcalConn.connected
+    ? `<div class="dm-sub" style="margin:0 0 12px">📆 Google Calendar connected as <b>${esc(gcalConn.email||"your Google account")}</b> — saved meetings can create a real event + Meet link. <button class="linkbtn" data-gc-disc>Disconnect</button></div>`
+    : `<div class="banner" style="margin:0 0 12px">Connect Google Calendar to create events + Meet links straight from Lintel OS — no more copy-pasting links. <button class="ghost" data-gc-conn style="margin-left:8px">🔗 Connect Google Calendar</button></div>`;
+}
+function bindGcalBar(body, rerender){
+  body.querySelectorAll("[data-gc-conn]").forEach(b=>b.onclick=()=>gcalConnect(rerender));
+  body.querySelectorAll("[data-gc-disc]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Disconnect Google Calendar? Existing events stay on your calendar, but Lintel OS can no longer update or cancel them.")) return;
+    try{ await gcalFetch("/disconnect",{}); }catch(e){ return toast(e.message); }
+    await gcalStatus(true); toast("Google Calendar disconnected"); rerender();
+  });
+}
+async function gcalConnect(rerender){
+  let d;
+  try{ d=await gcalFetch("/auth-url"); }
+  catch(e){ return toast(e.message); }
+  const pop=window.open(d.url,"gcal_auth","width=520,height=660");
+  if(!pop) return toast("Popup blocked — allow popups for this site and try again");
+  const done=async()=>{
+    await gcalStatus(true);
+    if(gcalConn.connected){ toast("Google Calendar connected"); rerender&&rerender(); }
+  };
+  const onMsg=ev=>{ if(ev.data&&ev.data.type==="gcal-connected"){ window.removeEventListener("message",onMsg); done(); } };
+  window.addEventListener("message",onMsg);
+  const iv=setInterval(()=>{ if(pop.closed){ clearInterval(iv); window.removeEventListener("message",onMsg); if(!gcalConn.connected) done(); } },1200);
+}
+async function gcalSyncMeeting(id){
+  toast("Creating Google Calendar event…");
+  const d=await gcalFetch("/create-event",{meeting_id:Number(id)});
+  toast(d.meet_link?"Calendar event + Meet link created — invite sent":"Calendar event created");
+  return d;
+}
+function meetEditModal(mt, rerender){
+  const toLocal=d=>{const p=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes());};
+  const when=mt.scheduled_at?toLocal(new Date(mt.scheduled_at)):"";
+  openModal(`<div class="modal-h">Edit meeting</div>
+    <div class="modal-b">
+      <div class="grid2">
+        <div class="field"><label>Title</label><input id="me_title" value="${esc(mt.title||"")}"></div>
+        <div class="field"><label>Client email (guest)</label><input id="me_email" value="${esc(mt.client_email||"")}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Date & time</label><input type="datetime-local" id="me_when" value="${when}"></div>
+        <div class="field"><label>Duration (min)</label><input type="number" id="me_dur" value="${mt.duration_min||30}" min="15" step="15"></div>
+      </div>
+      <div class="field"><label>Agenda</label><textarea id="me_agenda" rows="2">${esc(mt.agenda||"")}</textarea></div>
+      <div class="field"><label>Status</label><select id="me_status">${["scheduled","done","cancelled"].map(s=>`<option ${(mt.status||"scheduled")===s?"selected":""}>${s}</option>`).join("")}</select></div>
+      ${mt.gcal_event_id?`<div class="dm-sub">📆 Linked to Google Calendar — saving pushes the changes to the event and notifies guests.</div>`:""}
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="me_save">Save changes</button></div>`);
+  $("#me_save").onclick=async()=>{
+    const title=$("#me_title").value.trim(), when2=$("#me_when").value;
+    if(!title||!when2) return toast("Title and date/time needed");
+    const patch={ title, client_email:$("#me_email").value.trim()||null,
+      scheduled_at:new Date(when2).toISOString(), duration_min:Number($("#me_dur").value)||30,
+      agenda:$("#me_agenda").value.trim()||null, status:$("#me_status").value };
+    const {error}=await sb.from("design_meetings").update(patch).eq("id",mt.id);
+    if(error) return toast(error.message);
+    closeModal();
+    if(mt.gcal_event_id){
+      try{ await gcalFetch("/update-event",{meeting_id:mt.id}); toast("Meeting updated — Google Calendar synced, guests notified"); }
+      catch(e){ toast("Saved in Lintel OS, but Google Calendar update failed: "+e.message); }
+    } else toast("Meeting updated");
+    rerender();
+  };
+}
+async function meetDelete(id, rerender){
+  const {data:mt}=await sb.from("design_meetings").select("id,gcal_event_id").eq("id",id).single();
+  if(!confirm(mt&&mt.gcal_event_id?"Remove this meeting? The Google Calendar event will be cancelled and guests notified.":"Remove this meeting?")) return;
+  if(mt&&mt.gcal_event_id){
+    try{ await gcalFetch("/delete-event",{meeting_id:Number(id)}); }
+    catch(e){ if(!confirm("Could not cancel the Google Calendar event ("+e.message+"). Delete the meeting from Lintel OS anyway?")) return; }
+  }
+  await sb.from("design_meetings").delete().eq("id",id);
+  toast("Meeting removed"); rerender();
+}
+
 function bindMeetActions(p,body){
   body.querySelectorAll("[data-gcal]").forEach(b=>b.onclick=async()=>{
     const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.gcal).single();
     if(mt) window.open(gcalUrl(mt),"_blank");
   });
-  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Remove this meeting?")) return;
-    await sb.from("design_meetings").delete().eq("id",b.dataset.mdel); dsMeetings(p,body);
+  body.querySelectorAll("[data-msync]").forEach(b=>b.onclick=async()=>{
+    try{ await gcalSyncMeeting(b.dataset.msync); dsMeetings(p,body); }catch(e){ toast(e.message); }
   });
+  body.querySelectorAll("[data-medit]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.medit).single();
+    if(mt) meetEditModal(mt,()=>dsMeetings(p,body));
+  });
+  body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>meetDelete(b.dataset.mdel,()=>dsMeetings(p,body)));
   body.querySelectorAll("[data-mlink]").forEach(b=>b.onclick=async()=>{
     const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mlink).single();
     openModal(`<div class="modal-h">Google Meet link</div>
@@ -3423,7 +3563,7 @@ function bindMeetActions(p,body){
       closeModal(); toast("Meet link saved"); dsMeetings(p,body);
     };
   });
-  body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>momForm(p,{meeting_id:Number(b.dataset.mom),title:"MoM · "+b.dataset.momtitle},body));
+  body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>momForm("project",p,{meeting_id:Number(b.dataset.mom),title:"MoM · "+b.dataset.momtitle},body));
 }
 
 /* ---- Minutes of Meeting (unified: works for project + lead) ---- */
@@ -4370,12 +4510,13 @@ function classifyStream(cat){
 }
 // Resolved section for a row: persisted stream wins; else classify from its category.
 function rowStream(r){ return normStream(r&&r.stream?r.stream:classifyStream(r&&r.cat)); }
-// Per-section financial settings (boq_versions.stream_settings jsonb; falls back to the legacy single columns, then defaults).
+// Per-section financial settings (boq_versions.stream_settings jsonb; absent keys use STREAM_DEFAULTS).
+// No fallback to the legacy fee_pct/gst_pct/disc_pct/boost_pct columns — BOQ-STREAMS-02 materialized
+// them into stream_settings; a silent fallback is how a stale 20% discount hit every section on lead 104.
 function gStreamSettings(stream){
   const ss=(G.ver&&G.ver.stream_settings)||{}, s=ss[stream]||{};
-  const lg={fee:G.ver&&G.ver.fee_pct,gst:G.ver&&G.ver.gst_pct,disc:G.ver&&G.ver.disc_pct,boost:G.ver&&G.ver.boost_pct};
-  const pick=(a,b,d)=>{ const v=(a!==undefined&&a!==null&&a!=='')?a:((b!==undefined&&b!==null&&b!=='')?b:d); return Number(v)||0; };
-  return {fee:pick(s.fee,lg.fee,STREAM_DEFAULTS.fee),gst:pick(s.gst,lg.gst,STREAM_DEFAULTS.gst),disc:pick(s.disc,lg.disc,STREAM_DEFAULTS.disc),boost:pick(s.boost,lg.boost,STREAM_DEFAULTS.boost)};
+  const pick=(a,d)=>{ const v=(a!==undefined&&a!==null&&a!=='')?a:d; return Number(v)||0; };
+  return {fee:pick(s.fee,STREAM_DEFAULTS.fee),gst:pick(s.gst,STREAM_DEFAULTS.gst),disc:pick(s.disc,STREAM_DEFAULTS.disc),boost:pick(s.boost,STREAM_DEFAULTS.boost)};
 }
 function gSetStreamSetting(stream,key,val){
   G.ver=G.ver||{}; const ss=(G.ver.stream_settings=G.ver.stream_settings||{});
@@ -5007,13 +5148,15 @@ async function gSave(p, silent){
     G.ver=v;
     const vl=$("#m-version"); if(vl) vl.value=v.version_label;
   }
-  const grand=gGrand(), modCfg=gStreamSettings('modular');   // legacy columns mirror the modular section
+  const grand=gGrand();   // legacy fee/gst/disc/boost_pct columns are no longer written (BOQ-STREAMS-02)
   try{
     const {error:vErr}=await sb.from("boq_versions").update({
       client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
-      quote_date:v.quote_date||null,fee_pct:modCfg.fee,gst_pct:modCfg.gst,disc_pct:modCfg.disc,boost_pct:modCfg.boost,
+      quote_date:v.quote_date||null,
       stream_settings:(G.ver&&G.ver.stream_settings)||{},
       consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
+      // total = client-facing grand (discounts + GST, excluded/optional out) — same number as
+      // projects.contract_value below; the recalc_boq_total trigger that overwrote it is dropped
       total:grand.total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
     }).eq("id",G.boqId);
     if(vErr) throw vErr;
