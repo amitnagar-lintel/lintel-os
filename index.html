@@ -595,6 +595,22 @@
   .s2l-call-btn{flex:none;font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper-2);color:var(--ink);text-decoration:none;cursor:pointer;white-space:nowrap}
   .s2l-call-btn.log{background:#0D0D27;color:#fff;border:none}
 
+  /* ---- Call reminders / in-app alarm -------------------------------- */
+  .rem-list{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+  .rem-row{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px}
+  .rem-row button{border:none;background:none;color:var(--clay);cursor:pointer;font-size:12px;padding:0 2px}
+  #remAlarm{position:fixed;inset:0;z-index:900;background:rgba(13,13,39,.55);display:flex;align-items:center;justify-content:center}
+  .rem-alarm-box{background:var(--paper);border:1px solid var(--brass);border-radius:18px;
+    box-shadow:0 24px 80px rgba(13,13,39,.45);padding:34px 40px;text-align:center;max-width:360px;width:calc(100vw - 40px)}
+  .rem-clock{font-size:64px;display:inline-block;animation:remRing .8s ease-in-out infinite;transform-origin:50% 0}
+  @keyframes remRing{0%,100%{transform:rotate(-14deg)}50%{transform:rotate(14deg)}}
+  .rem-name{font-family:'Bricolage Grotesque',sans-serif;font-size:20px;font-weight:700;margin:10px 0 4px}
+  .rem-sub{font-size:13px;color:var(--ink-soft);margin-bottom:18px}
+  .rem-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .rem-btns a.rem-call{background:var(--green);color:#fff;border-radius:10px;padding:9px 16px;font-weight:600;font-size:14px;text-decoration:none}
+  .rem-btns button{border-radius:10px;padding:9px 16px;font-weight:600;font-size:14px;border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer}
+  .rem-btns .rem-done{background:var(--navy);color:var(--brass);border:none}
+
   /* ---- Lintel Assistant (chat bot) --------------------------------- */
   #assistFab{position:fixed;right:20px;bottom:20px;z-index:600;width:52px;height:52px;border-radius:50%;
     border:none;background:var(--navy);color:var(--brass);font-size:22px;box-shadow:var(--shadow);
@@ -1927,6 +1943,7 @@ function lwOverview(l,body){
           <input type="date" id="fu_date" class="lf-sel" style="padding:5px 8px">
           ${l.next_follow_up?`<button class="chip clear" data-fu="clear">Clear</button>`:""}
         </div>`:""}
+        ${w?`<button class="chip" style="margin-top:10px" onclick="remForm(${l.id})">⏰ Remind me to call</button><div id="remList" class="rem-list"></div>`:""}
       </div>
     </div>
     <div>
@@ -1952,6 +1969,7 @@ function lwOverview(l,body){
     </div>
   </div>`;
   bindLeadCommon(l);
+  if(w) remListForLead(l.id);
 }
 
 /* ---- Briefing: full client + qualification ---- */
@@ -5685,6 +5703,155 @@ function gExportCSV(){
 }
 
 /* =====================================================================
+   CALL REMINDERS — "⏰ Remind me to call" with in-app alarm + sound.
+   remind_at = call time; the alarm fires alarm_lead_min minutes earlier.
+   A matching Google Calendar popup event is created via the google-calendar
+   edge function (route /create-reminder) so phones buzz even with the app
+   closed. RLS keeps reminders private to the person who set them.
+   ===================================================================== */
+let remCache=[], remShownIds=new Set(), remLastFetch=0, remAudio=null, remRingTimer=null;
+
+function remFmtTime(iso){
+  return new Date(iso).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:true});
+}
+
+function remForm(leadId){
+  sb.from("leads").select("id,name,phone").eq("id",leadId).single().then(({data:l})=>{
+    if(!l) return toast("Lead not found");
+    const d=new Date(Date.now()+60*60000); d.setSeconds(0,0);
+    const pad=n=>String(n).padStart(2,"0");
+    const local=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    openModal(`<div class="modal-h">⏰ Call reminder · ${esc(l.name||"")}</div>
+      <div class="field"><label>Reminder name</label><input id="rem_title" value="Call ${esc(l.name||"client")}"></div>
+      <div class="field"><label>Call at</label><input type="datetime-local" id="rem_when" value="${local}"></div>
+      <div style="font-size:12px;color:var(--ink-soft);margin:0 0 12px">An alarm rings here (with sound) 5 minutes before — plus a Google Calendar popup on your phone if your calendar is connected.</div>
+      <button class="primary" id="rem_save">Set reminder</button>`);
+    $("#rem_save").onclick=()=>remSave(l);
+  });
+}
+
+async function remSave(l){
+  const title=$("#rem_title").value.trim()||("Call "+(l.name||"client"));
+  const when=$("#rem_when").value;
+  if(!when) return toast("Pick a date & time");
+  const at=new Date(when);
+  if(isNaN(at.getTime())||at.getTime()<Date.now()+60000) return toast("Pick a time in the future");
+  const {data,error}=await sb.from("call_reminders")
+    .insert({user_id:me.id,lead_id:l.id,title,phone:l.phone||null,remind_at:at.toISOString(),alarm_lead_min:5})
+    .select("id").single();
+  if(error) return toast("Could not save reminder: "+error.message);
+  closeModal(); toast("⏰ Reminder set — "+remFmtTime(at.toISOString()));
+  remLastFetch=0; remTick(); remListForLead(l.id);
+  try{
+    const d=await gcalFetch("/create-reminder",{
+      title:"📞 "+title, start_iso:at.toISOString(),
+      description:(l.phone?("Phone: "+l.phone+"\n"):"")+"Lead: "+(l.name||""),
+      reminder_minutes:5
+    });
+    if(d.event_id) await sb.from("call_reminders").update({gcal_event_id:d.event_id}).eq("id",data.id);
+  }catch(e){
+    if(String(e.message||"").includes("google-not-connected"))
+      toast("Tip: connect Google Calendar (Meetings tab) to also get phone reminders");
+  }
+}
+
+async function remListForLead(leadId){
+  const box=document.getElementById("remList"); if(!box||!me) return;
+  const {data}=await sb.from("call_reminders").select("id,title,remind_at")
+    .eq("user_id",me.id).eq("lead_id",leadId).eq("status","pending")
+    .order("remind_at").limit(5);
+  box.innerHTML=(data||[]).map(r=>
+    `<div class="rem-row">⏰ ${esc(r.title)} — ${remFmtTime(r.remind_at)} <button onclick="remCancel(${r.id},${leadId})" title="Cancel reminder">✕</button></div>`).join("");
+}
+
+async function remCancel(id,leadId){
+  await sb.from("call_reminders").update({status:"cancelled"}).eq("id",id);
+  remCache=remCache.filter(r=>r.id!==id);
+  toast("Reminder cancelled"); remListForLead(leadId);
+}
+
+/* sound: two-tone chime via WebAudio, no audio file. The one-time pointer
+   listener unlocks the AudioContext under browser autoplay rules. */
+document.addEventListener("pointerdown",()=>{
+  try{
+    if(!remAudio) remAudio=new (window.AudioContext||window.webkitAudioContext)();
+    if(remAudio.state==="suspended") remAudio.resume();
+  }catch(e){}
+},{once:true});
+
+function remBeep(){
+  try{
+    if(!remAudio) remAudio=new (window.AudioContext||window.webkitAudioContext)();
+    if(remAudio.state==="suspended") remAudio.resume();
+    const t0=remAudio.currentTime;
+    [[0,988],[0.18,1318]].forEach(([off,hz])=>{
+      const o=remAudio.createOscillator(), g=remAudio.createGain();
+      o.type="sine"; o.frequency.value=hz;
+      g.gain.setValueAtTime(0.0001,t0+off);
+      g.gain.exponentialRampToValueAtTime(0.28,t0+off+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+off+0.16);
+      o.connect(g); g.connect(remAudio.destination);
+      o.start(t0+off); o.stop(t0+off+0.2);
+    });
+  }catch(e){}
+}
+
+async function remTick(){
+  if(!me||!sb) return;
+  const now=Date.now();
+  if(now-remLastFetch>60000){
+    remLastFetch=now;
+    const {data}=await sb.from("call_reminders")
+      .select("id,title,phone,remind_at,alarm_lead_min,lead_id")
+      .eq("user_id",me.id).eq("status","pending")
+      .gte("remind_at",new Date(now-30*60000).toISOString())
+      .lte("remind_at",new Date(now+24*3600*1000).toISOString());
+    remCache=data||[];
+  }
+  for(const r of remCache){
+    const fireAt=new Date(r.remind_at).getTime()-(r.alarm_lead_min||0)*60000;
+    if(now>=fireAt&&!remShownIds.has(r.id)){ remShownIds.add(r.id); remFire(r); break; }
+  }
+}
+setInterval(remTick,15000);
+
+function remFire(r){
+  sb.from("call_reminders").update({status:"fired"}).eq("id",r.id).then(()=>{});
+  remCache=remCache.filter(x=>x.id!==r.id);
+  const mins=Math.max(0,Math.round((new Date(r.remind_at).getTime()-Date.now())/60000));
+  remCloseAlarm();
+  const div=document.createElement("div"); div.id="remAlarm";
+  div.innerHTML=`<div class="rem-alarm-box">
+    <div class="rem-clock">⏰</div>
+    <div class="rem-name">${esc(r.title)}</div>
+    <div class="rem-sub">${mins>0?("Call in "+mins+" min"):"It's time"}${r.phone?(" · "+esc(r.phone)):""}</div>
+    <div class="rem-btns">
+      ${r.phone?`<a class="rem-call" href="tel:${esc(r.phone)}">☎ Call now</a>`:""}
+      <button onclick="remSnooze(${r.id})">＋5 min</button>
+      <button class="rem-done" onclick="remDone(${r.id})">✓ Done</button>
+    </div></div>`;
+  document.body.appendChild(div);
+  remBeep(); remRingTimer=setInterval(remBeep,1500);
+  setTimeout(()=>{ if(remRingTimer){ clearInterval(remRingTimer); remRingTimer=null; } },60000);
+}
+
+function remCloseAlarm(){
+  const d=document.getElementById("remAlarm"); if(d) d.remove();
+  if(remRingTimer){ clearInterval(remRingTimer); remRingTimer=null; }
+}
+async function remDone(id){
+  remCloseAlarm();
+  await sb.from("call_reminders").update({status:"done"}).eq("id",id);
+}
+async function remSnooze(id){
+  remCloseAlarm(); remShownIds.delete(id);
+  await sb.from("call_reminders").update({
+    status:"pending", remind_at:new Date(Date.now()+5*60000).toISOString(), alarm_lead_min:0
+  }).eq("id",id);
+  remLastFetch=0; toast("Snoozed 5 minutes");
+}
+
+/* =====================================================================
    LINTEL ASSISTANT — in-app help chatbot
    UI here; the model call runs in the "os-assistant" edge function so the
    API key never reaches the client. History lives in assistant_chats
@@ -5826,7 +5993,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b13 · 20 Jul 2026";
+const APP_BUILD = "b14 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
