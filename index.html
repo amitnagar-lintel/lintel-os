@@ -594,6 +594,47 @@
   .s2l-call-sub{font-size:11.5px;color:var(--ink-soft)}
   .s2l-call-btn{flex:none;font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper-2);color:var(--ink);text-decoration:none;cursor:pointer;white-space:nowrap}
   .s2l-call-btn.log{background:#0D0D27;color:#fff;border:none}
+
+  /* ---- Lintel Assistant (chat bot) --------------------------------- */
+  #assistFab{position:fixed;right:20px;bottom:20px;z-index:600;width:52px;height:52px;border-radius:50%;
+    border:none;background:var(--navy);color:var(--brass);font-size:22px;box-shadow:var(--shadow);
+    display:flex;align-items:center;justify-content:center;transition:transform .15s}
+  #assistFab:hover{transform:scale(1.06)}
+  #assistPanel{position:fixed;right:20px;bottom:84px;z-index:600;width:380px;max-width:calc(100vw - 24px);
+    height:560px;max-height:calc(100vh - 120px);display:none;flex-direction:column;background:var(--paper);
+    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(13,13,39,.15),0 16px 48px rgba(13,13,39,.22);overflow:hidden}
+  #assistPanel.open{display:flex}
+  .assist-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--navy);color:#fff}
+  .assist-head .t{font-weight:700;font-size:14px;letter-spacing:.2px}
+  .assist-head .s{font-size:10.5px;color:#B9B7CE;margin-top:1px}
+  .assist-head .spacer{flex:1}
+  .assist-head button{border:none;background:none;color:#B9B7CE;font-size:15px;padding:4px 6px;border-radius:6px}
+  .assist-head button:hover{background:var(--navy-soft);color:#fff}
+  #assistMsgs{flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:10px;background:var(--paper)}
+  .assist-msg{max-width:86%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+  .assist-msg.user{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:4px}
+  .assist-msg.bot{align-self:flex-start;background:var(--paper-2);border:1px solid var(--line);color:var(--ink);border-bottom-left-radius:4px}
+  .assist-msg.bot b{color:var(--brass-deep)}
+  .assist-empty{margin:auto;text-align:center;color:var(--ink-soft);font-size:12.5px;padding:0 18px;line-height:1.7}
+  .assist-empty .big{font-size:26px;display:block;margin-bottom:6px}
+  .assist-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px}
+  .assist-chips button{font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer}
+  .assist-chips button:hover{border-color:var(--brass)}
+  .assist-typing{align-self:flex-start;color:var(--ink-soft);font-size:12px;padding:4px 8px}
+  .assist-foot{flex:none;border-top:1px solid var(--line);background:#fff;padding:10px}
+  .assist-inputrow{display:flex;gap:8px;align-items:flex-end}
+  #assistInput{flex:1;resize:none;border:1px solid var(--line-2);border-radius:10px;padding:9px 11px;font-size:13px;
+    max-height:110px;background:var(--paper);outline:none}
+  #assistInput:focus{border-color:var(--brass)}
+  #assistSendBtn{flex:none;width:38px;height:38px;border-radius:10px;border:none;background:var(--navy);color:var(--brass);font-size:15px}
+  #assistSendBtn:disabled{opacity:.5;cursor:default}
+  .assist-actions{display:flex;justify-content:space-between;margin-top:6px}
+  .assist-actions button{border:none;background:none;font-size:10.5px;color:var(--ink-soft);cursor:pointer;padding:2px 4px}
+  .assist-actions button:hover{color:var(--brass-deep);text-decoration:underline}
+  @media(max-width:640px){
+    #assistPanel{right:8px;left:8px;width:auto;bottom:76px;height:70vh}
+    #assistFab{right:14px;bottom:14px}
+  }
 </style>
 </head>
 <body>
@@ -650,6 +691,30 @@
     </div>
   </header>
   <main id="main"></main>
+
+  <!-- ===================== LINTEL ASSISTANT ===================== -->
+  <button id="assistFab" title="Lintel Assistant — ask anything about Lintel OS" onclick="assistToggle()">✦</button>
+  <div id="assistPanel">
+    <div class="assist-head">
+      <div>
+        <div class="t">Lintel Assistant</div>
+        <div class="s">Knows every tab of Lintel OS</div>
+      </div>
+      <div class="spacer"></div>
+      <button title="Clear my chat history" onclick="assistClear()">⌫</button>
+      <button title="Close" onclick="assistToggle(false)">✕</button>
+    </div>
+    <div id="assistMsgs"></div>
+    <div class="assist-foot">
+      <div class="assist-inputrow">
+        <textarea id="assistInput" rows="1" placeholder="Ask how to do anything in Lintel OS…"></textarea>
+        <button id="assistSendBtn" onclick="assistSend()" title="Send">➤</button>
+      </div>
+      <div class="assist-actions">
+        <button onclick="assistSuggest()" title="Flags your last question for Amit to review">💡 Suggest this to Amit</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -5619,6 +5684,120 @@ function gExportCSV(){
   a.download='Lintel_BOQ_'+((G.ver?.client_name)||'Client').replace(/\s/g,'_')+'.csv'; a.click();
 }
 
+/* =====================================================================
+   LINTEL ASSISTANT — in-app help chatbot
+   UI here; the model call runs in the "os-assistant" edge function so the
+   API key never reaches the client. History lives in assistant_chats
+   (RLS: each user sees only their own rows; admin/sales_head see all).
+   ===================================================================== */
+let assistMsgsData=[], assistLoadedHist=false, assistBusy=false;
+
+function assistToggle(open){
+  const p=$("#assistPanel");
+  const show=(open===undefined)?!p.classList.contains("open"):open;
+  p.classList.toggle("open",show);
+  if(show){
+    if(!assistLoadedHist) assistLoadHistory();
+    setTimeout(()=>$("#assistInput").focus(),50);
+  }
+}
+
+async function assistLoadHistory(){
+  assistLoadedHist=true;
+  const {data,error}=await sb.from("assistant_chats")
+    .select("role,content").eq("user_id",me.id)
+    .order("created_at",{ascending:false}).limit(40);
+  if(!error&&data) assistMsgsData=data.reverse().map(r=>({role:r.role,content:r.content}));
+  assistRender();
+}
+
+/* minimal safe formatting: escape everything, then **bold** and line breaks */
+function assistFmt(s){
+  return esc(s).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");
+}
+
+const ASSIST_STARTERS=[
+  "How do I convert a lead to a project?",
+  "Where do I add a discount in the BOQ?",
+  "How do payment milestones work?",
+  "How do I share the schedule with a client?"
+];
+
+function assistRender(){
+  const box=$("#assistMsgs");
+  if(!assistMsgsData.length&&!assistBusy){
+    box.innerHTML=`<div class="assist-empty"><span class="big">✦</span>
+      Hi ${esc((me?.email||"").split("@")[0]||"there")} — I know every tab of Lintel OS.<br>Ask me how anything works, or where to find it.
+      <div class="assist-chips">${ASSIST_STARTERS.map(q=>`<button onclick="assistAsk(this.textContent)">${esc(q)}</button>`).join("")}</div></div>`;
+    return;
+  }
+  box.innerHTML=assistMsgsData.map(m=>
+    `<div class="assist-msg ${m.role==="user"?"user":"bot"}">${assistFmt(m.content)}</div>`).join("")
+    +(assistBusy?`<div class="assist-typing">Assistant is thinking…</div>`:"");
+  box.scrollTop=box.scrollHeight;
+}
+
+function assistAsk(q){ $("#assistInput").value=q; assistSend(); }
+
+function assistContext(){
+  const view=document.querySelector("nav.tabs button.active")?.dataset.view||"dashboard";
+  let tab=null;
+  if(view==="leads"&&typeof activeLead!=="undefined"&&activeLead) tab="lead workspace · "+leadTab;
+  if(view==="projects"&&typeof activeProject!=="undefined"&&activeProject) tab="project workspace · "+projectTab;
+  return {view,tab};
+}
+
+async function assistSend(){
+  if(assistBusy) return;
+  const inp=$("#assistInput"); const text=inp.value.trim();
+  if(!text) return;
+  if(text.length>2000) return toast("Please keep questions under 2000 characters");
+  inp.value=""; inp.style.height="auto";
+  assistMsgsData.push({role:"user",content:text});
+  assistBusy=true; $("#assistSendBtn").disabled=true; assistRender();
+  sb.from("assistant_chats").insert({user_id:me.id,role:"user",content:text,context:assistContext()}).then(()=>{});
+  try{
+    const {data,error}=await sb.functions.invoke("os-assistant",{body:{
+      messages:assistMsgsData.slice(-12).map(m=>({role:m.role,content:m.content})),
+      context:assistContext()
+    }});
+    if(error||!data?.reply) throw new Error(data?.error||error?.message||"No reply");
+    assistMsgsData.push({role:"assistant",content:data.reply});
+    sb.from("assistant_chats").insert({user_id:me.id,role:"assistant",content:data.reply}).then(()=>{});
+  }catch(e){
+    assistMsgsData.push({role:"assistant",content:"Sorry — I couldn't reach the assistant service. Please try again in a moment. ("+(e.message||"error")+")"});
+  }
+  assistBusy=false; $("#assistSendBtn").disabled=false; assistRender();
+}
+
+async function assistSuggest(){
+  const lastQ=[...assistMsgsData].reverse().find(m=>m.role==="user");
+  if(!lastQ) return toast("Ask a question first, then suggest it");
+  const {data,error}=await sb.from("assistant_chats")
+    .select("id").eq("user_id",me.id).eq("role","user")
+    .order("created_at",{ascending:false}).limit(1);
+  if(error||!data?.length) return toast("Could not flag — try again");
+  const {error:e2}=await sb.from("assistant_chats").update({flagged:true}).eq("id",data[0].id);
+  if(e2) return toast("Could not flag — try again");
+  toast("Sent to Amit as a suggestion 💡");
+}
+
+async function assistClear(){
+  if(!confirm("Clear your entire assistant chat history?")) return;
+  await sb.from("assistant_chats").delete().eq("user_id",me.id);
+  assistMsgsData=[]; assistRender(); toast("Chat history cleared");
+}
+
+/* textarea: Enter sends, Shift+Enter = newline; auto-grow */
+(function(){
+  document.addEventListener("keydown",e=>{
+    if(e.target?.id==="assistInput"&&e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); assistSend(); }
+  });
+  document.addEventListener("input",e=>{
+    if(e.target?.id==="assistInput"){ e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,110)+"px"; }
+  });
+})();
+
 /* ---- PWA: register the same-origin service worker (sw.js) ----
    Real file (not a blob URL, which browsers reject), so it actually registers and
    auto-updates. When a new version activates it claims the page and we reload once,
@@ -5647,7 +5826,7 @@ function gExportCSV(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b10 · 20 Jul 2026";
+const APP_BUILD = "b11 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
