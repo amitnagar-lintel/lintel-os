@@ -4735,42 +4735,93 @@ async function gPdfBlob(p){
     holder.appendChild(css); holder.appendChild(clone);
     document.body.appendChild(holder);
 
+    /* The real sheet is WIDER than A4-at-96dpi (838px vs 794px on the Amit BOQ),
+       so a fixed 794px capture still clipped the right edge. Capture at the
+       sheet's own natural width instead — the PDF scales it to the page. */
+    const W = Math.max(GPDF_W, clone.scrollWidth, el.scrollWidth);
+    holder.style.width = W+"px"; clone.style.width = W+"px";
+    const Hcss = Math.max(clone.scrollHeight, 1);
+
+    /* Adaptive scale. Safari (and every iPhone/iPad) caps canvas AREA at
+       ~16.7M px² and silently BLANKS everything beyond it — on a 105-item BOQ
+       (8,600 CSS px tall) a fixed scale of 2 needs a 27M px² canvas, so the
+       bottom ~40% of the quote simply vanished: the "half BOQ" PDF. Scale down
+       just enough that the full sheet always fits within the safest limit. */
+    const SAFE_AREA = 14e6;
+    const scale = Math.min(2, Math.sqrt(SAFE_AREA/(W*Hcss)));
+
     /* Paginate by hand. html2pdf's own paging (even with avoid-all / avoid:'tr')
        slices the rasterised sheet at fixed heights and cuts straight through
-       table rows — that is the "half cut" pages. Instead: rasterise once, work
-       out every row's bottom edge, and only ever cut the image there. */
+       table rows. Instead: rasterise once, work out every row's bottom edge,
+       and only ever cut the image there. */
     // The bundle keeps html2canvas / jsPDF private, so reach them via the worker.
-    const opts={ html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",
-                              width:GPDF_W,windowWidth:GPDF_W,scrollX:0,scrollY:0},
+    const opts={ html2canvas:{scale:scale,useCORS:true,backgroundColor:"#ffffff",
+                              width:W,windowWidth:Math.max(W,1024),scrollX:0,scrollY:0},
                  jsPDF:{unit:"mm",format:"a4",orientation:"portrait"} };
     const canvas = await window.html2pdf().set(opts).from(clone).toCanvas().get("canvas");
+    // If the browser couldn't rasterise the whole sheet (width clipped, or the
+    // height came out well SHORT of the layout), refuse: a loud failure beats
+    // silently emailing a client a partial quotation. (Taller is fine —
+    // html2pdf re-lays-out the clone in its own frame, so height drifts a bit.)
+    if(Math.abs(canvas.width - Math.round(W*scale)) > 4 || canvas.height < 0.9*Hcss*scale){
+      throw new Error("This browser could not render the full quotation ("+canvas.width+"×"+canvas.height+
+                      " of "+Math.round(W*scale)+"×"+Math.round(Hcss*scale)+"). Try from a desktop browser.");
+    }
     // jsPDF hands back a plain object whose constructor can't be re-invoked, so
     // borrow this instance and drop its placeholder page once ours are added.
     const pdf = await window.html2pdf().set(opts).from(document.createElement("div")).toPdf().get("pdf");
     const M=8, pageWmm=210-2*M, pageHmm=297-2*M;
     const pxPerMm = canvas.width/pageWmm;               // canvas px per mm
     const pageHpx = Math.floor(pageHmm*pxPerMm);        // canvas px that fit on one page
-    const S = canvas.width/clone.scrollWidth;           // canvas px per CSS px
 
-    // Candidate cut lines = the bottom edge of every row / block element.
-    const cTop = clone.getBoundingClientRect().top;
-    const cuts=[];
-    clone.querySelectorAll("tr,p,h1,h2,h3,table,section,div").forEach(n=>{
-      const b = n.getBoundingClientRect().bottom - cTop;
-      if(b>0) cuts.push(Math.round(b*S));
-    });
-    cuts.sort((a,b)=>a-b);
+    /* Where may a page break? DOM-measured positions drift against the canvas
+       (html2pdf re-lays-out the clone in its own frame), so don't trust them.
+       Read the PIXELS instead — but note "one uniform colour" is the WRONG
+       test: the sheet's card borders run vertically down the whole table, so
+       no scanline is ever a single colour. What identifies a text-free gap is
+       a run of CONSECUTIVE scanlines that are identical to each other —
+       vertical borders repeat perfectly row after row, text never does. */
+    const ctx = canvas.getContext("2d",{willReadFrequently:true});
+    const inset=Math.max(12, Math.round(canvas.width*0.012));  // skip sheet edge/shadow
+    function findCut(cursor,target){
+      // Search the whole page upward if needed — a shorter page beats a sliced row.
+      const band=Math.max(0, target-cursor-100);
+      if(band<=0) return target;
+      const y0=target-band;
+      const img=ctx.getImageData(0,y0,canvas.width,band+1<canvas.height-y0?band+1:band).data;
+      const rowsN=Math.floor(img.length/(canvas.width*4));
+      const rowEq=(a,b)=>{
+        const oa=a*canvas.width*4, ob=b*canvas.width*4;
+        for(let x=inset;x<canvas.width-inset;x+=3){ const p=x*4;
+          if(Math.abs(img[oa+p]-img[ob+p])>8||Math.abs(img[oa+p+1]-img[ob+p+1])>8||Math.abs(img[oa+p+2]-img[ob+p+2])>8) return false; }
+        return true;
+      };
+      const whiteish=(r)=>{                             // mostly-white row (borders allowed)
+        const off=r*canvas.width*4; let dark=0, n=0;
+        for(let x=inset;x<canvas.width-inset;x+=6){ const o=off+x*4; n++;
+          if(img[o]<235||img[o+1]<235||img[o+2]<235) dark++; }
+        return dark<=n*0.06;
+      };
+      const NEED=6;                                     // ≥6 identical consecutive rows = text-free gap
+      let streak=1, bestWhite=-1, bestAny=-1;
+      for(let r=1;r<rowsN;r++){
+        streak = rowEq(r,r-1) ? streak+1 : 1;
+        if(streak>=NEED){
+          const mid=y0 + r - (NEED>>1);
+          if(mid>cursor+100 && mid<=target){
+            if(whiteish(r)){ bestWhite=mid; } else { bestAny=mid; }
+          }
+        }
+      }
+      if(bestWhite>0) return bestWhite;                 // gap between rows — perfect
+      if(bestAny>0)  return bestAny;                    // inside a solid band — acceptable
+      return target;                                    // nothing text-free -> hard cut
+    }
 
     let cursor=0, page=0;
     while(cursor < canvas.height-2){
       const target = cursor + pageHpx;
-      let cut = target;
-      if(target < canvas.height){
-        // deepest row boundary that still fits on this page
-        let best=-1;
-        for(let i=0;i<cuts.length;i++){ if(cuts[i]>cursor+40 && cuts[i]<=target) best=cuts[i]; else if(cuts[i]>target) break; }
-        if(best>0) cut=best;                            // no boundary fits -> hard cut (row taller than a page)
-      } else cut = canvas.height;
+      const cut = (target < canvas.height) ? findCut(cursor,target) : canvas.height;
 
       const hpx = cut-cursor;
       const slice=document.createElement("canvas");
@@ -5588,7 +5639,7 @@ function gExportCSV(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b9 · 20 Jul 2026";
+const APP_BUILD = "b10 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
