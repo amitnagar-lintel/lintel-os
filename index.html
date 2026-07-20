@@ -691,6 +691,10 @@ const canManageLeads = () => ["admin","sales_head","presales"].includes(myRole);
 const canManageStaff = () => ["admin","sales_head","presales"].includes(myRole);
 // full administrative access (roles, settings, delete anyone incl admins)
 const isAdminLevel = () => FULL_ACCESS.includes(myRole);
+// Override a locked BOQ. Deliberately STRICTER than isAdminLevel() (which also
+// covers sales_head): only role="admin" — currently just Amit. Mirrors the
+// is_boq_admin() SQL function that enforces this server-side (BOQ-LOCK-01).
+const isBoqAdmin = () => myRole === "admin";
 const roleLabel = r => ROLE_LABELS[r] || r || "—";
 
 const STAGES = [
@@ -2199,9 +2203,24 @@ async function convertLead(l){
         <div class="field"><label>Project manager</label><select id="cv_pm">${staffOpts(l.pm_id)}</select></div>
       </div>
       <div class="field"><label>Contract value (₹)</label><input id="cv_val" type="number" value="${total||0}"></div>
+      <div class="rule"></div>
+      <div class="banner" style="background:#FBF5E6;border-color:#D4B06A">A project can only be opened once the client has paid the <b>10% advance</b>${total?` — that is <b>${fmt(total*0.10)}</b> of ${fmt(total)}`:""}. Recording it here creates the project's first payment entry, and locks this BOQ.</div>
+      <div class="grid2">
+        <div class="field"><label>Advance received (₹)</label><input id="cv_adv" type="number" value="${total?Math.round(total*0.10):0}"></div>
+        <div class="field"><label>Paid on</label><input id="cv_adv_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Mode</label><select id="cv_adv_mode"><option>NEFT / IMPS</option><option>UPI</option><option>Cheque</option><option>Cash</option><option>Razorpay</option><option>Other</option></select></div>
+        <div class="field"><label>Reference / UTR</label><input id="cv_adv_ref" type="text" placeholder="optional"></div>
+      </div>
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
   $("#cv_go").onclick=async()=>{
+    // ── 10% advance gate: no project without the client's commitment ──
+    const adv=Number($("#cv_adv").value||0);
+    const need=(Number(total)||0)*0.10;
+    if(!(adv>0)) return toast("Enter the advance received — a project can't be opened without it.");
+    if(need>0 && adv<need-0.5) return toast("Advance is below 10% — "+fmt(need)+" required, "+fmt(adv)+" entered.");
     const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
     const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
     const designer=$("#cv_designer").value?Number($("#cv_designer").value):null;
@@ -2213,10 +2232,18 @@ async function convertLead(l){
       converted_at:new Date().toISOString()
     }).select().single();
     if(error) return toast(error.message);
+    // Re-pointing the BOQ at the project is what locks it (boq_versions_lock_guard).
     if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
+    // Record the advance that permitted this conversion as the project's first payment.
+    const {error:payErr}=await sb.from("project_payments").insert({
+      project_id:proj.id, amount:adv, paid_on:$("#cv_adv_date").value||new Date().toISOString().slice(0,10),
+      mode:$("#cv_adv_mode").value||null, reference:($("#cv_adv_ref").value||"").trim()||null,
+      stage:"Advance (10%)", note:"Advance recorded at conversion", recorded_by:me.id
+    });
+    if(payErr) toast("Project created, but the advance could not be saved: "+payErr.message);
     await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
     await sb.from("leads").update({stage:"won",designer_id:designer,updated_at:new Date().toISOString()}).eq("id",l.id);
-    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code}${designer?" · designer "+staffName(designer):""}`,by_user:me.id});
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code} · advance ${fmt(adv)} received${designer?" · designer "+staffName(designer):""} · BOQ locked`,by_user:me.id});
     closeModal(); activeLead=null; toast(`Project ${code} created`); render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
   };
@@ -4490,8 +4517,12 @@ async function pwBoq(p, body){
     };
     return;
   }
-  G.boqId = versions[0].id;
-  G.ver = versions[0];
+  // Versions: newest first. Open the one the user picked, else the newest.
+  G.versions = versions;
+  const picked = versions.find(v=>String(v.id)===String(G.openVersionId));
+  G.boqId = (picked||versions[0]).id;
+  G.ver   = picked||versions[0];
+  G.openVersionId = G.boqId;
   // load items
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",G.boqId).order("sort_idx");
   G.rows=(items||[]).map((r,i)=>({
@@ -4575,10 +4606,57 @@ function gRoomsIn(stream){ const o=[]; G.rows.forEach(r=>{ if(rowStream(r)===str
 function gActiveStreams(){ return STREAM_KEYS.filter(k=>G.rows.some(r=>rowStream(r)===k)); }
 
 /* ---- main render with sub-tabs ---- */
+/* ---- BOQ lock (BOQ-LOCK-01) ------------------------------------------------
+   A BOQ version freezes the moment the client commits: either the lead is
+   converted to a project, or a payment is recorded on that project. Postgres
+   stamps boq_versions.locked_at and blocks writes; only role="admin" (Amit)
+   can still edit. Everyone else raises a NEW revision, which starts unlocked.
+   The gating below is convenience only — the triggers are the real boundary. */
+const BOQ_ADVANCE_PCT = 0.10;   // advance required before a lead may convert
+const LOCK_REASON_TEXT = {
+  converted_to_project: "the lead was converted to a project",
+  payment_received:     "the client payment was received",
+  backfill:             "this project was already live"
+};
+function gLockInfo(){
+  const v=G.ver||{};
+  return { locked:!!v.locked_at, lockedAt:v.locked_at, reason:v.locked_reason||"",
+           sentAt:v.proposal_sent_at };
+}
+function gLocked(){ return !!((G.ver||{}).locked_at); }
+// The single source of truth for "may this user change this BOQ version?"
+function gCanEdit(){ return canWrite() && (!gLocked() || isBoqAdmin()); }
+
+function gLockBanner(){
+  const L=gLockInfo();
+  const box=(bg,bd,html)=>`<div style="margin-bottom:12px;padding:11px 14px;border:1px solid ${bd};background:${bg};border-radius:10px;font-size:12.5px;line-height:1.55">${html}</div>`;
+  const when=L.lockedAt?new Date(L.lockedAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
+  const why=LOCK_REASON_TEXT[L.reason]||"the client committed";
+  const sent=L.sentAt?` · proposal emailed ${new Date(L.sentAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}`:"";
+  if(L.locked && !isBoqAdmin())
+    return box("#F6E7E3","#D9A79B",`🔒 <b>This BOQ is locked.</b> Frozen on ${esc(when)} because ${esc(why)}${sent}. Only Amit can change it — use <b>New revision</b> to quote a variation.`);
+  if(L.locked && isBoqAdmin())
+    return box("#FBF5E6","#D4B06A",`🔓 <b>Locked BOQ — you are editing as admin.</b> Frozen ${esc(when)} (${esc(why)})${sent}. Changes are recorded against your name.`);
+  if(L.sentAt)
+    return box("#EAF0F6","#A9C2DA",`📤 <b>Proposal emailed to the client on ${esc(new Date(L.sentAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}))}.</b> This BOQ locks automatically once the lead converts or a payment is received.`);
+  return "";
+}
+
 function gRender(p, body){
-  const ro=!canWrite();
+  G.bodyEl=body;                    // remembered so the PDF builder can re-render tabs
+  const ro=!gCanEdit();
+  const L=gLockInfo();
+  const isProj=!!G.projectId;
+  const vers=G.versions||[];
   if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
+  ${gLockBanner()}
+  ${isProj&&vers.length>1?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
+      <span style="color:var(--ink-soft)">Version</span>
+      <select id="gVerPick" style="padding:6px 9px;border:1px solid var(--line-2);border-radius:8px;font-size:12px">
+        ${vers.map(v=>`<option value="${v.id}" ${String(v.id)===String(G.boqId)?"selected":""}>${esc(v.version_label||("v"+v.version))}${v.locked_at?" · locked":""}</option>`).join("")}
+      </select>
+    </div>`:""}
   <div class="gbar">
     <div class="gsub">
       <button data-g="est" class="${G.tab==='est'?'on':''}">Estimator</button>
@@ -4588,7 +4666,10 @@ function gRender(p, body){
     </div>
     <div class="gact">
       ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
+      ${canWrite()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
+      ${isProj&&canWrite()&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked revision for a variation / change-order">＋ New revision</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
+      <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
       <button class="primary" id="gPrint">Print / PDF</button>
     </div>
   </div>
@@ -4596,9 +4677,154 @@ function gRender(p, body){
   $("#gBody")&&gBody(p);
   $$(".gsub button").forEach(b=>b.onclick=()=>{ G.tab=b.dataset.g; gRender(p,body); });
   if(!ro&&$("#gSave")) $("#gSave").onclick=()=>gSave(p);
+  if($("#gSendProp")) $("#gSendProp").onclick=()=>gSendProposal(p,body);
+  if($("#gRevise")) $("#gRevise").onclick=()=>gNewRevision(p,body);
+  if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); pwBoq(p,body); };
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
+  if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
   if(!ro) gStartAutosave(p); // autosave every 5s while editing this BOQ
+  else gStopAutosave();      // locked (or read-only): never autosave
+}
+
+/* ---- Proposal PDF ----------------------------------------------------------
+   The browser's own "Save as PDF" can't be driven from code, so we build the
+   file from the SAME #client-sheet the team already prints. Numbers therefore
+   always match Print/PDF — no BOQ money math is re-implemented anywhere.
+   html2pdf is fetched on demand only (never on normal page loads). */
+const GPDF_LIB="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js";
+function gLoadLib(src){
+  return new Promise((res,rej)=>{
+    if(window.html2pdf) return res();
+    const s=document.createElement("script");
+    s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error("Could not load the PDF library — check your connection"));
+    document.head.appendChild(s);
+  });
+}
+function gPdfName(){
+  const v=G.ver||{};
+  return ("Lintel-Proposal-"+(v.project_name||v.client_name||"quotation")+"-"+(v.version_label||("v"+v.version)))
+         .replace(/[^\w.-]+/g,"-").replace(/-+/g,"-")+".pdf";
+}
+// Renders the client sheet (switching tabs if needed) and returns a PDF Blob.
+async function gPdfBlob(p){
+  await gLoadLib(GPDF_LIB);
+  const body=G.bodyEl||$("#pwBody");
+  const prev=G.tab;
+  if(prev!=="cli"){ G.tab="cli"; gRender(p,body); await new Promise(r=>setTimeout(r,300)); }
+  const el=$("#client-sheet");
+  try{
+    if(!el) throw new Error("Client view not available");
+    return await window.html2pdf().set({
+      margin:8,                                   // mm — same as the @page rule
+      image:{type:"jpeg",quality:0.95},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:el.scrollWidth},
+      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+      pagebreak:{mode:["css","legacy"]}
+    }).from(el).outputPdf("blob");
+  } finally {
+    if(prev!=="cli"){ G.tab=prev; gRender(p,body); }
+  }
+}
+/* Snapshot the rendered client sheet and mint a client-facing link.
+   Snapshotting (rather than re-rendering later) keeps the client's copy exactly
+   as it was sent, and means the BOQ money math is never duplicated anywhere. */
+const QUOTE_VIEW_BASE="https://os.lintelspace.com/quote.html";
+async function gMakeQuoteLink(p){
+  const body=G.bodyEl||$("#pwBody");
+  const prev=G.tab;
+  if(prev!=="cli"){ G.tab="cli"; gRender(p,body); await new Promise(r=>setTimeout(r,300)); }
+  let html="";
+  try{
+    const el=$("#client-sheet");
+    if(!el) throw new Error("Client view not available");
+    html=el.outerHTML;
+  } finally {
+    if(prev!=="cli"){ G.tab=prev; gRender(p,body); }
+  }
+  const v=G.ver||{};
+  const {data,error}=await sb.from("quote_shares").insert({
+    boq_version_id:G.boqId, html:html,
+    title:(v.project_name||v.client_name||"Quotation"),
+    client_name:v.client_name||null, total:Number(v.total)||null,
+    created_by:me.id, expires_at:v.validity_date?new Date(v.validity_date+"T23:59:59").toISOString():null
+  }).select("token").single();
+  if(error) throw new Error("Could not create the quotation link: "+error.message);
+  return { token:data.token, url:QUOTE_VIEW_BASE+"?t="+data.token };
+}
+
+/* One-click download — replaces "print, then Save as PDF". */
+async function gDownloadPdf(p){
+  try{
+    toast("Building PDF…");
+    const blob=await gPdfBlob(p);
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob); a.download=gPdfName(); a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+    toast("PDF downloaded");
+  }catch(e){ toast("Could not build the PDF: "+(e.message||e)); }
+}
+
+/* Email the proposal to the client from contact@lintelspace.com, BCC the team.
+   Sending happens in the send-proposal edge function (it holds the Resend key
+   and resolves the BCC list server-side, so recipients can't be tampered with). */
+async function gSendProposal(p, body){
+  if(!canWrite()||!G.boqId) return;
+  const v=G.ver||{};
+  const to=(v.client_email||"").trim();
+  if(!to) return toast("No client email on this BOQ — add one in the Client View / meta fields first.");
+  const again=v.proposal_sent_at?"\n\nThis proposal was already emailed on "+new Date(v.proposal_sent_at).toLocaleString("en-IN")+".":"";
+  if(!confirm("Email this proposal to "+to+"?\n\nThe quotation PDF is attached, sent from contact@lintelspace.com, BCC to the assigned team and Amit."+again)) return;
+  try{
+    // 1. a client-facing link (primary call-to-action in the email)
+    toast("Preparing quotation…");
+    const link=await gMakeQuoteLink(p);
+    // 2. the same sheet as a PDF, parked in project-files for the edge function
+    //    to attach (the browser never handles the mail itself)
+    toast("Building PDF…");
+    const blob=await gPdfBlob(p);
+    const path="proposals/"+G.boqId+"/"+gPdfName();
+    const {error:upErr}=await sb.storage.from("project-files")
+      .upload(path,blob,{contentType:"application/pdf",upsert:true});
+    if(upErr) throw new Error("Could not store the PDF: "+upErr.message);
+    toast("Sending proposal…");
+    const {data,error}=await sb.functions.invoke("send-proposal",{ body:{ boq_version_id:G.boqId, pdf_path:path, pdf_name:gPdfName(), quote_url:link.url } });
+    if(error) throw error;
+    if(data&&data.error) throw new Error(data.error);
+    const nowIso=(data&&data.sent_at)||new Date().toISOString();
+    G.ver.proposal_sent_at=nowIso;
+    gLogActivity(p,"Proposal emailed to "+to+(data&&data.bcc_count?" (BCC "+data.bcc_count+" team member"+(data.bcc_count===1?"":"s")+")":""));
+    toast("Proposal emailed to "+to);
+    gRender(p,body);
+  }catch(e){
+    toast("Could not send proposal: "+(e.message||e));
+  }
+}
+
+/* Copy the current BOQ into a fresh, unlocked revision. */
+async function gNewRevision(p, body){
+  if(!canWrite()||!G.boqId) return;
+  const src=G.ver||{};
+  if(!confirm("Create a new revision?\n\nIt copies this BOQ's line items into a new version that starts unlocked, so the version the client already has stays untouched.")) return;
+  const id=await newBoqFor({project_id:p.id,title:p.name});
+  if(!id) return toast("Could not create the revision");
+  await sb.from("boq_versions").update({
+    client_name:src.client_name,client_phone:src.client_phone,client_email:src.client_email,
+    project_name:src.project_name,property:src.property,
+    consultant:src.consultant,consultant_phone:src.consultant_phone,
+    quote_date:new Date().toISOString().slice(0,10),
+    stream_settings:src.stream_settings||{}
+  }).eq("id",id);
+  const {data:srcItems}=await sb.from("boq_items").select("*").eq("boq_version_id",src.id);
+  if(srcItems&&srcItems.length){
+    const copies=srcItems.map(r=>{ const c={...r}; delete c.id; c.boq_version_id=id; return c; });
+    const {error:cErr}=await sb.from("boq_items").insert(copies);
+    if(cErr) toast("Revision created, but copying items failed: "+cErr.message);
+  }
+  gLogActivity(p,"New BOQ revision created from "+(src.version_label||("v"+src.version)));
+  G.openVersionId=id; gStopAutosave();
+  toast("New revision created — this one is editable");
+  pwBoq(p,body);
 }
 function $$(s){ return Array.from(document.querySelectorAll(s)); }
 
@@ -4612,7 +4838,7 @@ function gBody(p){
 /* ================= ESTIMATOR ================= */
 function catsForStream(stream){ return [...new Set(G.rates.filter(r=>normStream(r.stream||classifyStream(r.cat))===stream).map(r=>r.cat))]; }
 function gEstimator(p){
-  const v=G.ver||{}, ro=!canWrite();
+  const v=G.ver||{}, ro=!gCanEdit();   // locked BOQs render read-only for everyone but Amit
   G.ctx=p;                                   // remember context so add/import can fully re-render
   if(!G.section) G.section='all';
   const addSec=(G.section!=='all')?G.section:'modular';   // section the add forms target
@@ -5155,6 +5381,14 @@ function gRates(p){
 /* ================= SAVE / CSV ================= */
 async function gSave(p, silent){
   if(!G.boqId) return;
+  // Locked BOQ (shared with client + 10% received): only Amit may write.
+  // Postgres enforces this anyway (boq_lock_guard); this just avoids firing
+  // doomed round-trips — especially from the 5s autosave.
+  if(!gCanEdit()){
+    gStopAutosave();
+    if(!silent) toast("This BOQ is locked — only Amit can edit it. Use “New revision” to quote changes.");
+    return;
+  }
   if(G._saving) return; // prevent overlapping saves
   G._saving=true;
   const v=G.ver||{};
@@ -5192,19 +5426,27 @@ async function gSave(p, silent){
       toast("BOQ saved");
       // log to activity (lead or project)
       gLogActivity(p, "BOQ saved · "+v.version_label);
+      // an edit to a locked BOQ is an admin override — make it visible in the trail
+      if(gLocked() && isBoqAdmin()) gLogActivity(p, "⚠ Locked BOQ edited by admin · "+v.version_label);
     }
     if(G.leadId && typeof refreshLeadBoqFlow==="function" && !silent) refreshLeadBoqFlow();
   }catch(e){
-    const ind=$("#g-autosave"); if(ind){ ind.textContent="⚠ Not saved — "+(e.message||"error"); ind.style.color="#d9534f"; }
-    if(!silent) toast("Save failed: "+(e.message||e));
+    const locked=/BOQ_LOCKED/.test(e.message||"");
+    const msg=locked?"BOQ is locked — only Amit can edit it":(e.message||"error");
+    if(locked) gStopAutosave();
+    const ind=$("#g-autosave"); if(ind){ ind.textContent="⚠ Not saved — "+msg; ind.style.color="#d9534f"; }
+    if(!silent) toast(locked?msg+". Use “New revision” to quote changes.":("Save failed: "+msg));
   }finally{ G._saving=false; }
 }
 
 // log BOQ activity to the right timeline (lead_activities or project)
 async function gLogActivity(p, text){
   try{
-    if(G.leadId){
-      await sb.from("lead_activities").insert({lead_id:G.leadId,type:"Note",text:text,by_user:me.id});
+    // Project BOQs have no G.leadId, but their project points at a lead — log
+    // there so share / revision / admin-override events land in one trail.
+    const leadId = G.leadId || (p && p.lead_id) || null;
+    if(leadId){
+      await sb.from("lead_activities").insert({lead_id:leadId,type:"Note",text:text,by_user:me.id});
     }
   }catch(e){}
 }
