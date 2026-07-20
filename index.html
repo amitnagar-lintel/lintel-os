@@ -698,7 +698,7 @@
     <div class="assist-head">
       <div>
         <div class="t">Lintel Assistant</div>
-        <div class="s">Knows every tab of Lintel OS</div>
+        <div class="s">Knows every tab — and your pipeline</div>
       </div>
       <div class="spacer"></div>
       <button title="Clear my chat history" onclick="assistClear()">⌫</button>
@@ -5717,17 +5717,17 @@ function assistFmt(s){
 }
 
 const ASSIST_STARTERS=[
+  "What follow-ups do I have due today?",
+  "Show me my pipeline summary",
   "How do I convert a lead to a project?",
-  "Where do I add a discount in the BOQ?",
-  "How do payment milestones work?",
-  "How do I share the schedule with a client?"
+  "Where do I add a discount in the BOQ?"
 ];
 
 function assistRender(){
   const box=$("#assistMsgs");
   if(!assistMsgsData.length&&!assistBusy){
     box.innerHTML=`<div class="assist-empty"><span class="big">✦</span>
-      Hi ${esc((me?.email||"").split("@")[0]||"there")} — I know every tab of Lintel OS.<br>Ask me how anything works, or where to find it.
+      Hi ${esc((me?.email||"").split("@")[0]||"there")} — I know every tab of Lintel OS, and I can look up your leads, projects and payments.<br>Ask me anything.
       <div class="assist-chips">${ASSIST_STARTERS.map(q=>`<button onclick="assistAsk(this.textContent)">${esc(q)}</button>`).join("")}</div></div>`;
     return;
   }
@@ -5826,7 +5826,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b11 · 20 Jul 2026";
+const APP_BUILD = "b12 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
