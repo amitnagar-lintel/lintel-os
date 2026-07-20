@@ -4856,9 +4856,13 @@ async function gSendProposal(p, body){
     //    to attach (the browser never handles the mail itself)
     toast("Building PDF…");
     const blob=await gPdfBlob(p);
-    const path="proposals/"+G.boqId+"/"+gPdfName();
+    // Timestamped, so every send is its own object: re-sending never overwrites
+    // (an overwrite is an UPDATE, which this bucket had no policy for) and we
+    // keep a record of exactly which PDF each client was sent.
+    const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
+    const path="proposals/"+G.boqId+"/"+stamp+"-"+gPdfName();
     const {error:upErr}=await sb.storage.from("project-files")
-      .upload(path,blob,{contentType:"application/pdf",upsert:true});
+      .upload(path,blob,{contentType:"application/pdf",upsert:false});
     if(upErr) throw new Error("Could not store the PDF: "+upErr.message);
     toast("Sending proposal…");
     const {data,error}=await sb.functions.invoke("send-proposal",{ body:{ boq_version_id:G.boqId, pdf_path:path, pdf_name:gPdfName(), quote_url:link.url } });
@@ -5584,7 +5588,7 @@ function gExportCSV(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b8 · 20 Jul 2026";
+const APP_BUILD = "b9 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
