@@ -4707,23 +4707,84 @@ function gPdfName(){
   return ("Lintel-Proposal-"+(v.project_name||v.client_name||"quotation")+"-"+(v.version_label||("v"+v.version)))
          .replace(/[^\w.-]+/g,"-").replace(/-+/g,"-")+".pdf";
 }
+const GPDF_W = 794;   // 210mm at 96dpi — capture at true A4 width
 // Renders the client sheet (switching tabs if needed) and returns a PDF Blob.
 async function gPdfBlob(p){
   await gLoadLib(GPDF_LIB);
   const body=G.bodyEl||$("#pwBody");
   const prev=G.tab;
   if(prev!=="cli"){ G.tab="cli"; gRender(p,body); await new Promise(r=>setTimeout(r,300)); }
-  const el=$("#client-sheet");
+  let holder=null;
   try{
+    const el=$("#client-sheet");
     if(!el) throw new Error("Client view not available");
-    return await window.html2pdf().set({
-      margin:8,                                   // mm — same as the @page rule
-      image:{type:"jpeg",quality:0.95},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:el.scrollWidth},
-      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
-      pagebreak:{mode:["css","legacy"]}
-    }).from(el).outputPdf("blob");
+    /* Capture an isolated CLONE at a fixed A4 width rather than the live node.
+       Captured in place, the app's layout squeezed the sheet and html2canvas
+       produced a canvas narrower than the content — the right-hand Amount
+       column was cut off. The injected rules also stop a page break landing
+       mid-row, which sliced rows in half at every page boundary. */
+    holder=document.createElement("div");
+    holder.style.cssText="position:fixed;left:-10000px;top:0;width:"+GPDF_W+"px;background:#fff;z-index:-1";
+    const clone=el.cloneNode(true);
+    clone.style.width=GPDF_W+"px"; clone.style.maxWidth="none"; clone.style.margin="0";
+    const css=document.createElement("style");
+    css.textContent="*{box-sizing:border-box}"+
+      "table{width:100%!important;border-collapse:collapse}"+
+      "tr,td,th{page-break-inside:avoid!important;break-inside:avoid!important}"+
+      "thead{display:table-header-group}";   // repeat headers on each page
+    holder.appendChild(css); holder.appendChild(clone);
+    document.body.appendChild(holder);
+
+    /* Paginate by hand. html2pdf's own paging (even with avoid-all / avoid:'tr')
+       slices the rasterised sheet at fixed heights and cuts straight through
+       table rows — that is the "half cut" pages. Instead: rasterise once, work
+       out every row's bottom edge, and only ever cut the image there. */
+    // The bundle keeps html2canvas / jsPDF private, so reach them via the worker.
+    const opts={ html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",
+                              width:GPDF_W,windowWidth:GPDF_W,scrollX:0,scrollY:0},
+                 jsPDF:{unit:"mm",format:"a4",orientation:"portrait"} };
+    const canvas = await window.html2pdf().set(opts).from(clone).toCanvas().get("canvas");
+    // jsPDF hands back a plain object whose constructor can't be re-invoked, so
+    // borrow this instance and drop its placeholder page once ours are added.
+    const pdf = await window.html2pdf().set(opts).from(document.createElement("div")).toPdf().get("pdf");
+    const M=8, pageWmm=210-2*M, pageHmm=297-2*M;
+    const pxPerMm = canvas.width/pageWmm;               // canvas px per mm
+    const pageHpx = Math.floor(pageHmm*pxPerMm);        // canvas px that fit on one page
+    const S = canvas.width/clone.scrollWidth;           // canvas px per CSS px
+
+    // Candidate cut lines = the bottom edge of every row / block element.
+    const cTop = clone.getBoundingClientRect().top;
+    const cuts=[];
+    clone.querySelectorAll("tr,p,h1,h2,h3,table,section,div").forEach(n=>{
+      const b = n.getBoundingClientRect().bottom - cTop;
+      if(b>0) cuts.push(Math.round(b*S));
+    });
+    cuts.sort((a,b)=>a-b);
+
+    let cursor=0, page=0;
+    while(cursor < canvas.height-2){
+      const target = cursor + pageHpx;
+      let cut = target;
+      if(target < canvas.height){
+        // deepest row boundary that still fits on this page
+        let best=-1;
+        for(let i=0;i<cuts.length;i++){ if(cuts[i]>cursor+40 && cuts[i]<=target) best=cuts[i]; else if(cuts[i]>target) break; }
+        if(best>0) cut=best;                            // no boundary fits -> hard cut (row taller than a page)
+      } else cut = canvas.height;
+
+      const hpx = cut-cursor;
+      const slice=document.createElement("canvas");
+      slice.width=canvas.width; slice.height=hpx;
+      slice.getContext("2d").drawImage(canvas,0,cursor,canvas.width,hpx,0,0,canvas.width,hpx);
+      pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg",0.95),"JPEG",M,M,pageWmm,hpx/pxPerMm);
+      cursor=cut; page++;
+      if(page>60) break;                                // guard against a pathological loop
+    }
+    if(page>0) pdf.deletePage(1);                       // remove the borrowed placeholder page
+    return pdf.output("blob");
   } finally {
+    if(holder) holder.remove();
     if(prev!=="cli"){ G.tab=prev; gRender(p,body); }
   }
 }
@@ -5523,7 +5584,7 @@ function gExportCSV(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b7 · 20 Jul 2026";
+const APP_BUILD = "b8 · 20 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
