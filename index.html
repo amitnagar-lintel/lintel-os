@@ -643,6 +643,7 @@
     </nav>
     <div class="spacer"></div>
     <div class="who">
+      <span id="buildTag" title="App build. If something looks out of date, quote this — a mismatch means your browser is on an old cached build." style="font-size:10px;letter-spacing:.4px;color:var(--ink-soft);opacity:.65;white-space:nowrap"></span>
       <span id="userName"></span>
       <span class="role-chip" id="userRole">—</span>
       <button class="ghost" id="logoutBtn">Sign out</button>
@@ -4768,11 +4769,22 @@ async function gDownloadPdf(p){
 /* Email the proposal to the client from contact@lintelspace.com, BCC the team.
    Sending happens in the send-proposal edge function (it holds the Resend key
    and resolves the BCC list server-side, so recipients can't be tampered with). */
+/* Resolve the client's address the SAME way send-proposal does: the BOQ's own
+   meta field is usually blank (and on a locked BOQ nobody but Amit could fill
+   it), so fall back to the project, then the lead. Some records hold several
+   addresses in one field — take the first valid one. Keep this in step with the
+   edge function; they used to disagree, which blocked sending entirely. */
+function gClientEmail(p){
+  const v=G.ver||{};
+  const raw=[v.client_email, p&&p.client_email, p&&p.email]
+    .map(x=>String(x||"").trim()).find(x=>x) || "";
+  return (raw.split(/[\s,;]+/).find(e=>/.+@.+\..+/.test(e)) || "").trim();
+}
 async function gSendProposal(p, body){
   if(!canWrite()||!G.boqId) return;
   const v=G.ver||{};
-  const to=(v.client_email||"").trim();
-  if(!to) return toast("No client email on this BOQ — add one in the Client View / meta fields first.");
+  const to=gClientEmail(p);
+  if(!to) return toast("No client email on this BOQ, its project or its lead — add one in Client Details first.");
   const again=v.proposal_sent_at?"\n\nThis proposal was already emailed on "+new Date(v.proposal_sent_at).toLocaleString("en-IN")+".":"";
   if(!confirm("Email this proposal to "+to+"?\n\nThe quotation PDF is attached, sent from contact@lintelspace.com, BCC to the assigned team and Amit."+again)) return;
   try{
@@ -5497,8 +5509,24 @@ function gExportCSV(){
     });
   }
   window.addEventListener("load",()=>{
-    navigator.serviceWorker.register("/sw.js").then(reg=>{ try{ reg.update(); }catch(_){} }).catch(()=>{});
+    // updateViaCache:"none" — without it the browser may reuse a cached sw.js for
+    // up to 24h and not notice a deploy, which is how a stale build hid the BOQ
+    // "Send proposal" button. Always fetch the worker script fresh.
+    navigator.serviceWorker.register("/sw.js",{updateViaCache:"none"})
+      .then(reg=>{ try{ reg.update(); }catch(_){}
+        setInterval(()=>{ try{ reg.update(); }catch(_){} }, 15*60*1000); })  // re-check while a long session stays open
+      .catch(()=>{});
   });
+})();
+
+/* ---- Build stamp -----------------------------------------------------------
+   Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
+   current build?" is answerable without guesswork — a stale service worker once
+   hid a whole feature and cost an afternoon of hunting. */
+const APP_BUILD = "b7 · 20 Jul 2026";
+(function(){
+  const t=document.getElementById("buildTag");
+  if(t) t.textContent=APP_BUILD;
 })();
 
 /* ---- PWA install button: shows when the browser offers installation ---- */
