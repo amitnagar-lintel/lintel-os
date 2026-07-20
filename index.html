@@ -1199,7 +1199,9 @@ async function renderDashboard(){
 
   const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];
   const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
-  const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id||l.presales_id;return id?staffName(id):"";};
+  // presales_id is excluded on purpose: auto-assignment now sets it (Maleen) on every
+  // lead, so it no longer signals ownership — including it would show her as Owner everywhere.
+  const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id;return id?staffName(id):"";};
   const prio=l=>{const sc=Number(l.bant_score)||bantFromQual(l)||0;return sc>=60?["High","hi"]:sc<35?["Low","lo"]:["Medium","md"];};
 
   const recent=L.slice(0,8);
@@ -1353,7 +1355,9 @@ async function drawLeadsTable(){
   const rows=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.source && l.source!==f.source) return false;
-    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id||l.presales_id) return false; }
+    // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
+    // so counting it would make this filter permanently return zero rows.
+    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id) return false; }
     else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
@@ -1364,7 +1368,9 @@ async function drawLeadsTable(){
   const badge=$("#dueCount"); if(badge){ badge.textContent=dueN?dueN:""; badge.style.display=dueN?"inline-flex":"none"; }
   const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];
   const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
-  const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id||l.presales_id;return id?staffName(id):"";};
+  // presales_id is excluded on purpose: auto-assignment now sets it (Maleen) on every
+  // lead, so it no longer signals ownership — including it would show her as Owner everywhere.
+  const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id;return id?staffName(id):"";};
   host.innerHTML=`
     <div class="lead-count">${rows.length} of ${(leads||[]).length} leads</div>
     <div class="ltbl-scroll">
@@ -1418,7 +1424,9 @@ async function drawBoard(){
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.source && l.source!==f.source) return false;
-    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id||l.presales_id) return false; }
+    // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
+    // so counting it would make this filter permanently return zero rows.
+    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id) return false; }
     else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
