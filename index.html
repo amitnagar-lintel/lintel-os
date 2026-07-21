@@ -5262,6 +5262,82 @@ async function gNewRevision(p, body){
 }
 function $$(s){ return Array.from(document.querySelectorAll(s)); }
 
+/* ================= WHAT'S NEW (in-app feature updates) =================
+   Auto-opens once per build per device right after sign-in, teaching the team
+   each new feature in how-to language; the injected 🔔 in the header reopens
+   the full history any time. Fully self-contained: injects its own button,
+   stores last-seen build in localStorage, touches no shared shell code.
+   DEPLOY CONVENTION (see CLAUDE.md): every user-facing deploy bumps APP_BUILD
+   AND adds an entry at the TOP of WHATS_NEW — one bullet per change, written
+   as an instruction ("do X to get Y"), not a changelog line. */
+const WN_KEY="lsa_seen_build";
+const WHATS_NEW=[
+  {build:"b21",date:"21 Jul 2026",title:"This update popup",points:[
+    "Lintel OS now shows what changed the moment you sign in after an update — with steps on how to use each feature.",
+    "Reopen it any time from the <b>🔔</b> at the top right. A red dot means something new is waiting."]},
+  {build:"b20",date:"21 Jul 2026",title:"Two BOQ options for one client (different finishes)",points:[
+    "Finished a quote? Press <b>🔒 Finalise &amp; lock</b> in the BOQ bar — it freezes that version exactly as shared. It stops changing; only Amit can edit it after.",
+    "Then press <b>＋ New option</b> — it copies everything into a fresh editable version. Name it for the client, e.g. <b>Option B — Acrylic finish</b>, and change finishes/rates there.",
+    "Switch between options with the <b>Version</b> dropdown (now on leads too). Send each option's proposal / PDF separately — the client gets both, clearly labelled."]},
+  {build:"b19",date:"21 Jul 2026",title:"Item notes now appear on the quotation",points:[
+    "Type a note in the estimator's <b>note</b> column (e.g. brand, finish, site condition) and save — it prints in italics under the item name on the client sheet, the PDF, print, and the emailed proposal."]},
+  {build:"b18",date:"21 Jul 2026",title:"Design Partner role for external partners",points:[
+    "Partners added with the <b>design_partner</b> role see ONLY the projects assigned to them — projects-only view with design tabs and Studio, no leads or financials."]},
+  {build:"b17",date:"21 Jul 2026",title:"Fix a wrongly-mapped project stage",points:[
+    "Admins: the Projects list now has a stage-correction dropdown — pick the right stage and the timeline resyncs."]},
+  {build:"b16",date:"21 Jul 2026",title:"Project lifecycle tabs with payment gates",points:[
+    "Projects flow <b>Design → Execution → Handover (snag &amp; clear) → Closed</b>; production is gated on 50% payment and handover on 100%."]},
+  {build:"b15",date:"21 Jul 2026",title:"Proposal PDF fixed",points:[
+    "Downloaded and emailed quotation pages no longer cut off the left columns. If a device ever fails to render the full sheet, the app now refuses with a clear error instead of silently sending a broken PDF."]}
+];
+function wnUnseen(){
+  const seen=localStorage.getItem(WN_KEY)||"";
+  const i=WHATS_NEW.findIndex(e=>e.build===seen);
+  return i<0?WHATS_NEW.slice():WHATS_NEW.slice(0,i);
+}
+function wnPaintBadge(){ const d=document.getElementById("wnDot"); if(d) d.style.display=wnUnseen().length?"block":"none"; }
+function wnOpen(list,manual){
+  if(!list||!list.length) return;
+  openModal(`<div style="max-width:540px">
+    <h3 style="margin:0 0 4px">🔔 What's new in Lintel OS</h3>
+    <div style="font-size:11px;color:var(--ink-soft);margin-bottom:12px">${manual?"Everything that shipped recently":"Updated since you last signed in"} — and how to use it.</div>
+    <div style="max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:12px;padding-right:4px">
+      ${list.map(e=>`<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px">
+          <b style="font-size:13px">${e.title}</b>
+          <span style="font-size:10px;color:var(--ink-soft);white-space:nowrap">${e.build} · ${e.date}</span></div>
+        <ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.75">${e.points.map(pt=>`<li>${pt}</li>`).join("")}</ul>
+      </div>`).join("")}
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button class="primary" id="wnGotIt">Got it 👍</button>
+    </div>
+  </div>`);
+  const b=$("#wnGotIt");
+  if(b) b.onclick=()=>{ localStorage.setItem(WN_KEY,WHATS_NEW[0].build); wnPaintBadge(); closeModal(); };
+}
+(function wnBoot(){
+  let tries=0;
+  const t=setInterval(()=>{
+    if(++tries>90){ clearInterval(t); return; }        // give up after ~72s (never signed in)
+    const app=document.getElementById("app");
+    if(typeof me==="undefined"||!me||!me.id||!app||getComputedStyle(app).display==="none") return;
+    clearInterval(t);
+    const who=document.querySelector("#app .who");
+    if(who&&!document.getElementById("wnBell")){
+      const b=document.createElement("button");
+      b.id="wnBell"; b.className="ghost"; b.title="What's new in Lintel OS";
+      b.style.cssText="position:relative;padding:5px 9px;font-size:14px;line-height:1";
+      b.innerHTML=`🔔<span id="wnDot" style="display:none;position:absolute;top:2px;right:3px;width:7px;height:7px;border-radius:50%;background:#C0392B"></span>`;
+      b.onclick=()=>wnOpen(WHATS_NEW,true);
+      who.insertBefore(b,who.firstChild);
+    }
+    wnPaintBadge();
+    const unseen=wnUnseen();
+    if(unseen.length) wnOpen(unseen,false);
+  },800);
+})();
+
 function gBody(p){
   if(G.tab==='est') return gEstimator(p);
   if(G.tab==='sum') return gSummary();
@@ -6211,7 +6287,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b18 · 21 Jul 2026";
+const APP_BUILD = "b21 · 21 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
