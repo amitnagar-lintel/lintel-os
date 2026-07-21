@@ -754,16 +754,21 @@ let myName = "", myAvatar = "";
 const $ = s => document.querySelector(s);
 const fmt = n => "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0});
 
-/* ---- Role & permission model (5 roles) ----
+/* ---- Role & permission model (6 roles) ----
    admin            : everything
    sales_head       : everything
    presales         : manage leads + add/delete stakeholders (except admins)
    design_consultant: work assigned projects + all features, but cannot add/delete people
    interior_designer: same as design_consultant
+   design_partner   : EXTERNAL partner — sees ONLY projects assigned to them
+                      (server-side via RLS, see PARTNER-02). Read-only in the OS
+                      except Studio boards for their projects. No leads, no
+                      dashboard, no financial tabs, no team management.
 */
 const ROLE_LABELS = {
   admin:"Admin", sales_head:"Sales Head", presales:"Presales Executive",
-  design_consultant:"Design Consultant", interior_designer:"Interior Designer"
+  design_consultant:"Design Consultant", interior_designer:"Interior Designer",
+  design_partner:"Design Partner"
 };
 const FULL_ACCESS = ["admin","sales_head"];
 // can create/edit leads, projects, BOQs, payments, work orders, etc.
@@ -778,6 +783,8 @@ const isAdminLevel = () => FULL_ACCESS.includes(myRole);
 // covers sales_head): only role="admin" — currently just Amit. Mirrors the
 // is_boq_admin() SQL function that enforces this server-side (BOQ-LOCK-01).
 const isBoqAdmin = () => myRole === "admin";
+// External design partner: projects-only UI; the real fence is RLS (PARTNER-02).
+const isDesignPartner = () => myRole === "design_partner";
 const roleLabel = r => ROLE_LABELS[r] || r || "—";
 
 const STAGES = [
@@ -1086,12 +1093,16 @@ async function enter(session){
     $("#userName").textContent = prof?.full_name || email.split("@")[0];
     $("#userRole").textContent = myRole.replace("_"," ");
     if(canManageStaff()) $("#navTeam").style.display="";
+    if(isDesignPartner()){ // partner: Projects + Studio only
+      document.querySelectorAll('nav.tabs button[data-view="dashboard"],nav.tabs button[data-view="leads"]').forEach(b=>b.style.display="none");
+      document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    }
     document.querySelectorAll("nav.tabs button").forEach(b=>{
       if(b.dataset.external) return;
       b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
         b.classList.add("active"); activeLead=null; activeProject=null; if(typeof gStopAutosave==="function")gStopAutosave(); render(b.dataset.view); };
     });
-    render("dashboard");
+    render(isDesignPartner()?"projects":"dashboard");
   } catch(e) {
     window.__entered = false;
     const el=$("#loginErr"); if(el){ el.style.display="block"; el.textContent="Could not load workspace: "+(e&&e.message?e.message:"unknown")+". Refresh and try again."; }
@@ -1182,6 +1193,7 @@ function openModal(html){$("#scrim").innerHTML=`<div class="modal">${html}</div>
 
 /* ===================== ROUTER ===================== */
 function render(view){
+  if(isDesignPartner()&&view!=="projects") view="projects"; // partners see projects only
   if(view==="dashboard") return renderDashboard();
   if(view==="leads") return renderLeads();
   if(view==="boq")   return renderBOQ();
@@ -1769,7 +1781,7 @@ function drawLeadTab(l){
 const LSA_STUDIO_URL = "https://amitnagar-lintel.github.io/lintel-studio/";
 async function moodboardPanel(leadId, body, headerSuffix){
   body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Client moodboards <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· ${esc(headerSuffix||"")}</span></h3><div id="presInner">Loading…</div></div>`;
-  const w=canWrite();
+  const w=canWrite()||isDesignPartner(); // partners build Studio boards for their projects
   if(!leadId){ $("#presInner").innerHTML=`<div class="tl-empty">This project isn't linked to a lead yet, so moodboards can't be listed here. Moodboards are keyed to the lead record.</div>`; return; }
   const {data:pres,error}=await sb.from("studio_presentations")
     .select("id,title,client,created_by,updated_at").eq("lead_id",leadId).order("updated_at",{ascending:false});
@@ -1793,7 +1805,7 @@ async function pwMoodboard(p,body){ return moodboardPanel(p.lead_id, body, (p.co
 /* ---- Lintel Canvas boards (LSA Studio sketch boards, keyed by lead; shown in project) ---- */
 async function canvasPanel(leadId, body, headerSuffix){
   body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Design canvases <span class="mono" style="font-weight:400;opacity:.5;font-size:13px">· ${esc(headerSuffix||"")}</span></h3><div style="font-size:12.5px;color:var(--ink-soft);margin:-4px 0 14px">Live layout sketches drawn in Lintel Canvas — kitchen, wardrobe &amp; TV-unit plans explained to the client. Every board saved in the Studio appears here.</div><div id="canvInner">Loading…</div></div>`;
-  const w=canWrite();
+  const w=canWrite()||isDesignPartner(); // partners sketch Canvas boards for their projects
   if(!leadId){ $("#canvInner").innerHTML=`<div class="tl-empty">This project isn't linked to a lead yet, so canvases can't be listed here. Boards are keyed to the lead record.</div>`; return; }
   const {data:rows,error}=await sb.from("studio_canvases")
     .select("id,title,created_by,updated_at").eq("lead_id",leadId).order("updated_at",{ascending:false});
@@ -2693,9 +2705,13 @@ async function projCloseProject(p){
 }
 
 const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["execution","Execution"],["documents","Documents"],["team","Team"]];
+// Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
+const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","execution","documents","team"];
+const projTabsFor=()=>isDesignPartner()?PROJ_TABS.filter(t=>PARTNER_PROJ_TABS.includes(t[0])):PROJ_TABS;
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
+  if(isDesignPartner()&&!PARTNER_PROJ_TABS.includes(projectTab)) projectTab="overview";
   const m=$("#main");
   const {data:p,error}=await sb.from("projects").select("*").eq("id",pid).single();
   if(error||!p){ activeProject=null; return renderProjects(); }
@@ -2708,7 +2724,7 @@ async function renderProjectWorkspace(pid){
       <div class="pw-val mono">${fmt(p.contract_value)}</div>
     </div>
     <nav class="pw-tabs" id="pwTabs">
-      ${PROJ_TABS.map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
+      ${projTabsFor().map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
     <div id="pwBody">Loading…</div>`;
   $("#pwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); } activeProject=null; renderProjects(); };
@@ -4662,7 +4678,7 @@ async function pwTeam(p,body){
 }
 
 /* ===================== LINTEL TEAM (admin) ===================== */
-const DESIGNATIONS=["Admin","Project Manager","Design Consultant","Interior Designer","Site Engineer","Presales Executive","Accounts","Procurement"];
+const DESIGNATIONS=["Admin","Project Manager","Design Consultant","Interior Designer","Design Partner","Site Engineer","Presales Executive","Accounts","Procurement"];
 async function renderTeam(){
   if(!canManageStaff()){ $("#main").innerHTML=emptyState("Restricted","The Lintel Team directory is available to Admin, Sales Head and Presales."); return; }
   const m=$("#main");
@@ -4709,7 +4725,7 @@ function memberForm(mem){
       <div class="grid2">
         <div class="field"><label>Designation</label><select id="tm_desig">${opts(DESIGNATIONS,r.designation)}</select></div>
         <div class="field"><label>App role (when they log in)</label><select id="tm_role">${
-          (isAdminLevel()?["admin","sales_head","presales","design_consultant","interior_designer"]:["presales","design_consultant","interior_designer"])
+          (isAdminLevel()?["admin","sales_head","presales","design_consultant","interior_designer","design_partner"]:["presales","design_consultant","interior_designer","design_partner"])
             .map(rv=>`<option value="${rv}" ${r.app_role===rv?"selected":""}>${roleLabel(rv)}</option>`).join("")
         }</select>${isAdminLevel()?"":`<div style="font-size:11px;color:var(--ink-soft);margin-top:4px">Only Admin/Sales Head can grant admin roles.</div>`}</div>
       </div>
@@ -6163,7 +6179,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b17 · 21 Jul 2026";
+const APP_BUILD = "b18 · 21 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
