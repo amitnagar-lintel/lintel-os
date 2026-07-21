@@ -4846,8 +4846,16 @@ async function gPdfBlob(p){
        table rows. Instead: rasterise once, work out every row's bottom edge,
        and only ever cut the image there. */
     // The bundle keeps html2canvas / jsPDF private, so reach them via the worker.
+    /* windowWidth MUST track the real window. html2pdf centres its capture
+       container in the REAL window (position:absolute + margin:auto), and
+       html2canvas crops at that real-window rect while REFLOWING the clone at
+       windowWidth. When the two widths differ, the crop origin and the layout
+       disagree and the whole sheet lands shifted in the canvas — left columns
+       (room names) cut off, a blank band on the right. On a 1280px window the
+       old fixed windowWidth:1024 shifted every page by (1280−838)/2 − (1024−838)/2
+       = 128px: the "half printed" proposal PDF. */
     const opts={ html2canvas:{scale:scale,useCORS:true,backgroundColor:"#ffffff",
-                              width:W,windowWidth:Math.max(W,1024),scrollX:0,scrollY:0},
+                              width:W,windowWidth:Math.max(W,window.innerWidth||1024),scrollX:0,scrollY:0},
                  jsPDF:{unit:"mm",format:"a4",orientation:"portrait"} };
     const canvas = await window.html2pdf().set(opts).from(clone).toCanvas().get("canvas");
     // If the browser couldn't rasterise the whole sheet (width clipped, or the
@@ -4857,6 +4865,16 @@ async function gPdfBlob(p){
     if(Math.abs(canvas.width - Math.round(W*scale)) > 4 || canvas.height < 0.9*Hcss*scale){
       throw new Error("This browser could not render the full quotation ("+canvas.width+"×"+canvas.height+
                       " of "+Math.round(W*scale)+"×"+Math.round(Hcss*scale)+"). Try from a desktop browser.");
+    }
+    const ctx = canvas.getContext("2d",{willReadFrequently:true});
+    // Horizontal-shift tripwire: the sheet's dark navy header is full-bleed, so
+    // it must reach BOTH edges of the canvas. If either probe reads white the
+    // capture is displaced (the bug above, or a future regression) — refuse
+    // rather than email a client a sheet with its left columns missing.
+    const hdrY=Math.round(40*scale);
+    const hdrDark=x=>{const d=ctx.getImageData(x,hdrY,1,1).data;return d[0]<120&&d[1]<120;};
+    if(!hdrDark(8)||!hdrDark(canvas.width-8)){
+      throw new Error("The quotation rendered shifted sideways — retry, and if it persists try a desktop browser at a different window size.");
     }
     // jsPDF hands back a plain object whose constructor can't be re-invoked, so
     // borrow this instance and drop its placeholder page once ours are added.
@@ -4872,7 +4890,6 @@ async function gPdfBlob(p){
        no scanline is ever a single colour. What identifies a text-free gap is
        a run of CONSECUTIVE scanlines that are identical to each other —
        vertical borders repeat perfectly row after row, text never does. */
-    const ctx = canvas.getContext("2d",{willReadFrequently:true});
     const inset=Math.max(12, Math.round(canvas.width*0.012));  // skip sheet edge/shadow
     function findCut(cursor,target){
       // Search the whole page upward if needed — a shorter page beats a sliced row.
