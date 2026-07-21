@@ -2280,7 +2280,12 @@ async function leadBoqGenerator(l, host){
     };
     return;
   }
-  G.boqId=versions[0].id; G.ver=versions[0];
+  // Honour an explicitly opened version (dropdown / freshly created option);
+  // otherwise open the newest. Mirrors pwBoq.
+  G.versions=versions;
+  let cur=versions[0];
+  if(G.openVersionId){ const m=versions.find(v=>String(v.id)===String(G.openVersionId)); if(m) cur=m; }
+  G.boqId=cur.id; G.ver=cur;
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",G.boqId).order("sort_idx");
   G.rows=(items||[]).map((r,i)=>({
     id:i, dbid:r.id, room:r.room||r.room_tag||"General", cat:r.category||"", item:r.item_name||r.description||"",
@@ -4877,6 +4882,7 @@ const BOQ_ADVANCE_PCT = 0.10;   // advance required before a lead may convert
 const LOCK_REASON_TEXT = {
   converted_to_project: "the lead was converted to a project",
   payment_received:     "the client payment was received",
+  finalised:            "the quote was finalised for the client",
   backfill:             "this project was already live"
 };
 function gLockInfo(){
@@ -4912,7 +4918,7 @@ function gRender(p, body){
   if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
   ${gLockBanner()}
-  ${isProj&&vers.length>1?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
+  ${vers.length>1?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
       <span style="color:var(--ink-soft)">Version</span>
       <select id="gVerPick" style="padding:6px 9px;border:1px solid var(--line-2);border-radius:8px;font-size:12px">
         ${vers.map(v=>`<option value="${v.id}" ${String(v.id)===String(G.boqId)?"selected":""}>${esc(v.version_label||("v"+v.version))}${v.locked_at?" · locked":""}</option>`).join("")}
@@ -4928,7 +4934,8 @@ function gRender(p, body){
     <div class="gact">
       ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
       ${canWrite()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
-      ${isProj&&canWrite()&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked revision for a variation / change-order">＋ New revision</button>`:''}
+      ${!ro&&!L.locked?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
+      ${canWrite()&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
       <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
       <button class="primary" id="gPrint">Print / PDF</button>
@@ -4940,7 +4947,8 @@ function gRender(p, body){
   if(!ro&&$("#gSave")) $("#gSave").onclick=()=>gSave(p);
   if($("#gSendProp")) $("#gSendProp").onclick=()=>gSendProposal(p,body);
   if($("#gRevise")) $("#gRevise").onclick=()=>gNewRevision(p,body);
-  if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); pwBoq(p,body); };
+  if($("#gFinal")) $("#gFinal").onclick=()=>gFinaliseLock(p,body);
+  if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); G.projectId?pwBoq(p,body):leadBoqGenerator(p,body); };
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
   if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
@@ -5206,19 +5214,40 @@ async function gSendProposal(p, body){
   }
 }
 
-/* Copy the current BOQ into a fresh, unlocked revision. */
+/* Finalise: freeze the open BOQ so the shared option can never drift, then the
+   team raises a NEW option (e.g. a different finish) alongside it. The DB lock
+   guard allows any editor to LOCK an unlocked version; unlocking is admin-only. */
+async function gFinaliseLock(p, body){
+  if(!canWrite()||!G.boqId||gLocked()) return;
+  const v=G.ver||{};
+  if(!confirm("Finalise & lock this BOQ?\n\nIt freezes "+(v.version_label||"this version")+" exactly as it is — the sheet stops changing and only Amit can edit it afterwards. Use ＋ New option to quote a different finish alongside it.")) return;
+  await gSave(p, true);                     // commit pending edits BEFORE the freeze
+  const now=new Date().toISOString();
+  const {error}=await sb.from("boq_versions").update({locked_at:now,locked_reason:'finalised'}).eq("id",G.boqId).is("locked_at",null);
+  if(error) return toast("Could not lock: "+error.message);
+  G.ver.locked_at=now; G.ver.locked_reason='finalised';
+  const gv=(G.versions||[]).find(x=>String(x.id)===String(G.boqId)); if(gv) gv.locked_at=now;
+  gStopAutosave();
+  gLogActivity(p,"BOQ finalised & locked · "+(v.version_label||("v"+v.version)));
+  toast("BOQ finalised — frozen for everyone except Amit");
+  gRender(p,body);
+}
+
+/* Copy the current BOQ into a fresh, unlocked option/revision (lead or project). */
 async function gNewRevision(p, body){
   if(!canWrite()||!G.boqId) return;
   const src=G.ver||{};
-  if(!confirm("Create a new revision?\n\nIt copies this BOQ's line items into a new version that starts unlocked, so the version the client already has stays untouched.")) return;
-  const id=await newBoqFor({project_id:p.id,title:p.name});
+  if(!confirm("Create a new BOQ option?\n\nIt copies this BOQ's line items into a new version that starts unlocked — change finishes or rates there while the version the client already has stays untouched.")) return;
+  const label=prompt("Name this option (shown on the quotation), e.g. Option B — Acrylic finish. Leave blank for an automatic version label:","");
+  const id=await newBoqFor(G.projectId?{project_id:G.projectId,title:p.name}:{lead_id:G.leadId,title:p.name});
   if(!id) return toast("Could not create the revision");
   await sb.from("boq_versions").update({
     client_name:src.client_name,client_phone:src.client_phone,client_email:src.client_email,
     project_name:src.project_name,property:src.property,
     consultant:src.consultant,consultant_phone:src.consultant_phone,
     quote_date:new Date().toISOString().slice(0,10),
-    stream_settings:src.stream_settings||{}
+    stream_settings:src.stream_settings||{},
+    ...(label&&label.trim()?{version_label:label.trim()}:{})
   }).eq("id",id);
   const {data:srcItems}=await sb.from("boq_items").select("*").eq("boq_version_id",src.id);
   if(srcItems&&srcItems.length){
@@ -5226,10 +5255,10 @@ async function gNewRevision(p, body){
     const {error:cErr}=await sb.from("boq_items").insert(copies);
     if(cErr) toast("Revision created, but copying items failed: "+cErr.message);
   }
-  gLogActivity(p,"New BOQ revision created from "+(src.version_label||("v"+src.version)));
+  gLogActivity(p,"New BOQ option created from "+(src.version_label||("v"+src.version)));
   G.openVersionId=id; gStopAutosave();
-  toast("New revision created — this one is editable");
-  pwBoq(p,body);
+  toast("New option created — this one is editable");
+  if(G.projectId) pwBoq(p,body); else leadBoqGenerator(p,body);
 }
 function $$(s){ return Array.from(document.querySelectorAll(s)); }
 
