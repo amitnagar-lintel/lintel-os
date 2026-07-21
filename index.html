@@ -2579,9 +2579,12 @@ async function renderProjects(){
         else if(p.handover_status!=="clear") act=`<button class="linkbtn" data-snag="${p.id}">Snags cleared</button>`;
         else act=`<button class="linkbtn" data-close="${p.id}">Close project</button>`;
       }
+      const stageCell=isBoqAdmin()
+        ?`<select class="tl2-sel" data-stg="${p.id}" title="Admin: correct a wrongly mapped stage" onclick="event.stopPropagation()">${STAGE_FLOW.map(s=>`<option ${s===p.current_stage?"selected":""}>${s}</option>`).join("")}</select> ${handoverPill(p)}`
+        :`${esc(p.current_stage||"—")} ${handoverPill(p)}`;
       return `<tr class="clickable" data-id="${p.id}"><td class="mono">${esc(p.code||"—")}</td>
       <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc(p.site_address||"")}</div></td>
-      <td>${esc(p.current_stage||"—")} ${handoverPill(p)}</td>
+      <td>${stageCell}</td>
       <td><span class="pill ${p.status}">${p.status}</span></td>
       <td class="num">${fmt(p.contract_value)}</td>
       <td style="min-width:110px"><div class="mono" style="font-size:12px">${pct}%</div><div class="ov-bar"><div style="width:${Math.min(100,pct)}%"></div></div></td>
@@ -2592,6 +2595,7 @@ async function renderProjects(){
     tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; renderProjectWorkspace(activeProject); };
   });
   const byId=id=>all.find(p=>String(p.id)===String(id));
+  $("#projWrap").querySelectorAll("[data-stg]").forEach(sel=>sel.onchange=()=>projSetStage(byId(sel.dataset.stg),sel.value));
   $("#projWrap").querySelectorAll("[data-exec]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.exec); projMoveToExecution(p,pctOf(p));});
   $("#projWrap").querySelectorAll("[data-hand]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.hand); projMarkHandover(p,pctOf(p));});
   $("#projWrap").querySelectorAll("[data-snag]").forEach(b=>b.onclick=()=>projClearSnags(byId(b.dataset.snag)));
@@ -2619,6 +2623,32 @@ async function projSyncStones(pid,doneStages,currentStage){
     else if(s.stage===currentStage&&s.status==="todo")
       await sb.from("project_milestones").update({status:"in_progress"}).eq("id",s.id);
   }
+}
+/* Admin-only stage correction (fix a wrongly mapped stage). Bypasses the payment
+   gates, so it mirrors the BOQ-lock rule: role="admin" only. Fully resyncs the
+   Overview timeline — earlier stages done, chosen stage in progress, later reset. */
+async function projSetStage(p,stage){
+  if(!p||!isBoqAdmin()||!STAGE_FLOW.includes(stage)) return;
+  if(stage===p.current_stage) return;
+  if(!confirm(`Set ${p.name} to stage “${stage}”?\n\nThis is an admin correction — payment gates are not checked. Earlier stages will be marked done, later ones reset to to-do.`)) return renderProjects();
+  const patch={current_stage:stage};
+  if(stage==="Handover"){ if(!p.handover_status) patch.handover_status="snag"; }
+  else patch.handover_status=null;
+  const {error}=await sb.from("projects").update(patch).eq("id",p.id);
+  if(error) return toast(error.message);
+  const idx=STAGE_FLOW.indexOf(stage);
+  const stones=(await sb.from("project_milestones").select("id,stage,status").eq("project_id",p.id)).data||[];
+  const today=new Date().toISOString().slice(0,10);
+  for(const s of stones){
+    const si=STAGE_FLOW.indexOf(s.stage);
+    if(si<0) continue;
+    if(si<idx&&s.status!=="done") await sb.from("project_milestones").update({status:"done",done_date:today}).eq("id",s.id);
+    else if(si===idx&&s.status!=="in_progress") await sb.from("project_milestones").update({status:"in_progress",done_date:null}).eq("id",s.id);
+    else if(si>idx&&s.status!=="todo") await sb.from("project_milestones").update({status:"todo",done_date:null}).eq("id",s.id);
+  }
+  await projLog(p,`Stage corrected to ${stage} (admin)`);
+  toast(`Stage set to ${stage}`);
+  renderProjects();
 }
 async function projMoveToExecution(p,pct){
   if(!p||!canWrite()) return;
@@ -6133,7 +6163,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b16 · 21 Jul 2026";
+const APP_BUILD = "b17 · 21 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
