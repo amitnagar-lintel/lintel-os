@@ -106,6 +106,7 @@
   .num{font-family:'IBM Plex Mono';text-align:right;font-variant-numeric:tabular-nums}
   .pill{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600}
   .pill.active{background:#E7F0E8;color:var(--green)} .pill.draft{background:var(--paper-2);color:var(--slate)}
+  .pill.completed{background:#E8EEF6;color:var(--blue)} .pill.on_hold{background:#F6EFE3;color:#8A6D2F} .pill.cancelled{background:#F6E7E3;color:var(--clay)}
   .pill.approved{background:#E7F0E8;color:var(--green)} .pill.sent{background:#E8EEF6;color:var(--blue)}
 
   /* ---- BOQ sheet (signature surface) ------------------------------ */
@@ -2472,7 +2473,7 @@ async function refreshBoqTotal(){
 }
 
 /* ===================== PROJECTS ===================== */
-let activeProject=null, projectTab="overview";
+let activeProject=null, projectTab="overview", projListTab="all";
 function newProjectForm(){
   openModal(`
     <div class="modal-h">Create a New project</div>
@@ -2516,27 +2517,149 @@ function newProjectForm(){
   };
 }
 
+/* ---- Project lifecycle: Design → Execution → Handover (snag → clear) → Closed ----
+   Design tab  = active projects still in the design stages (advance ≥10% is already
+                 gated at lead conversion). Moving to Execution needs 50% collected
+                 (10% advance + 40% design sign-off milestone).
+   Execution   = Production/Installation/Handover. Handover needs 100% collected and
+                 starts with snags open; once snag-free the project can be closed. */
+const DESIGN_STAGES=["Briefing","Design","Proposal/BOQ"];
+const EXEC_STAGES=["Production","Installation","Handover"];
+const PROJ_LIST_TABS=[["all","All"],["design","Design"],["execution","Execution"],["closed","Closed"]];
+function projPhase(p){
+  if(p.status==="completed"||p.status==="cancelled") return "closed";
+  return EXEC_STAGES.includes(p.current_stage)?"execution":"design";
+}
+function handoverPill(p){
+  if(p.current_stage!=="Handover") return "";
+  return p.handover_status==="clear"
+    ? `<span class="pill approved">Snag-free</span>`
+    : `<span class="pill sent">Snags open</span>`;
+}
+
 async function renderProjects(){
   if(activeProject) return renderProjectWorkspace(activeProject);
   const m=$("#main");
   m.innerHTML=`<div class="view-head"><div><h2 class="display">Projects</h2>
     <div class="sub">Click a project to open its workspace</div></div>
-    ${canWrite()?`<button class="primary" id="newProjBtn">+ Create a New project</button>`:""}</div><div id="projWrap">Loading…</div>`;
+    ${canWrite()?`<button class="primary" id="newProjBtn">+ Create a New project</button>`:""}</div>
+    <div class="viewtoggle" id="projTabs" style="margin-bottom:14px"></div>
+    <div id="projWrap">Loading…</div>`;
   if(canWrite()) $("#newProjBtn").onclick=()=>newProjectForm();
-  const {data:projects,error}=await sb.from("projects").select("*").order("created_at",{ascending:false});
+  const [{data:projects,error},{data:pays}]=await Promise.all([
+    sb.from("projects").select("*").order("created_at",{ascending:false}),
+    sb.from("project_payments").select("project_id,amount")
+  ]);
   if(error){$("#projWrap").innerHTML=esc(error.message);return;}
-  if(!projects||!projects.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
-  $("#projWrap").innerHTML=`<table><thead><tr><th>Code</th><th>Project</th><th>Type</th>
-    <th>Status</th><th class="num">Contract value</th></tr></thead><tbody>
-    ${projects.map(p=>`<tr class="clickable" data-id="${p.id}"><td class="mono">${esc(p.code||"—")}</td>
+  const all=projects||[];
+  const paid={};
+  (pays||[]).forEach(r=>{ paid[r.project_id]=(paid[r.project_id]||0)+Number(r.amount||0); });
+  const pctOf=p=>{ const inv=Number(p.invoiced_total)||Number(p.contract_value)||0; return inv?Math.round((paid[p.id]||0)/inv*100):0; };
+  const counts={all:all.length,design:0,execution:0,closed:0};
+  all.forEach(p=>counts[projPhase(p)]++);
+  $("#projTabs").innerHTML=PROJ_LIST_TABS.map(t=>`<button data-pt="${t[0]}" class="${projListTab===t[0]?'on':''}">${t[1]} · ${counts[t[0]]}</button>`).join("");
+  $("#projTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ projListTab=b.dataset.pt; renderProjects(); });
+  if(!all.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
+  const rows=projListTab==="all"?all:all.filter(p=>projPhase(p)===projListTab);
+  if(!rows.length){
+    const hints={design:"Projects land here after conversion, while design is in progress.",
+      execution:"Move a design-complete project here once 50% is collected.",
+      closed:"Snag-free handovers you close will appear here."};
+    $("#projWrap").innerHTML=emptyState("Nothing in this tab yet",hints[projListTab]||"");return;
+  }
+  const w=canWrite();
+  $("#projWrap").innerHTML=`<table><thead><tr><th>Code</th><th>Project</th><th>Stage</th>
+    <th>Status</th><th class="num">Contract value</th><th>Collected</th>${w?"<th></th>":""}</tr></thead><tbody>
+    ${rows.map(p=>{
+      const pct=pctOf(p), ph=projPhase(p);
+      let act="";
+      if(w&&ph==="design") act=`<button class="linkbtn" data-exec="${p.id}" title="Needs 50% collected (10% advance + 40% design sign-off)">→ Execution</button>`;
+      else if(w&&ph==="execution"){
+        if(p.current_stage!=="Handover") act=`<button class="linkbtn" data-hand="${p.id}" title="Needs 100% collected">Mark handover</button>`;
+        else if(p.handover_status!=="clear") act=`<button class="linkbtn" data-snag="${p.id}">Snags cleared</button>`;
+        else act=`<button class="linkbtn" data-close="${p.id}">Close project</button>`;
+      }
+      return `<tr class="clickable" data-id="${p.id}"><td class="mono">${esc(p.code||"—")}</td>
       <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc(p.site_address||"")}</div></td>
-      <td>${esc(p.property_type||"—")}</td>
+      <td>${esc(p.current_stage||"—")} ${handoverPill(p)}</td>
       <td><span class="pill ${p.status}">${p.status}</span></td>
-      <td class="num">${fmt(p.contract_value)}</td></tr>`).join("")}
+      <td class="num">${fmt(p.contract_value)}</td>
+      <td style="min-width:110px"><div class="mono" style="font-size:12px">${pct}%</div><div class="ov-bar"><div style="width:${Math.min(100,pct)}%"></div></div></td>
+      ${w?`<td style="white-space:nowrap" onclick="event.stopPropagation()">${act}</td>`:""}</tr>`;
+    }).join("")}
     </tbody></table>`;
   $("#projWrap").querySelectorAll("tr[data-id]").forEach(tr=>{
     tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; renderProjectWorkspace(activeProject); };
   });
+  const byId=id=>all.find(p=>String(p.id)===String(id));
+  $("#projWrap").querySelectorAll("[data-exec]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.exec); projMoveToExecution(p,pctOf(p));});
+  $("#projWrap").querySelectorAll("[data-hand]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.hand); projMarkHandover(p,pctOf(p));});
+  $("#projWrap").querySelectorAll("[data-snag]").forEach(b=>b.onclick=()=>projClearSnags(byId(b.dataset.snag)));
+  $("#projWrap").querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>projCloseProject(byId(b.dataset.close)));
+}
+
+/* Payment gate for phase moves. role="admin" (Amit) can override, mirroring the BOQ-lock rule. */
+function projGate(pct,need,label){
+  if(pct>=need) return true;
+  if(isBoqAdmin()) return confirm(`Only ${pct}% collected — ${label} needs ${need}%.\n\nAdmin override: proceed anyway?`);
+  toast(`${label} needs ${need}% collected — only ${pct}% received so far. Collect the milestone payment first (Payments tab).`);
+  return false;
+}
+async function projLog(p,text){
+  if(!p.lead_id) return;
+  try{ await sb.from("lead_activities").insert({lead_id:p.lead_id,type:"Note",text,by_user:me.id}); }catch(e){}
+}
+/* keep the Overview timeline milestones in step when a phase gate is crossed */
+async function projSyncStones(pid,doneStages,currentStage){
+  const stones=(await sb.from("project_milestones").select("id,stage,status").eq("project_id",pid)).data||[];
+  const today=new Date().toISOString().slice(0,10);
+  for(const s of stones){
+    if(doneStages.includes(s.stage)&&s.status!=="done")
+      await sb.from("project_milestones").update({status:"done",done_date:today}).eq("id",s.id);
+    else if(s.stage===currentStage&&s.status==="todo")
+      await sb.from("project_milestones").update({status:"in_progress"}).eq("id",s.id);
+  }
+}
+async function projMoveToExecution(p,pct){
+  if(!p||!canWrite()) return;
+  if(!projGate(pct,50,"Moving to Execution")) return;
+  if(!confirm(`Move ${p.name} to Execution?\n\nDesign stages will be marked done and Production begins.`)) return;
+  const {error}=await sb.from("projects").update({current_stage:"Production"}).eq("id",p.id);
+  if(error) return toast(error.message);
+  await projSyncStones(p.id,DESIGN_STAGES,"Production");
+  await projLog(p,`Moved to Execution · ${pct}% collected`);
+  toast("Project moved to Execution");
+  projListTab="execution"; renderProjects();
+}
+async function projMarkHandover(p,pct){
+  if(!p||!canWrite()) return;
+  if(!projGate(pct,100,"Handover")) return;
+  if(!confirm(`Mark ${p.name} as handed over?\n\nIt starts with snags open — use “Snags cleared” once the snag list is resolved.`)) return;
+  const {error}=await sb.from("projects").update({current_stage:"Handover",handover_status:"snag"}).eq("id",p.id);
+  if(error) return toast(error.message);
+  await projSyncStones(p.id,[...DESIGN_STAGES,"Production","Installation"],"Handover");
+  await projLog(p,`Handed over · ${pct}% collected · snag list open`);
+  toast("Handed over — snags open");
+  renderProjects();
+}
+async function projClearSnags(p){
+  if(!p||!canWrite()) return;
+  if(!confirm(`Confirm all snags are resolved for ${p.name}?`)) return;
+  const {error}=await sb.from("projects").update({handover_status:"clear"}).eq("id",p.id);
+  if(error) return toast(error.message);
+  await projSyncStones(p.id,STAGE_FLOW,null);
+  await projLog(p,"Snag list cleared · snag-free handover");
+  toast("Snag-free handover recorded");
+  renderProjects();
+}
+async function projCloseProject(p){
+  if(!p||!canWrite()) return;
+  if(!confirm(`Close ${p.name}?\n\nIt will be marked completed and move to the Closed tab.`)) return;
+  const {error}=await sb.from("projects").update({status:"completed",closed_at:new Date().toISOString()}).eq("id",p.id);
+  if(error) return toast(error.message);
+  await projLog(p,"Project closed");
+  toast("Project closed");
+  projListTab="closed"; renderProjects();
 }
 
 const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["payments","Payments"],["orders","Work Orders"],["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["execution","Execution"],["documents","Documents"],["team","Team"]];
@@ -2551,7 +2674,7 @@ async function renderProjectWorkspace(pid){
       <button class="ghost" id="pwBack">← All projects</button>
       <div class="pw-title"><span class="mono pw-code">${esc(p.code||"")}</span>
         <h2 class="display">${esc(p.name)}</h2>
-        <span class="pill ${p.status}">${p.status}</span></div>
+        <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)}</div>
       <div class="pw-val mono">${fmt(p.contract_value)}</div>
     </div>
     <nav class="pw-tabs" id="pwTabs">
@@ -6010,7 +6133,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b14 · 20 Jul 2026";
+const APP_BUILD = "b16 · 21 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
