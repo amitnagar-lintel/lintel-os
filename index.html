@@ -761,9 +761,10 @@ const fmt = n => "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDig
    design_consultant: work assigned projects + all features, but cannot add/delete people
    interior_designer: same as design_consultant
    design_partner   : EXTERNAL partner — sees ONLY projects assigned to them
-                      (server-side via RLS, see PARTNER-02). Read-only in the OS
-                      except Studio boards for their projects. No leads, no
-                      dashboard, no financial tabs, no team management.
+                      (server-side via RLS, PARTNER-02/04). Can WORK the design
+                      surfaces of those projects: meetings, MoM, design timeline,
+                      files, activity feed, Studio boards. No leads, no dashboard,
+                      no financial tabs (BOQ/Payments/WOs), no team management.
 */
 const ROLE_LABELS = {
   admin:"Admin", sales_head:"Sales Head", presales:"Presales Executive",
@@ -783,8 +784,12 @@ const isAdminLevel = () => FULL_ACCESS.includes(myRole);
 // covers sales_head): only role="admin" — currently just Amit. Mirrors the
 // is_boq_admin() SQL function that enforces this server-side (BOQ-LOCK-01).
 const isBoqAdmin = () => myRole === "admin";
-// External design partner: projects-only UI; the real fence is RLS (PARTNER-02).
+// External design partner: projects-only UI; the real fence is RLS (PARTNER-02/04).
 const isDesignPartner = () => myRole === "design_partner";
+// Can work a project's design surfaces (meetings, MoM, design timeline, files,
+// activity feed). Partners qualify — but only their assigned projects are
+// reachable/writable (RLS PARTNER-04). Payments/BOQ/WOs stay canWrite()-only.
+const canWorkProject = () => canWrite() || isDesignPartner();
 const roleLabel = r => ROLE_LABELS[r] || r || "—";
 
 const STAGES = [
@@ -2768,7 +2773,7 @@ async function renderProjectActivity(p){
     return;
   }
   const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",p.lead_id).order("created_at",{ascending:false});
-  const w=canWrite();
+  const w=canWorkProject();
   box.innerHTML=`
     ${w?`<div class="actadd">
       <select id="pact_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option><option value="Quote">📄 Quote</option></select>
@@ -3605,7 +3610,7 @@ async function pwDesign(p,body){
 
 /* ---- Design Timeline ---- */
 async function dsTimeline(p,body){
-  const w=canWrite();
+  const w=canWorkProject();
   const {data:tasks}=await sb.from("design_tasks").select("*").eq("project_id",p.id).order("sort_idx").order("target_date",{ascending:true,nullsFirst:false});
   body.innerHTML=`
   ${w?`<div class="ds-card"><h3 style="margin:0 0 12px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Add a design task</h3>
@@ -3661,7 +3666,7 @@ function tasksHtml(tasks,w){
 
 /* ---- Meetings (with Google Calendar + Meet) ---- */
 async function dsMeetings(p,body){
-  const w=canWrite();
+  const w=canWorkProject();
   await gcalStatus();
   const {data:meets}=await sb.from("design_meetings").select("*").eq("project_id",p.id).order("scheduled_at",{ascending:false});
   body.innerHTML=`
@@ -3883,7 +3888,7 @@ async function dsMoM(p,body){
 
 /* entityType: "project" | "lead" — entity needs .id (+code/name for project, .name for lead) */
 async function renderMoM(entityType, entity, body){
-  const w=canWrite();
+  const w=canWorkProject();
   const idCol = entityType==="project" ? "project_id" : "lead_id";
   const {data:moms}=await sb.from("design_moms").select("*").eq(idCol,entity.id).order("created_at",{ascending:false});
   const {data:meets}=await sb.from("design_meetings").select("id,title").eq(idCol,entity.id);
@@ -4594,7 +4599,7 @@ async function pwFiles(p,body,kind){
   const {data:files,error:fErr}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false}).order("id",{ascending:false});
   if(fErr){ body.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load files: ${esc(fErr.message)}</div>`; return; }
   body.innerHTML=`<div class="pw-card">
-    ${canWrite()?`<div class="upbar">
+    ${canWorkProject()?`<div class="upbar">
       <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg"':''}>
       <input id="pf_title" placeholder="Title (optional)">
       <input id="pf_ver" placeholder="V1" style="width:70px">
@@ -4602,18 +4607,18 @@ async function pwFiles(p,body,kind){
     </div><div class="uphint" id="pf_hint"></div>`:""}
     <div id="pf_list">${renderFileList(files||[],kind)}</div>
   </div>`;
-  if(canWrite()){
+  if(canWorkProject()){
     $("#pf_up").onclick=()=>uploadProjectFile(p,kind);
     bindFileDownloads();
   } else bindFileDownloads();
 }
 function renderFileList(files,kind){
-  if(!files.length) return emptyState(`No ${kind} files yet`,canWrite()?"Upload using the bar above.":"Nothing uploaded yet.");
+  if(!files.length) return emptyState(`No ${kind} files yet`,canWorkProject()?"Upload using the bar above.":"Nothing uploaded yet.");
   return `<table><thead><tr><th>File</th><th>Version</th><th>Type</th><th>Uploaded</th><th></th></tr></thead><tbody>
     ${files.map(f=>`<tr><td><b>${esc(f.title||f.storage_path.split("/").pop())}</b></td>
       <td class="mono">${esc(f.version||"—")}</td><td>${esc(f.file_type||"—")}</td>
       <td>${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
-      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${canWrite()?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
+      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${(canWrite()||(isDesignPartner()&&f.uploaded_by===me.id))?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
   </tbody></table>`;
 }
 function bindFileDownloads(){
@@ -6287,7 +6292,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b21 · 21 Jul 2026";
+const APP_BUILD = "b22 · 21 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
