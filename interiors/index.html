@@ -26,19 +26,14 @@
 <link rel="preload" as="image" href="assets/hero-living.webp" media="(min-width: 720px)">
 <link rel="preload" as="image" href="assets/hero-living-960.webp" media="(max-width: 719.9px)">
 
-<!-- ============================================================
-     GOOGLE ADS / GA4 TAG — replace AW-XXXXXXXXXX with your
-     conversion ID from Google Ads > Tools > Conversions, then
-     uncomment. The form-submit conversion fires in submitLead().
-================================================================
-<script async src="https://www.googletagmanager.com/gtag/js?id=AW-XXXXXXXXXX"></script>
+<!-- Google Ads tag (account 257-690-6850) — form-submit conversion fires in the lead-form handler -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=AW-17680531496"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-  gtag('config', 'AW-XXXXXXXXXX');
+  gtag('config', 'AW-17680531496');
 </script>
-============================================================ -->
 
 <script type="application/ld+json">
 {
@@ -470,9 +465,8 @@ form.addEventListener('submit', async function(e){
     if(!res.ok || !out.ok) throw new Error(out.error || 'Something went wrong');
     form.style.display = 'none';
     document.getElementById('thanksBox').style.display = 'block';
-    /* Google Ads conversion — uncomment + set your labels once the gtag
-       snippet in <head> is live:
-    gtag('event','conversion',{send_to:'AW-XXXXXXXXXX/YYYYYYYYYYY'}); */
+    if (typeof gtag === 'function')
+      gtag('event','conversion',{send_to:'AW-17680531496/r5TiCNjvrdUcEKiA3u5B'});
   }catch(err){
     showErr('Could not submit right now — please retry, or WhatsApp us at +91 99165 58777.');
   }
