@@ -3741,6 +3741,7 @@ function gcalUrl(mt){
   const params=new URLSearchParams({
     action:"TEMPLATE", text:mt.title||"Design meeting",
     dates:`${fmtG(start)}/${fmtG(end)}`,
+    ctz:"Asia/Kolkata", // render in IST regardless of the Google account's calendar timezone
     details:(mt.agenda||"")+"\n\nScheduled via Lintel OS. Click 'Add Google Meet video conferencing' before saving.",
     add:mt.client_email||""
   });
