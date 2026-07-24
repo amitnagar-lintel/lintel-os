@@ -51,10 +51,14 @@
   "areaServed": { "@type": "City", "name": "Bengaluru" },
   "address": {
     "@type": "PostalAddress",
+    "streetAddress": "Ground Floor, Right Wing, Ramky House, 1st Cross, behind Sony Centre, Kalyan Nagar",
     "addressLocality": "Bengaluru",
     "addressRegion": "Karnataka",
+    "postalCode": "560043",
     "addressCountry": "IN"
-  }
+  },
+  "geo": { "@type": "GeoCoordinates", "latitude": 13.027828, "longitude": 77.6348597 },
+  "openingHours": "Mo-Sa 10:00-19:00"
 }
 </script>
 
@@ -126,6 +130,13 @@ h1,h2,h3{font-family:var(--serif);font-weight:400;line-height:1.15}
 .why{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:10px;padding:26px 22px}
 .why h3{font-size:1.15rem;color:var(--navy);margin-bottom:8px}
 .why p{font-size:.92rem;color:var(--mut)}
+
+/* Quotes */
+.quote-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.quote{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:26px 22px;display:flex;flex-direction:column;gap:14px}
+.quote blockquote{font-size:.95rem;color:var(--ink);font-style:italic;line-height:1.65}
+.quote figcaption{font-size:.85rem;font-weight:600;color:var(--navy)}
+.quote figcaption span{color:var(--gold-deep);font-weight:500}
 
 /* Process */
 .steps{counter-reset:step;display:grid;gap:0}
@@ -223,7 +234,7 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
       <a class="btn btn-ghost" href="https://wa.me/919916558777?text=Hi%20Lintel%20Space%20Atelier%2C%20I%27d%20like%20to%20discuss%20interiors%20for%20my%20home%20in%20Bangalore." target="_blank" rel="noopener">Chat on WhatsApp</a>
     </div>
     <div class="trust-strip">
-      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="#C9A24B"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17l-6.1 3.6 1.4-6.8L2.2 9.1l6.9-.8z"/></svg> Design-first atelier studio</span>
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="#C9A24B"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17l-6.1 3.6 1.4-6.8L2.2 9.1l6.9-.8z"/></svg> 5.0&#9733; on Google &middot; 42 reviews</span>
       <span><svg width="14" height="14" viewBox="0 0 24 24" fill="#C9A24B"><path d="M9 16.2l-3.5-3.5L4 14.2 9 19.2 20 8.2l-1.4-1.4z"/></svg> One team, design to handover</span>
       <span><svg width="14" height="14" viewBox="0 0 24 24" fill="#C9A24B"><path d="M12 1L3 5v6c0 5.6 3.8 10.7 9 12 5.2-1.3 9-6.4 9-12V5l-9-4z"/></svg> Milestone-based payments</span>
     </div>
@@ -291,17 +302,18 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
   </div>
 </section>
 
-<!-- ================= TESTIMONIALS (disabled until real quotes are added) =====
+<!-- ================= TESTIMONIALS (real Google reviews, quoted verbatim) ================= -->
 <section class="section">
   <div class="wrap">
     <p class="eyebrow">Client words</p>
-    <h2>Homes we've delivered. Words we've earned.</h2>
-    < ! - - Add 2-3 REAL client quotes with first names + locality, e.g.
-    "…" — Ananya & Rohit, 3 BHK, Whitefield. Never publish invented
-    testimonials: it violates Google Ads policy and erodes trust. - - >
+    <h2>Rated 5.0 on Google by the people who live in our work.</h2>
+    <div class="quote-grid" style="margin-top:34px">
+      <figure class="quote"><blockquote>&ldquo;They transformed my space with thoughtful design and attention to detail&hellip; a stylish, functional result. Communication was smooth, and the project was completed on time.&rdquo;</blockquote><figcaption>Shraddha S. &middot; <span>&#9733;&#9733;&#9733;&#9733;&#9733; Google review</span></figcaption></figure>
+      <figure class="quote"><blockquote>&ldquo;Excellent and creative designs&hellip; got the work done for me in the promised time. Very reasonable to work with too. Not very expensive like the big companies.&rdquo;</blockquote><figcaption>Naveen B. &middot; <span>&#9733;&#9733;&#9733;&#9733;&#9733; Google review</span></figcaption></figure>
+      <figure class="quote"><blockquote>&ldquo;Working with Lintel Space Atelier was an absolute delight. From the initial design discussion to the final handover, their team demonstrated outstanding&hellip;&rdquo;</blockquote><figcaption>Abhijeet S. &middot; <span>&#9733;&#9733;&#9733;&#9733;&#9733; Google review</span></figcaption></figure>
+    </div>
   </div>
 </section>
-============================================================================= -->
 
 <!-- ================= CONSULT FORM ================= -->
 <section class="section consult" id="consult">
@@ -387,10 +399,9 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
         <span><b>LINTEL SPACE ATELIER</b><small>Where luxury meets functionality</small></span>
       </a>
       <div class="addr">
-        <!-- TODO: add the studio's full street address (also add it to the
-             LocalBusiness schema in <head>) — it strengthens local SEO and
-             Google Ads location assets. -->
-        Bengaluru, Karnataka<br>
+        Ground Floor, Right Wing, Ramky House,<br>
+        1st Cross, behind Sony Centre,<br>
+        Kalyan Nagar, Bengaluru 560043<br>
         <a href="tel:+919916558777">+91 99165 58777</a><br>
         <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a>
       </div>
