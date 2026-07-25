@@ -474,6 +474,13 @@ document.getElementById('yr').textContent = new Date().getFullYear();
       var v = p.get(k); if(v) keep[k] = v.slice(0,180);
     });
     if(Object.keys(keep).length) sessionStorage.setItem('lsa_attr', JSON.stringify(keep));
+    /* ?v=villas deep-links ad traffic straight to the villa section */
+    if(p.get('v') === 'villas'){
+      window.addEventListener('load', function(){
+        var s = document.getElementById('villas');
+        if(s) setTimeout(function(){ s.scrollIntoView(); }, 150);
+      });
+    }
   }catch(e){}
 })();
 
