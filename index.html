@@ -173,6 +173,29 @@
   .ltd-val{font-weight:600;font-variant-numeric:tabular-nums}
   .stpill{display:inline-block;padding:4px 11px;border-radius:20px;font-size:11.5px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);border:1px solid color-mix(in srgb,var(--c) 30%,#fff);white-space:nowrap}
   .srcpill{display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500;background:var(--sand,#F1EDE1);color:var(--ink-soft)}
+  .ch{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.01em;white-space:nowrap;background:#EEE;color:#555}
+  .ch-meta{background:#E9F1FD;color:#1B4F9C}
+  .ch-google{background:#E7F1EA;color:#1F7A4C}
+  .ch-web{background:#F1EDFA;color:#5B4A8A}
+  .ch-ref{background:#EFE7D8;color:var(--brass-deep)}
+  .ch-walk{background:#F1EDE1;color:var(--ink-soft)}
+  .ch-sub{background:#FBEDE6;color:#A9552F}
+  .ch-other{background:#EDEEF1;color:#5A6072}
+  .ch-none{background:#F4F4F6;color:#9AA0AC;font-weight:600}
+  .ch-warn{background:#FBECEC;color:#B4453A}
+  /* client-reply action inbox */
+  .cr-strip{border:1px solid #E6D2A8;background:#FFFBF2;border-radius:12px;padding:12px 14px;margin:0 0 14px}
+  .cr-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .cr-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--brass-deep)}
+  .cr-n{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:4px;background:var(--clay);color:#fff;border-radius:10px;font-size:11px}
+  .cr-item{display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-top:1px solid #F0E4CB}
+  .cr-main{flex:1;min-width:0}
+  .cr-lead{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .cr-text{font-size:13px;color:var(--ink-soft);margin-top:2px;line-height:1.45;word-wrap:break-word}
+  .cr-side{display:flex;align-items:center;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+  .cr-age{font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft)}
+  .cr-age.hot{color:var(--clay);font-weight:700}
+  @media(max-width:640px){.cr-item{flex-direction:column;gap:6px}.cr-side{justify-content:flex-start}}
   .scorepill{display:inline-flex;min-width:30px;justify-content:center;padding:3px 8px;border-radius:6px;font-size:12px;font-weight:700;background:#EEE;color:#555}
   .scorepill.hi{background:#E3F1E8;color:#2E7D5B}
   .scorepill.lo{background:#FBECEC;color:#B4453A}
@@ -798,6 +821,39 @@ const STAGES = [
   ["negotiation","Negotiation","#c08a2d"],["won","Won","#4f7d52"],["lost","Lost","#a4503e"]
 ];
 const SOURCES = ["Instagram","Referral","Google / GBP","Website","Substack","Walk-in","Other"];
+// Acquisition channel. `leads.platform` ('ig'|'fb'|'google_ads'|'website') is written by the
+// meta-leadgen and landing-lead edge functions and is the ONLY reliable Meta-vs-Google signal:
+// meta-leadgen maps Facebook leads to source="Other", and ~19 leads have a blank source.
+// `source` is the fallback for pre-webhook rows, whose platform is null.
+const CHANNELS = [
+  ["meta","Meta ads (IG/FB)"],["google","Google"],["website","Website"],
+  ["referral","Referral"],["walkin","Walk-in"],["substack","Substack"],
+  ["other","Other"],["unknown","Unlabelled"]
+];
+function channelOf(l){
+  const p=String(l.platform||"").toLowerCase();
+  if(p==="ig") return {key:"meta",label:"Meta · Instagram",short:"Meta · IG",cls:"ch-meta"};
+  if(p==="fb") return {key:"meta",label:"Meta · Facebook",short:"Meta · FB",cls:"ch-meta"};
+  if(p==="google_ads") return {key:"google",label:"Google Ads",short:"Google Ads",cls:"ch-google"};
+  if(p==="website") return {key:"website",label:"Website form",short:"Website",cls:"ch-web"};
+  // Legacy rows (platform null): colour by channel, but keep the raw source as the label
+  // so nothing is silently reinterpreted.
+  const s=String(l.source||"").trim(), sl=s.toLowerCase();
+  if(!s) return {key:"unknown",label:"No source recorded",short:"Unlabelled",cls:"ch-none"};
+  if(/instagram|meta|facebook/.test(sl)) return {key:"meta",label:s,short:s,cls:"ch-meta"};
+  if(/google|gbp/.test(sl))              return {key:"google",label:s,short:s,cls:"ch-google"};
+  if(/website|web/.test(sl))             return {key:"website",label:s,short:s,cls:"ch-web"};
+  if(/referral/.test(sl))                return {key:"referral",label:s,short:s,cls:"ch-ref"};
+  if(/walk/.test(sl))                    return {key:"walkin",label:s,short:s,cls:"ch-walk"};
+  if(/substack|newsletter/.test(sl))     return {key:"substack",label:s,short:s,cls:"ch-sub"};
+  return {key:"other",label:s,short:s,cls:"ch-other"};
+}
+function channelChipHtml(l,full){
+  const c=channelOf(l);
+  const bits=[c.label]; if(l.campaign_name) bits.push("Campaign: "+l.campaign_name);
+  if(l.ad_set_name) bits.push("Ad set / keyword: "+l.ad_set_name);
+  return `<span class="ch ${c.cls}" title="${esc(bits.join(" · "))}">${esc(full?c.label:c.short)}</span>`;
+}
 const PROJECT_TYPES = ["2BHK Apartment","3BHK Apartment","4BHK Apartment","Villa","Independent house","Office","Retail","Other"];
 const TAG_OPTIONS = ["hot","premium","referral","commercial","budget","comparing-quotes","newsletter-lead","case-study","closed"];
 const QUAL = {
@@ -1206,6 +1262,83 @@ function render(view){
   if(view==="team") return renderTeam();
 }
 
+/* ============== CLIENT REPLIES · action inbox ==============
+   Client-originated events (a WhatsApp confirmation, a reschedule) are recorded in
+   lead_activities by the external Priya service and flagged needs_action by the
+   CLIENTREPLY-01 trigger. Every other read of lead_activities in this file is
+   scoped .eq("lead_id", …), so without this strip a reply is only visible if
+   someone happens to open that one lead — which is exactly how lead 219's
+   "Client confirmed the meeting" sat unseen for 17 hours. */
+function myStaffId(){
+  const s=STAFF.find(x=>x.email && me && String(x.email).toLowerCase()===String(me.email||"").toLowerCase());
+  return s?s.id:null;
+}
+let crShowAll=null, crTimer=null, crHost=null;
+
+function crStartTicker(){
+  if(crTimer) return;
+  crTimer=setInterval(()=>{
+    if(!crHost||!$(crHost)){ clearInterval(crTimer); crTimer=null; return; }
+    renderClientReplies(crHost);
+  },60000);
+}
+
+async function renderClientReplies(hostSel){
+  const host=$(hostSel); if(!host) return;
+  await ensureStaff();
+  crHost=hostSel;
+  if(crShowAll===null) crShowAll=isAdminLevel();
+  const mine=myStaffId();
+  const {data,error}=await sb.from("lead_activities")
+    .select("id,lead_id,text,created_at,action_owner_id,leads(name,phone,stage,source,platform,campaign_name)")
+    .eq("needs_action",true).is("acked_at",null)
+    .order("created_at",{ascending:false}).limit(30);
+  // Before CLIENTREPLY-01 is applied the columns don't exist — degrade to nothing.
+  if(error){ host.innerHTML=""; return; }
+  // Unassigned replies are shown to everyone: they are the ones that otherwise
+  // reach nobody at all (14 open leads currently have no consultant).
+  const rows=(data||[]).filter(r=>crShowAll||!mine||r.action_owner_id===null||String(r.action_owner_id)===String(mine));
+  if(!rows.length){ host.innerHTML=""; crStartTicker(); return; }
+  host.innerHTML=`<div class="cr-strip">
+    <div class="cr-head">
+      <span class="cr-title">Clients replied · action pending <span class="cr-n">${rows.length}</span></span>
+      ${mine?`<button class="ghost sm" id="crToggle">${crShowAll?"Only mine":"Show all"}</button>`:""}
+    </div>
+    ${rows.map(r=>{
+      const l=r.leads||{};
+      const mins=Math.max(0,Math.round((Date.now()-new Date(r.created_at).getTime())/60000));
+      const age=mins<60?mins+"m":mins<1440?Math.round(mins/60)+"h":Math.round(mins/1440)+"d";
+      const owner=r.action_owner_id?staffName(r.action_owner_id):"";
+      return `<div class="cr-item">
+        <div class="cr-main">
+          <div class="cr-lead">${esc(l.name||("Lead #"+r.lead_id))} ${channelChipHtml(l)}${
+            r.action_owner_id===null?`<span class="ch ch-warn">Unassigned</span>`:
+            (crShowAll&&owner?`<span class="ch ch-other">${esc(owner)}</span>`:"")}</div>
+          <div class="cr-text">${esc(r.text||"")}</div>
+        </div>
+        <div class="cr-side">
+          <span class="cr-age ${mins>120?"hot":""}">${age} ago</span>
+          <button class="chip" data-cr-open="${r.lead_id}">Open</button>
+          ${canWrite()?`<button class="chip" data-cr-ack="${r.id}">Mark handled</button>`:""}
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+  const tg=$("#crToggle"); if(tg) tg.onclick=()=>{ crShowAll=!crShowAll; renderClientReplies(hostSel); };
+  host.querySelectorAll("[data-cr-open]").forEach(b=>b.onclick=()=>{
+    const id=Number(b.dataset.crOpen);
+    gotoTab("leads"); setTimeout(()=>openLead(id),40);
+  });
+  host.querySelectorAll("[data-cr-ack]").forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    const {error:e}=await sb.from("lead_activities")
+      .update({acked_at:new Date().toISOString(),acked_by:me.id}).eq("id",Number(b.dataset.crAck));
+    if(e){ toast("Couldn't mark handled — "+e.message); b.disabled=false; return; }
+    renderClientReplies(hostSel);
+  });
+  crStartTicker();
+}
+
 /* ===================== DASHBOARD ===================== */
 function gotoTab(view){
   document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));
@@ -1229,6 +1362,7 @@ async function renderDashboard(){
       </div>
       ${myAvatar?`<img class="dash-av" src="${esc(myAvatar)}" alt="">`:`<div class="dash-av dash-av-i">${initials(myName)}</div>`}
     </section>
+    <section id="dashClientReplies"></section>
     <section id="dashS2lCalls" class="dash-s2l"></section>
     <section class="dash-kpis" id="dashKpis">
       <div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div>
@@ -1263,6 +1397,7 @@ async function renderDashboard(){
     + kpi("Converted · mo", S.converted_month||0, "projects", "#4f7d52");
   s2lRenderDashKpis(s2l||{});
   s2lRenderTodayCalls(calls||[]);
+  renderClientReplies("#dashClientReplies");
 
   // name-wise team performance (this month for activity; assigned & value are current totals)
   const bp = S.by_person||[];
@@ -1325,7 +1460,7 @@ async function renderDashboard(){
           <td class="hide-lg">${esc(l.project_type||l.bhk||"\u2014")}</td>
           <td class="hide-sm dl-val">${l.expected_value?fmt(l.expected_value):"\u2014"}</td>
           <td><span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span></td>
-          <td class="hide-md">${l.source?`<span class="srcpill">${esc(l.source)}</span>`:"\u2014"}</td>
+          <td class="hide-md">${channelChipHtml(l)}</td>
           <td><span class="prio prio-${pc}">${pl}</span></td>
         </tr>`;
       }).join("")}
@@ -1361,7 +1496,7 @@ async function dashConsultantProjects(cid, name){
 
 
 /* ===================== LEADS (full CRM) ===================== */
-let leadFilters = { search:"", source:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
+let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
 let activeLead = null, leadTab = "overview";
 const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Moodboard"],["activity","Activity"],["notes","Notes"]];
 
@@ -1418,9 +1553,10 @@ async function renderLeads(){
         ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
       </div>
     </div>
+    <div id="leadsClientReplies"></div>
     <div class="lead-filters">
       <input id="lf_search" class="lf-in" placeholder="Search name, phone, locality…" value="${esc(leadFilters.search)}">
-      <select id="lf_source" class="lf-sel"><option value="">All sources</option>${SOURCES.map(s=>`<option ${leadFilters.source===s?"selected":""}>${s}</option>`).join("")}</select>
+      <select id="lf_channel" class="lf-sel"><option value="">All channels</option>${CHANNELS.map(([k,lab])=>`<option value="${k}" ${leadFilters.channel===k?"selected":""}>${lab}</option>`).join("")}</select>
       <select id="lf_owner" class="lf-sel"><option value="">All owners</option><option value="__none__" ${leadFilters.owner==="__none__"?"selected":""}>— Unassigned —</option>${STAFF.map(s=>`<option value="${s.id}" ${leadFilters.owner===s.id?"selected":""}>${esc(s.full_name||s.email)}</option>`).join("")}</select>
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
@@ -1430,11 +1566,12 @@ async function renderLeads(){
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
   $$(".viewtoggle button").forEach(b=>b.onclick=()=>{ window.leadView=b.dataset.lv; renderLeads(); });
   $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawLeadsView();};
-  $("#lf_source").onchange=e=>{leadFilters.source=e.target.value;drawLeadsView();};
+  $("#lf_channel").onchange=e=>{leadFilters.channel=e.target.value;drawLeadsView();};
   $("#lf_owner").onchange=e=>{leadFilters.owner=e.target.value;drawLeadsView();};
   $("#lf_tag").onchange=e=>{leadFilters.tag=e.target.value;drawLeadsView();};
   $("#lf_due").onchange=e=>{leadFilters.dueOnly=e.target.checked;drawLeadsView();};
   $("#lf_dup").onchange=e=>{leadFilters.dupOnly=e.target.checked;drawLeadsView();};
+  renderClientReplies("#leadsClientReplies");
   drawLeadsView();
 }
 
@@ -1453,7 +1590,7 @@ async function drawLeadsTable(){
   const f=leadFilters, q=f.search.toLowerCase();
   const rows=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
-    if(f.source && l.source!==f.source) return false;
+    if(f.channel && channelOf(l).key!==f.channel) return false;
     // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
     // so counting it would make this filter permanently return zero rows.
     if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id) return false; }
@@ -1476,7 +1613,7 @@ async function drawLeadsTable(){
     <table class="lead-table">
       <thead><tr>
         <th>Lead</th><th class="hide-md">Contact</th><th class="hide-lg">Property</th>
-        <th class="hide-sm">Value</th><th>Stage</th><th class="hide-md">Source</th>
+        <th class="hide-sm">Value</th><th>Stage</th><th class="hide-md">Channel</th>
         <th class="hide-lg">Score</th><th class="hide-xl">Owner</th><th class="hide-sm">Follow-up</th>
       </tr></thead>
       <tbody>
@@ -1496,7 +1633,7 @@ async function drawLeadsTable(){
             <td class="hide-lg">${esc(l.project_type||l.bhk||"—")}</td>
             <td class="hide-sm ltd-val">${l.expected_value?fmt(l.expected_value):"—"}</td>
             <td>${pr?`<span class="stpill" style="--c:#2E7D5B">✓ ${esc(pr.code||"Won")}</span>`:`<span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>`}</td>
-            <td class="hide-md">${l.source?`<span class="srcpill">${esc(l.source)}</span>`:"—"}</td>
+            <td class="hide-md">${channelChipHtml(l)}</td>
             <td class="hide-lg"><span class="scorepill ${sCls}">${score}</span></td>
             <td class="hide-xl ltd-sub">${esc(owner(l)||"—")}</td>
             <td class="hide-sm">${l.next_follow_up?`<span class="fu ${dc}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
@@ -1522,7 +1659,7 @@ async function drawBoard(){
   const f=leadFilters, q=f.search.toLowerCase();
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
-    if(f.source && l.source!==f.source) return false;
+    if(f.channel && channelOf(l).key!==f.channel) return false;
     // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
     // so counting it would make this filter permanently return zero rows.
     if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id) return false; }
@@ -1564,7 +1701,7 @@ async function drawBoard(){
       const c=document.createElement("div");c.className="card";
       c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
         <div class="meta">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div>
-        ${(l.tags&&l.tags.length)?`<div class="tagrow">${l.tags.slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>`:""}
+        <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
@@ -1751,7 +1888,7 @@ async function renderLeadWorkspace(id){
       <div class="lw-pills">
         ${s2lSlaChipHtml(l)}
         ${s2lDupBadgeHtml(l)}
-        ${l.source?`<span class="lw-pill src">${esc(l.source)}</span>`:""}
+        ${channelChipHtml(l,true)}
         ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
         ${l.expected_value?`<span class="lw-pill">${fmt(l.expected_value)}</span>`:""}
       </div>
@@ -1969,6 +2106,7 @@ function lwOverview(l,body){
         <h3>Snapshot</h3>
         <div class="kv"><span class="k">BANT score</span><span class="v">${l.bant_score||bantFromQual(l)}</span></div>
         <div class="kv"><span class="k">Budget</span><span class="v">${l.expected_value?fmt(l.expected_value):"—"}</span></div>
+        <div class="kv"><span class="k">Channel</span><span class="v">${channelChipHtml(l,true)}${l.campaign_name?` <span class="ltd-sub">· ${esc(l.campaign_name)}</span>`:""}</span></div>
         <div class="kv"><span class="k">Source</span><span class="v">${esc(l.source||"—")}</span></div>
         <div class="kv"><span class="k">Project type</span><span class="v">${esc(l.project_type||"—")}</span></div>
         <div class="kv"><span class="k">Created</span><span class="v">${l.created_at?new Date(l.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"}):"—"}</span></div>
