@@ -119,9 +119,11 @@ h1,h2,h3{font-family:var(--serif);font-weight:400;line-height:1.15}
 .folio{background:var(--navy);color:var(--ivory)}
 .folio h2{color:var(--ivory)}
 .folio .lead{color:#b9b6c9}
-.folio-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:18px}
-.card{position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(201,162,75,.25)}
-.card img{width:100%;height:280px;object-fit:cover;transition:transform .5s}
+.folio-grid{columns:3;column-gap:18px}
+@media(max-width:900px){.folio-grid{columns:2;column-gap:12px}}
+.card{position:relative;border-radius:12px;overflow:hidden;border:1px solid rgba(201,162,75,.25);margin-bottom:18px;break-inside:avoid}
+@media(max-width:900px){.card{margin-bottom:12px}}
+.card img{width:100%;height:auto;transition:transform .5s}
 .card:hover img{transform:scale(1.04)}
 .card figcaption{position:absolute;left:0;right:0;bottom:0;padding:36px 18px 14px;font-size:.9rem;background:linear-gradient(transparent,rgba(13,13,39,.9));color:var(--gold-pale)}
 
@@ -263,12 +265,20 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
   <div class="wrap">
     <p class="eyebrow">Recent work</p>
     <h2>Designed to be lived in, finished to be admired.</h2>
-    <p class="lead">From the Bhupathi Residence at Century Ethos, Bengaluru — a recently delivered full-home project.</p>
+    <p class="lead">From our recently delivered Bengaluru homes — every space designed, produced and installed by the Lintel team.</p>
     <div class="folio-grid">
       <figure class="card"><img src="assets/living.webp" alt="Luxury living lounge interior, Bhupathi Residence, Century Ethos, Bangalore" loading="lazy"><figcaption>Living lounge · Bhupathi Residence, Century Ethos</figcaption></figure>
+      <figure class="card"><img src="assets/np-suite.webp" alt="Master bedroom with tropical wallpaper panels and sculptural pendant light, Bangalore" loading="lazy"><figcaption>Master suite · tropical panels &amp; brass</figcaption></figure>
       <figure class="card"><img src="assets/kitchen.webp" alt="Modular kitchen with breakfast bar and arched crockery display, Bhupathi Residence, Bangalore" loading="lazy"><figcaption>Kitchen &amp; breakfast bar · Bhupathi Residence</figcaption></figure>
+      <figure class="card"><img src="assets/np-bedroom.webp" alt="Bedroom with frosted glass sliding wardrobes and designer chandelier, Bangalore" loading="lazy"><figcaption>Bedroom · frosted-glass wardrobes</figcaption></figure>
+      <figure class="card"><img src="assets/np-living.webp" alt="Living room with backlit wall panels, cream sofa and brass chandelier, Bangalore" loading="lazy"><figcaption>Living · backlit panels &amp; brass</figcaption></figure>
       <figure class="card"><img src="assets/dining.webp" alt="Dining room with arched curio display cabinets, Bhupathi Residence, Bangalore" loading="lazy"><figcaption>Dining &amp; curio arches · Bhupathi Residence</figcaption></figure>
+      <figure class="card"><img src="assets/np-kitchen.webp" alt="Light oak modular kitchen with black glass wall units, Bangalore" loading="lazy"><figcaption>Modular kitchen · light oak &amp; glass</figcaption></figure>
+      <figure class="card"><img src="assets/np-dining.webp" alt="Dining area with geometric LED chandelier and marble table, Bangalore" loading="lazy"><figcaption>Dining · sculptural LED</figcaption></figure>
       <figure class="card"><img src="assets/dressing.webp" alt="Dressing corner with round mirror and lacquer vanity, Bhupathi Residence, Bangalore" loading="lazy"><figcaption>Dressing corner · Bhupathi Residence</figcaption></figure>
+      <figure class="card"><img src="assets/np-balcony.webp" alt="Bedroom suite opening to a private balcony, warm cove lighting, Bangalore" loading="lazy"><figcaption>Bedroom · balcony suite</figcaption></figure>
+      <figure class="card"><img src="assets/np-wardrobe.webp" alt="Smoked glass wardrobe with walnut slat panelling and grey bed, Bangalore" loading="lazy"><figcaption>Wardrobe · smoked glass &amp; walnut</figcaption></figure>
+      <figure class="card"><img src="assets/np-tv.webp" alt="Media wall in lacquered glass with floating black console, Bangalore" loading="lazy"><figcaption>Media wall · lacquered glass</figcaption></figure>
     </div>
   </div>
 </section>
