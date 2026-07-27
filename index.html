@@ -493,6 +493,8 @@
   .cut-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
   .cut-warn{border:1px solid var(--clay);background:#FBF0EC;border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--ink);margin-bottom:4px}
   .cut-warn b{color:var(--clay)}
+  .cut-group + .cut-group{margin-top:22px;padding-top:20px;border-top:2px solid var(--line-2)}
+  .cut-group-h{font-family:'Bricolage Grotesque',sans-serif;font-size:16px;font-weight:600;margin-bottom:12px}
   @media(max-width:880px){ .cut-wrap{grid-template-columns:1fr} }
   @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow,.wallet{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
 
@@ -3717,7 +3719,11 @@ async function poDetail(p,body,poId){
    width/height straight off boq_items — no schema change (v1).
    pack/cut helpers mirror the g/pw families. Board and BOQ dims share one unit. */
 const CUT_PAL=["#C9A66B","#8FA98C","#7E9BB3","#B98A7A","#9A8FB0","#A5794A","#C2B280","#8C9A6B","#B47E9A","#6F8CA3","#CAB08E","#7FA0A0"];
-let cutState=null; // {verId,verLabel,bw,bh,kerf,rotate,panels:[{key,label,room,w,h,count,rotatable,color}]}
+let cutState=null; // {verId,verLabel,bw,bh,kerf,rotate,groups:[{key,label,panels:[{key,label,room,w,h,count,rotatable,color}]}]}
+// Cutting is board-carpentry only. These materials never nest, even inside carpentry/modular streams.
+const CUT_NONBOARD=/glass|mirror|fabric|accessor|hettich|hardware|cleaning|protection|curtain|wallpaper|appliance|granite|quartz|marble|\bstone\b|hinge|handle|\bchannel|\blight|sofa|console/i;
+// Board trades -> separate plans. stream 'carpentry' == trade onsite_carpentry; stream 'modular' == trade kws.
+const CUT_GROUPS=[{key:'onsite',stream:'carpentry',label:'On-site Carpentry'},{key:'kws',stream:'modular',label:'KWS / Modular'}];
 
 function cutNum(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
 function cutUnit(board){ return board.w>50?'mm':'ft'; }
@@ -3777,30 +3783,65 @@ async function pwCutting(p,body){
   if(!vers||!vers.length) return bail(emptyState("No BOQ yet","Build the project BOQ first — panels with width & height feed the cutting optimiser."));
   const ver=vers[0];
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
-  const panelItems=(items||[]).filter(r=>Number(r.width)>0&&Number(r.height)>0&&r.scope!=='excluded'&&r.scope!=='optional');
-  if(!panelItems.length) return bail(emptyState("No panels with dimensions","Add width (W) & height (H) to modular / carpentry lines in the BOQ — those become cut panels here."));
+  const streamOf=r=>normStream(r.stream||classifyStream(r.category));
+  const boardItems=(items||[]).filter(r=>{
+    const st=streamOf(r);
+    return Number(r.width)>0&&Number(r.height)>0&&r.scope!=='excluded'&&r.scope!=='optional'
+      &&(st==='carpentry'||st==='modular')
+      &&!CUT_NONBOARD.test(((r.item_name||r.description||'')+' '+(r.category||'')));
+  });
+  if(!boardItems.length) return bail(emptyState("No carpentry panels found","Only on-site carpentry and KWS / modular board lines (with width & height) are cut here — services, furnishing, glass, mirror, stone and hardware are excluded."));
   if(!cutState||cutState.verId!==ver.id){
-    cutState={ verId:ver.id, verLabel:ver.version_label||('v'+ver.version), bw:8, bh:4, kerf:0.01, rotate:true,
-      panels: panelItems.map((r,i)=>({ key:r.id, label:r.item_name||r.description||'Panel', room:r.room_tag||r.room||'', w:Number(r.width), h:Number(r.height), count:1, rotatable:true, color:CUT_PAL[i%CUT_PAL.length] })) };
+    let ci=0;
+    const groups=CUT_GROUPS.map(g=>({
+      key:g.key, label:g.label,
+      panels: boardItems.filter(r=>streamOf(r)===g.stream).map(r=>({
+        key:r.id, label:r.item_name||r.description||'Panel', room:r.room_tag||r.room||'',
+        w:Number(r.width), h:Number(r.height), count:1, rotatable:true, color:CUT_PAL[ci++%CUT_PAL.length]
+      }))
+    })).filter(g=>g.panels.length);
+    cutState={ verId:ver.id, verLabel:ver.version_label||('v'+ver.version), bw:8, bh:4, kerf:0.01, rotate:true, groups };
   }
   renderCutting(p,body);
 }
 
+function cutGroupResult(group,board,kerf,rotate){
+  const res=packCutting(group.panels,board,kerf,rotate);
+  const boardArea=board.w*board.h;
+  const area=group.panels.reduce((a,pn)=>a+pn.w*pn.h*(pn.count||0),0);
+  const boardsByArea=area>0?Math.ceil(area/(boardArea*0.85)):0; // ~15% offcut/kerf allowance
+  const pieces=group.panels.reduce((a,pn)=>a+(pn.count||0),0);
+  const placed=res.sheets.reduce((a,x)=>a+x.placed.length,0);
+  return {res,area,boardArea,boardsByArea,pieces,placed};
+}
+
 function renderCutting(p,body){
   const s=cutState, ro=!canWrite();
-  const board={w:Number(s.bw)||1,h:Number(s.bh)||1};
-  const res=packCutting(s.panels,board,Number(s.kerf)||0,s.rotate);
-  const placed=res.sheets.reduce((a,x)=>a+x.placed.length,0);
-  const utilPct=Math.round(res.util*100), wastePct=res.total?Math.round((1-res.used/res.total)*100):0;
-  const uClass=utilPct>=75?'wgood':utilPct>=55?'':'wdue', wClass=wastePct>=30?'wdue':wastePct>=18?'':'wgood';
-  const stats=`<div class="wallet">
-    <div class="wcell"><div class="wl">Boards needed</div><div class="wv">${res.sheets.length}</div></div>
-    <div class="wcell ${uClass}"><div class="wl">Utilisation</div><div class="wv">${utilPct}%</div></div>
-    <div class="wcell ${wClass}"><div class="wl">Waste</div><div class="wv">${wastePct}%</div></div>
-    <div class="wcell"><div class="wl">Panels placed</div><div class="wv">${placed}</div></div></div>`;
-  const legend=`<div class="cut-legend">${s.panels.map(pn=>`<span><i style="background:${pn.color}"></i>${esc(pn.label)}</span>`).join('')}</div>`;
-  const warn=res.unplaceable.length?`<div class="cut-warn"><b>${res.unplaceable.length} panel(s) don't fit a ${cutNum(board.w)}×${cutNum(board.h)} board</b> — ${res.unplaceable.map(x=>esc(x.label)+' ('+cutNum(x.w)+'×'+cutNum(x.h)+')').join(', ')}. Split into smaller parts or use a larger sheet.</div>`:'';
-  const sheetsHtml=res.sheets.length?`<div class="cut-sheets">${res.sheets.map((sh,i)=>cutSvg(sh,board,i)).join('')}</div>`:emptyState("Nothing to nest","Set a panel quantity above 0.");
+  const board={w:Number(s.bw)||1,h:Number(s.bh)||1}, kerf=Number(s.kerf)||0;
+  const outs=s.groups.map(g=>Object.assign({g},cutGroupResult(g,board,kerf,s.rotate)));
+  const areaUnit=cutUnit(board)==='mm'?'m²':'sq ft';
+  const tables=s.groups.map((g,gi)=>`
+      <div class="sec-label" style="border:none;padding:0">${esc(g.label)} <span style="opacity:.55">(${g.panels.length})</span></div>
+      <div style="max-height:240px;overflow:auto">
+        <table class="cut-parts"><thead><tr><th>Panel</th><th class="num">W</th><th class="num">H</th><th class="num">Qty</th></tr></thead>
+        <tbody>${g.panels.map((pn,ci)=>`<tr><td><span class="cut-sw" style="background:${pn.color}"></span>${esc(pn.label)}${pn.room?` <span style="color:var(--ink-soft)">· ${esc(pn.room)}</span>`:''}</td><td class="num mono">${cutNum(pn.w)}</td><td class="num mono">${cutNum(pn.h)}</td><td class="num"><input class="cnt mono" type="number" min="0" step="1" value="${pn.count}" data-gi="${gi}" data-ci="${ci}" ${ro?'disabled':''}></td></tr>`).join('')}</tbody></table>
+      </div>`).join('');
+  const sections=outs.map(o=>{
+    const oversize=o.res.unplaceable.length;
+    const legend=`<div class="cut-legend">${o.g.panels.map(pn=>`<span><i style="background:${pn.color}"></i>${esc(pn.label)}</span>`).join('')}</div>`;
+    const warn=oversize?`<div class="cut-warn"><b>${oversize} line(s) are bigger than a ${cutNum(board.w)}×${cutNum(board.h)} board</b> — the BOQ stores these as run / elevation sizes (a whole kitchen or wardrobe run), not individual cut pieces, so they can't be nested as single panels. The board count above is by total area; exact nesting needs per-part sizes (v2). Lines: ${o.res.unplaceable.map(x=>esc(x.label)+' ('+cutNum(x.w)+'×'+cutNum(x.h)+')').join(', ')}.</div>`:'';
+    const sheets=o.res.sheets.length?`<div class="cut-sheets">${o.res.sheets.map((sh,i)=>cutSvg(sh,board,i)).join('')}</div>`:'';
+    return `<div class="cut-group">
+        <div class="cut-group-h">${esc(o.g.label)}</div>
+        <div class="wallet">
+          <div class="wcell wgood"><div class="wl">Boards (by area)</div><div class="wv">${o.boardsByArea}</div><div class="wl" style="margin:4px 0 0;text-transform:none">incl ~15% waste</div></div>
+          <div class="wcell"><div class="wl">Panel area</div><div class="wv">${cutNum(o.area)}</div><div class="wl" style="margin:4px 0 0;text-transform:none">${areaUnit}</div></div>
+          <div class="wcell"><div class="wl">Nested as panels</div><div class="wv">${o.placed}/${o.pieces}</div></div>
+          <div class="wcell ${oversize?'wdue':''}"><div class="wl">Run-size lines</div><div class="wv">${oversize}</div></div>
+        </div>
+        ${legend}${warn}${sheets}
+      </div>`;
+  }).join('');
   body.innerHTML=`
   <div class="gbar"><button class="ghost" id="cutBack">← Work orders</button>
     <div class="gact"><button class="ghost" id="cutCsv">Export CSV</button><button class="primary" id="cutPrint">Print / PDF</button></div></div>
@@ -3817,10 +3858,7 @@ function renderCutting(p,body){
       </div>
       <div style="font-size:11px;color:var(--ink-soft)">Board &amp; BOQ dimensions must share one unit (feet by default).${ro?'':' <a id="cut_mm" href="javascript:void 0">Switch to mm board (2440×1220)</a>'}</div>
       <div class="sec-label" style="border:none;padding:0">Panels · BOQ ${esc(s.verLabel||'')}</div>
-      <div style="max-height:320px;overflow:auto">
-        <table class="cut-parts"><thead><tr><th>Panel</th><th class="num">W</th><th class="num">H</th><th class="num">Qty</th></tr></thead>
-        <tbody>${s.panels.map((pn,i)=>`<tr><td><span class="cut-sw" style="background:${pn.color}"></span>${esc(pn.label)}${pn.room?` <span style="color:var(--ink-soft)">· ${esc(pn.room)}</span>`:''}</td><td class="num mono">${cutNum(pn.w)}</td><td class="num mono">${cutNum(pn.h)}</td><td class="num"><input class="cnt mono" type="number" min="0" step="1" value="${pn.count}" data-ci="${i}" ${ro?'disabled':''}></td></tr>`).join('')}</tbody></table>
-      </div>
+      ${tables}
       ${ro?'':'<button class="primary" id="cutRun">Re-optimise →</button>'}
     </div>
     <div id="cut-sheet">
@@ -3829,25 +3867,27 @@ function renderCutting(p,body){
         <div><div class="cn">Lintel Space Atelier</div><div class="cs">Cutting Plan · ${esc(p.name||'')} ${p.code?'· '+esc(p.code):''}</div></div>
         <div class="cm">Board ${cutNum(board.w)}×${cutNum(board.h)} ${cutUnit(board)}<br>Kerf ${cutNum(s.kerf)} ${cutUnit(board)}</div>
       </div>
-      <div style="padding:18px 20px">${stats}${warn}${legend}${sheetsHtml}</div>
+      <div style="padding:18px 20px">${sections}</div>
     </div>
   </div>`;
   $("#cutBack").onclick=()=>{ cutView=false; pwOrders(p,body); };
   $("#cutPrint").onclick=()=>{ const el=$("#cut-sheet"); el.classList.add("printing"); window.print(); setTimeout(()=>el.classList.remove("printing"),500); };
-  $("#cutCsv").onclick=()=>cutExportCSV(p,res,board);
+  $("#cutCsv").onclick=()=>cutExportCSV(p,outs,board);
   if(!ro){
     const commit=()=>{ s.bw=$("#cut_bw").value; s.bh=$("#cut_bh").value; s.kerf=$("#cut_kerf").value; s.rotate=$("#cut_rot").checked; };
-    body.querySelectorAll(".cnt").forEach(inp=>inp.onchange=()=>{ s.panels[Number(inp.dataset.ci)].count=Math.max(0,parseInt(inp.value,10)||0); });
+    body.querySelectorAll(".cnt").forEach(inp=>inp.onchange=()=>{ const g=s.groups[Number(inp.dataset.gi)]; if(g&&g.panels[Number(inp.dataset.ci)]) g.panels[Number(inp.dataset.ci)].count=Math.max(0,parseInt(inp.value,10)||0); });
     if($("#cutRun")) $("#cutRun").onclick=()=>{ commit(); renderCutting(p,body); };
     if($("#cut_mm")) $("#cut_mm").onclick=()=>{ commit(); s.bw=2440; s.bh=1220; s.kerf=3; renderCutting(p,body); };
   }
 }
 
-function cutExportCSV(p,res,board){
-  let csv='Sheet,Panel,Width,Height,X,Y,Rotated\n';
-  res.sheets.forEach((s,i)=>s.placed.forEach(pc=>{ csv+=`${i+1},"${String(pc.label||'').replace(/"/g,'""')}",${cutNum(pc.w)},${cutNum(pc.h)},${cutNum(pc.x)},${cutNum(pc.y)},${pc.rot?'Y':'N'}\n`; }));
-  csv+=`\nBoards needed,${res.sheets.length}\nUtilisation,${Math.round(res.util*100)}%\nWaste area,${cutArea(res.total-res.used,board)}\n`;
-  if(res.unplaceable.length) csv+=`Oversize (unplaced),"${res.unplaceable.map(x=>x.label+' '+cutNum(x.w)+'x'+cutNum(x.h)).join('; ')}"\n`;
+function cutExportCSV(p,outs,board){
+  const au=cutUnit(board)==='mm'?'m2':'sqft';
+  let csv='Plan,Sheet,Panel,Width,Height,X,Y,Rotated\n';
+  outs.forEach(o=>o.res.sheets.forEach((s,i)=>s.placed.forEach(pc=>{ csv+=`"${o.g.label}",${i+1},"${String(pc.label||'').replace(/"/g,'""')}",${cutNum(pc.w)},${cutNum(pc.h)},${cutNum(pc.x)},${cutNum(pc.y)},${pc.rot?'Y':'N'}\n`; })));
+  csv+=`\nPlan,Boards (by area),Panel area (${au}),Nested as panels,Run-size lines\n`;
+  outs.forEach(o=>{ csv+=`"${o.g.label}",${o.boardsByArea},${cutNum(o.area)},${o.placed}/${o.pieces},${o.res.unplaceable.length}\n`; });
+  outs.forEach(o=>{ if(o.res.unplaceable.length) csv+=`\n"${o.g.label}" run-size lines (need per-part sizes),"${o.res.unplaceable.map(x=>x.label+' '+cutNum(x.w)+'x'+cutNum(x.h)).join('; ')}"\n`; });
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='Lintel_CutList_'+String(p.code||p.name||'Project').replace(/\s+/g,'_')+'.csv'; a.click();
   toast("Cut list exported");
