@@ -3715,7 +3715,7 @@ async function poDetail(p,body,poId){
 /* ==================== Cutting Optimizer (Production) ====================
    2D guillotine nesting of BOQ panels onto standard boards. Reads
    width/height straight off boq_items — no schema change (v1).
-   pack*/cut* mirror the g*/pw* families. Board & BOQ dims share one unit. */
+   pack/cut helpers mirror the g/pw families. Board and BOQ dims share one unit. */
 const CUT_PAL=["#C9A66B","#8FA98C","#7E9BB3","#B98A7A","#9A8FB0","#A5794A","#C2B280","#8C9A6B","#B47E9A","#6F8CA3","#CAB08E","#7FA0A0"];
 let cutState=null; // {verId,verLabel,bw,bh,kerf,rotate,panels:[{key,label,room,w,h,count,rotatable,color}]}
 
