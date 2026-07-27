@@ -466,6 +466,34 @@
   .wcell.wdue{background:#FBF0EC;border-color:#E3B9AD} .wcell.wdue .wv{color:var(--clay)}
   #po-sheet{background:#fff;border:1px solid var(--line);border-radius:10px;max-width:840px;margin:0 auto;overflow:hidden;box-shadow:0 4px 30px rgba(0,0,0,.08)}
   @media print{ #po-sheet.printing,#po-sheet.printing *{visibility:visible} body:has(#po-sheet.printing) *{visibility:hidden} #po-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
+
+  /* ---- Cutting Optimizer (Production) ---- */
+  #cut-sheet{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+  @media print{ #cut-sheet.printing,#cut-sheet.printing *{visibility:visible} body:has(#cut-sheet.printing) *{visibility:hidden} #cut-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
+  .cut-wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+  .cut-hd{background:linear-gradient(135deg,#0D0D27,#1A1A40);padding:16px 22px;display:flex;align-items:center;gap:14px}
+  .cut-hd img{width:46px;height:46px;background:#fff;border-radius:50%;padding:3px}
+  .cut-hd .cn{font-family:'Times New Roman',serif;font-size:15px;letter-spacing:3px;color:#fff;text-transform:uppercase}
+  .cut-hd .cs{font-size:9px;letter-spacing:2.5px;color:var(--brass);margin-top:3px;text-transform:uppercase}
+  .cut-hd .cm{margin-left:auto;text-align:right;color:rgba(255,255,255,.72);font-size:11px;font-family:'IBM Plex Mono',monospace;line-height:1.6}
+  .cut-parts{width:100%;border-collapse:collapse;font-size:12px}
+  .cut-parts th{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink-soft);text-align:left;padding:0 6px 6px;font-weight:700}
+  .cut-parts td{padding:4px 6px;border-bottom:1px solid var(--line)}
+  .cut-parts .num{text-align:right}
+  .cut-parts input.cnt{width:54px;text-align:right;padding:5px 7px;border:1px solid var(--line-2);border-radius:7px}
+  .cut-sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  .cut-sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:12px}
+  .cut-board{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .cut-board .cbh{display:flex;align-items:baseline;gap:8px;padding:8px 11px;border-bottom:1px solid var(--line);font-size:12px}
+  .cut-board .cbh b{font-family:'Bricolage Grotesque',sans-serif}
+  .cut-board .cbh .u{margin-left:auto;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace}
+  .cut-board svg{display:block;width:100%;height:auto;background:var(--paper)}
+  .cut-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:12px 0 2px;font-size:11px}
+  .cut-legend span{display:inline-flex;align-items:center;gap:5px;color:var(--ink-soft)}
+  .cut-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .cut-warn{border:1px solid var(--clay);background:#FBF0EC;border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--ink);margin-bottom:4px}
+  .cut-warn b{color:var(--clay)}
+  @media(max-width:880px){ .cut-wrap{grid-template-columns:1fr} }
   @media(max-width:880px){.board{grid-template-columns:repeat(7,200px)}.boq-wrap{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.grid4{grid-template-columns:1fr 1fr}.addgrid{grid-template-columns:1fr 1fr}.totbar,.finrow,.wallet{grid-template-columns:1fr 1fr}.ov-grid{grid-template-columns:1fr}}
 
   /* ================= MOBILE (phones ≤640px): fit-to-screen, no zoom ================= */
@@ -2752,7 +2780,7 @@ async function renderProjects(){
     }).join("")}
     </tbody></table>`;
   $("#projWrap").querySelectorAll("tr[data-id]").forEach(tr=>{
-    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; renderProjectWorkspace(activeProject); };
+    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; cutView=false; cutState=null; renderProjectWorkspace(activeProject); };
   });
   const byId=id=>all.find(p=>String(p.id)===String(id));
   $("#projWrap").querySelectorAll("[data-stg]").forEach(sel=>sel.onchange=()=>projSetStage(byId(sel.dataset.stg),sel.value));
@@ -3524,16 +3552,18 @@ Lintel Space Atelier
 
 /* ---- Work Orders (from BOQ, internal schedule tracking) ---- */
 let activePO=null;
+let cutView=false;
 async function pwOrders(p,body){
   await ensureStaff();
   if(activePO) return poDetail(p,body,activePO);
+  if(cutView) return pwCutting(p,body);
   const {data:pos}=await sb.from("purchase_orders").select("*").eq("project_id",p.id).order("created_at",{ascending:false});
   const list=pos||[];
   const ro=!canWrite();
   body.innerHTML=`
     <div class="pw-card">
       <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Work orders</div>
-        ${ro?'':`<button class="primary" id="genPO">Generate from BOQ</button>`}</div>
+        <div class="gact"><button class="ghost" id="openCut">Cutting plan</button>${ro?'':`<button class="primary" id="genPO">Generate from BOQ</button>`}</div></div>
       ${list.length?`<table><thead><tr><th>WO #</th><th>Scope (category)</th><th>Assigned to</th><th>Target</th><th>Status</th><th class="num">Value</th><th></th></tr></thead><tbody>
         ${list.map(o=>{const dc=dueClass(o.target_date);return `<tr><td class="mono">${esc(o.po_number||'—')}</td><td>${esc(o.category||'—')}</td>
           <td>${o.assignee_id?`<span class="av" style="margin-right:6px">${initials(staffName(o.assignee_id))}</span>${esc(staffName(o.assignee_id))}`:'<span style="color:var(--ink-soft)">— unassigned —</span>'}</td>
@@ -3543,6 +3573,7 @@ async function pwOrders(p,body){
       </tbody></table>`:emptyState("No work orders yet",ro?"":"Generate work orders from the project's BOQ — one per scope/category, each assignable with a schedule.")}
     </div>`;
   body.querySelectorAll("[data-po]").forEach(b=>b.onclick=()=>{ activePO=Number(b.dataset.po); poDetail(p,body,activePO); });
+  if($("#openCut")) $("#openCut").onclick=()=>{ cutView=true; pwCutting(p,body); };
   if(!ro){
     if($("#genPO")) $("#genPO").onclick=()=>generatePOs(p,body);
     body.querySelectorAll("[data-pod]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this work order?"))return; const {error}=await sb.from("purchase_orders").delete().eq("id",b.dataset.pod); if(error) return toast(error.message); pwOrders(p,body); });
@@ -3679,6 +3710,147 @@ async function poDetail(p,body,poId){
     if(error) return toast(error.message);
     toast("Work order saved"); Object.assign(o,patch);
   };
+}
+
+/* ==================== Cutting Optimizer (Production) ====================
+   2D guillotine nesting of BOQ panels onto standard boards. Reads
+   width/height straight off boq_items — no schema change (v1).
+   pack*/cut* mirror the g*/pw* families. Board & BOQ dims share one unit. */
+const CUT_PAL=["#C9A66B","#8FA98C","#7E9BB3","#B98A7A","#9A8FB0","#A5794A","#C2B280","#8C9A6B","#B47E9A","#6F8CA3","#CAB08E","#7FA0A0"];
+let cutState=null; // {verId,verLabel,bw,bh,kerf,rotate,panels:[{key,label,room,w,h,count,rotatable,color}]}
+
+function cutNum(n){ return (Math.round(n*100)/100).toLocaleString('en-IN'); }
+function cutUnit(board){ return board.w>50?'mm':'ft'; }
+function cutArea(a,board){ return board.w>50 ? cutNum(a/1e6)+' m²' : cutNum(a)+' sq ft'; }
+
+/* guillotine bin-packing: best-area-fit placement + shorter-leftover-axis split, kerf-aware */
+function packCutting(panels,board,kerf,allowRotate){
+  const EPS=1e-6, unplaceable=[]; let pieces=[];
+  panels.forEach(p=>{ for(let i=0;i<p.count;i++) pieces.push({label:p.label,w:p.w,h:p.h,rot:allowRotate&&p.rotatable!==false,color:p.color}); });
+  const fits=(w,h)=>w<=board.w+EPS&&h<=board.h+EPS;
+  pieces=pieces.filter(pc=>{ const ok=fits(pc.w,pc.h)||(pc.rot&&fits(pc.h,pc.w)); if(!ok)unplaceable.push(pc); return ok; });
+  pieces.sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)||(b.w*b.h)-(a.w*a.h));
+  const sheets=[], fresh=()=>({free:[{x:0,y:0,w:board.w,h:board.h}],placed:[]});
+  function place(sheet,pc){
+    let best=null;
+    sheet.free.forEach((fr,idx)=>{
+      const orients=[{w:pc.w,h:pc.h,rot:false}]; if(pc.rot)orients.push({w:pc.h,h:pc.w,rot:true});
+      orients.forEach(o=>{ if(o.w<=fr.w+EPS&&o.h<=fr.h+EPS){ const lo=fr.w*fr.h-o.w*o.h; if(!best||lo<best.lo)best={idx,fr,o,lo}; } });
+    });
+    if(!best) return false;
+    const fr=best.fr,o=best.o;
+    sheet.placed.push({x:fr.x,y:fr.y,w:o.w,h:o.h,label:pc.label,rot:o.rot,color:pc.color});
+    const uW=o.w+kerf,uH=o.h+kerf,rW=fr.w-uW,bH=fr.h-uH,nf=[];
+    if((fr.w-o.w)<(fr.h-o.h)){ if(rW>EPS)nf.push({x:fr.x+uW,y:fr.y,w:rW,h:o.h}); if(bH>EPS)nf.push({x:fr.x,y:fr.y+uH,w:fr.w,h:bH}); }
+    else{ if(bH>EPS)nf.push({x:fr.x,y:fr.y+uH,w:o.w,h:bH}); if(rW>EPS)nf.push({x:fr.x+uW,y:fr.y,w:rW,h:fr.h}); }
+    sheet.free.splice(best.idx,1); nf.forEach(r=>sheet.free.push(r));
+    return true;
+  }
+  pieces.forEach(pc=>{ let done=false; for(const s of sheets){ if(place(s,pc)){done=true;break;} } if(!done){ const s=fresh(); sheets.push(s); place(s,pc); } });
+  const bArea=board.w*board.h;
+  const used=sheets.reduce((t,s)=>t+s.placed.reduce((a,p)=>a+p.w*p.h,0),0);
+  const total=sheets.length*bArea;
+  return {sheets,unplaceable,used,total,util:total?used/total:0};
+}
+
+function cutSvg(sheet,board,idx){
+  const PAD=board.w*0.015, vw=board.w+PAD*2, vh=board.h+PAD*2;
+  const fs=Math.min(board.w,board.h)*0.05, ds=fs*0.72, sw=board.w*0.003;
+  const used=sheet.placed.reduce((a,p)=>a+p.w*p.h,0);
+  const util=Math.round(used/(board.w*board.h)*100);
+  const parts=sheet.placed.map(p=>{
+    const show=p.w>board.w*0.05&&p.h>board.h*0.06, cx=p.x+p.w/2, cy=p.y+p.h/2;
+    const lbl=p.label.length>16?p.label.slice(0,15)+'…':p.label;
+    const t=show?`<text x="${cx}" y="${cy-ds*0.15}" font-size="${fs}" text-anchor="middle" fill="#0D0D27" font-family="Inter,sans-serif" font-weight="600">${esc(lbl)}${p.rot?' ↻':''}</text><text x="${cx}" y="${cy+fs*0.95}" font-size="${ds}" text-anchor="middle" fill="#0D0D27" fill-opacity="0.6" font-family="'IBM Plex Mono',monospace">${cutNum(p.w)} × ${cutNum(p.h)}</text>`:'';
+    return `<g><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.color}" fill-opacity="0.82" stroke="#0D0D27" stroke-opacity="0.35" stroke-width="${sw}"/>${t}</g>`;
+  }).join('');
+  return `<div class="cut-board"><div class="cbh"><b>Sheet ${idx+1}</b><span class="u">${util}% used</span></div>`+
+    `<svg viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet"><g transform="translate(${PAD},${PAD})">`+
+    `<rect x="0" y="0" width="${board.w}" height="${board.h}" fill="#F4EFE6" stroke="#CFC4AD" stroke-width="${board.w*0.004}"/>${parts}</g></svg></div>`;
+}
+
+async function pwCutting(p,body){
+  await ensureStaff();
+  const back=`<div class="gbar"><button class="ghost" id="cutBack">← Work orders</button><div class="gact"></div></div>`;
+  const bail=inner=>{ body.innerHTML=back+`<div class="pw-card">${inner}</div>`; $("#cutBack").onclick=()=>{ cutView=false; pwOrders(p,body); }; };
+  const {data:vers}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  if(!vers||!vers.length) return bail(emptyState("No BOQ yet","Build the project BOQ first — panels with width & height feed the cutting optimiser."));
+  const ver=vers[0];
+  const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
+  const panelItems=(items||[]).filter(r=>Number(r.width)>0&&Number(r.height)>0&&r.scope!=='excluded'&&r.scope!=='optional');
+  if(!panelItems.length) return bail(emptyState("No panels with dimensions","Add width (W) & height (H) to modular / carpentry lines in the BOQ — those become cut panels here."));
+  if(!cutState||cutState.verId!==ver.id){
+    cutState={ verId:ver.id, verLabel:ver.version_label||('v'+ver.version), bw:8, bh:4, kerf:0.01, rotate:true,
+      panels: panelItems.map((r,i)=>({ key:r.id, label:r.item_name||r.description||'Panel', room:r.room_tag||r.room||'', w:Number(r.width), h:Number(r.height), count:1, rotatable:true, color:CUT_PAL[i%CUT_PAL.length] })) };
+  }
+  renderCutting(p,body);
+}
+
+function renderCutting(p,body){
+  const s=cutState, ro=!canWrite();
+  const board={w:Number(s.bw)||1,h:Number(s.bh)||1};
+  const res=packCutting(s.panels,board,Number(s.kerf)||0,s.rotate);
+  const placed=res.sheets.reduce((a,x)=>a+x.placed.length,0);
+  const utilPct=Math.round(res.util*100), wastePct=res.total?Math.round((1-res.used/res.total)*100):0;
+  const uClass=utilPct>=75?'wgood':utilPct>=55?'':'wdue', wClass=wastePct>=30?'wdue':wastePct>=18?'':'wgood';
+  const stats=`<div class="wallet">
+    <div class="wcell"><div class="wl">Boards needed</div><div class="wv">${res.sheets.length}</div></div>
+    <div class="wcell ${uClass}"><div class="wl">Utilisation</div><div class="wv">${utilPct}%</div></div>
+    <div class="wcell ${wClass}"><div class="wl">Waste</div><div class="wv">${wastePct}%</div></div>
+    <div class="wcell"><div class="wl">Panels placed</div><div class="wv">${placed}</div></div></div>`;
+  const legend=`<div class="cut-legend">${s.panels.map(pn=>`<span><i style="background:${pn.color}"></i>${esc(pn.label)}</span>`).join('')}</div>`;
+  const warn=res.unplaceable.length?`<div class="cut-warn"><b>${res.unplaceable.length} panel(s) don't fit a ${cutNum(board.w)}×${cutNum(board.h)} board</b> — ${res.unplaceable.map(x=>esc(x.label)+' ('+cutNum(x.w)+'×'+cutNum(x.h)+')').join(', ')}. Split into smaller parts or use a larger sheet.</div>`:'';
+  const sheetsHtml=res.sheets.length?`<div class="cut-sheets">${res.sheets.map((sh,i)=>cutSvg(sh,board,i)).join('')}</div>`:emptyState("Nothing to nest","Set a panel quantity above 0.");
+  body.innerHTML=`
+  <div class="gbar"><button class="ghost" id="cutBack">← Work orders</button>
+    <div class="gact"><button class="ghost" id="cutCsv">Export CSV</button><button class="primary" id="cutPrint">Print / PDF</button></div></div>
+  <div class="cut-wrap">
+    <div class="pw-card">
+      <div class="sec-label" style="border:none;padding:0">Board &amp; blade</div>
+      <div class="grid2">
+        <div class="field"><label>Board width</label><input id="cut_bw" type="number" step="any" value="${s.bw}" ${ro?'disabled':''}></div>
+        <div class="field"><label>Board height</label><input id="cut_bh" type="number" step="any" value="${s.bh}" ${ro?'disabled':''}></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Saw kerf</label><input id="cut_kerf" type="number" step="any" value="${s.kerf}" ${ro?'disabled':''}></div>
+        <div class="field"><label>Grain / rotation</label><label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:13px"><input type="checkbox" id="cut_rot" ${s.rotate?'checked':''} ${ro?'disabled':''} style="width:auto"> Panels may turn 90°</label></div>
+      </div>
+      <div style="font-size:11px;color:var(--ink-soft)">Board &amp; BOQ dimensions must share one unit (feet by default).${ro?'':' <a id="cut_mm" href="javascript:void 0">Switch to mm board (2440×1220)</a>'}</div>
+      <div class="sec-label" style="border:none;padding:0">Panels · BOQ ${esc(s.verLabel||'')}</div>
+      <div style="max-height:320px;overflow:auto">
+        <table class="cut-parts"><thead><tr><th>Panel</th><th class="num">W</th><th class="num">H</th><th class="num">Qty</th></tr></thead>
+        <tbody>${s.panels.map((pn,i)=>`<tr><td><span class="cut-sw" style="background:${pn.color}"></span>${esc(pn.label)}${pn.room?` <span style="color:var(--ink-soft)">· ${esc(pn.room)}</span>`:''}</td><td class="num mono">${cutNum(pn.w)}</td><td class="num mono">${cutNum(pn.h)}</td><td class="num"><input class="cnt mono" type="number" min="0" step="1" value="${pn.count}" data-ci="${i}" ${ro?'disabled':''}></td></tr>`).join('')}</tbody></table>
+      </div>
+      ${ro?'':'<button class="primary" id="cutRun">Re-optimise →</button>'}
+    </div>
+    <div id="cut-sheet">
+      <div class="cut-hd">
+        <img src="${LSA_SEAL}" alt="">
+        <div><div class="cn">Lintel Space Atelier</div><div class="cs">Cutting Plan · ${esc(p.name||'')} ${p.code?'· '+esc(p.code):''}</div></div>
+        <div class="cm">Board ${cutNum(board.w)}×${cutNum(board.h)} ${cutUnit(board)}<br>Kerf ${cutNum(s.kerf)} ${cutUnit(board)}</div>
+      </div>
+      <div style="padding:18px 20px">${stats}${warn}${legend}${sheetsHtml}</div>
+    </div>
+  </div>`;
+  $("#cutBack").onclick=()=>{ cutView=false; pwOrders(p,body); };
+  $("#cutPrint").onclick=()=>{ const el=$("#cut-sheet"); el.classList.add("printing"); window.print(); setTimeout(()=>el.classList.remove("printing"),500); };
+  $("#cutCsv").onclick=()=>cutExportCSV(p,res,board);
+  if(!ro){
+    const commit=()=>{ s.bw=$("#cut_bw").value; s.bh=$("#cut_bh").value; s.kerf=$("#cut_kerf").value; s.rotate=$("#cut_rot").checked; };
+    body.querySelectorAll(".cnt").forEach(inp=>inp.onchange=()=>{ s.panels[Number(inp.dataset.ci)].count=Math.max(0,parseInt(inp.value,10)||0); });
+    if($("#cutRun")) $("#cutRun").onclick=()=>{ commit(); renderCutting(p,body); };
+    if($("#cut_mm")) $("#cut_mm").onclick=()=>{ commit(); s.bw=2440; s.bh=1220; s.kerf=3; renderCutting(p,body); };
+  }
+}
+
+function cutExportCSV(p,res,board){
+  let csv='Sheet,Panel,Width,Height,X,Y,Rotated\n';
+  res.sheets.forEach((s,i)=>s.placed.forEach(pc=>{ csv+=`${i+1},"${String(pc.label||'').replace(/"/g,'""')}",${cutNum(pc.w)},${cutNum(pc.h)},${cutNum(pc.x)},${cutNum(pc.y)},${pc.rot?'Y':'N'}\n`; }));
+  csv+=`\nBoards needed,${res.sheets.length}\nUtilisation,${Math.round(res.util*100)}%\nWaste area,${cutArea(res.total-res.used,board)}\n`;
+  if(res.unplaceable.length) csv+=`Oversize (unplaced),"${res.unplaceable.map(x=>x.label+' '+cutNum(x.w)+'x'+cutNum(x.h)).join('; ')}"\n`;
+  const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='Lintel_CutList_'+String(p.code||p.name||'Project').replace(/\s+/g,'_')+'.csv'; a.click();
+  toast("Cut list exported");
 }
 
 /* ---- Client Details ---- */
