@@ -705,6 +705,32 @@
     #assistPanel{right:8px;left:8px;width:auto;bottom:76px;height:70vh}
     #assistFab{right:14px;bottom:14px}
   }
+/* ---- Vastu consultant ---- */
+.vt-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;margin-top:10px}
+@media(max-width:900px){.vt-wrap{grid-template-columns:1fr}}
+.vt-canvasbox{min-width:0}
+#vt_c{width:100%;border:1px solid #e3e3ea;border-radius:10px;touch-action:none;cursor:crosshair;background:#fff}
+.vt-side select,.vt-side input[type=range]{width:100%}
+.vt-lbl{display:block;font-size:12px;font-weight:700;margin:10px 0 4px;letter-spacing:.03em}
+.vt-quick{display:flex;gap:6px;margin-top:6px}
+.vt-quick button{flex:1;padding:6px 4px;font-size:12px}
+.vt-addrow{display:flex;gap:6px}
+.vt-addrow select{flex:1}
+.vt-hint{font-size:12.5px;color:#c4943a;font-weight:600;min-height:18px;margin-top:8px}
+.vt-score{border:1px solid #e3ddd0;border-radius:12px;padding:12px 14px;margin-top:10px;text-align:center}
+.vt-scoreN{font-size:34px;font-weight:800}
+.vt-scoreN span{font-size:15px;opacity:.55}
+.vt-scoreV{font-size:13px;font-weight:700;margin:2px 0 8px}
+.vt-bar{height:8px;border-radius:5px;background:#eee;overflow:hidden}
+.vt-bar div{height:100%;background:linear-gradient(90deg,#d64545,#d4930d,#1e9e5a)}
+.vt-score.vt-good{border-color:#1e9e5a88}.vt-score.vt-bad{border-color:#d6454588}
+.vt-pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700}
+.vt-pill.vt-good{background:#e2f5ea;color:#187a44}
+.vt-pill.vt-ok{background:#fdf3dd;color:#a06f00}
+.vt-pill.vt-bad{background:#fde4e4;color:#b83232}
+.vt-rooms{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.vt-roomrow{display:grid;grid-template-columns:1fr 38px 44px 24px;align-items:center;gap:6px;font-size:13px;padding:5px 8px;background:rgba(13,13,39,.04);border-radius:8px}
+.vt-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
 </style>
 </head>
 <body>
@@ -1528,7 +1554,7 @@ async function dashConsultantProjects(cid, name){
 /* ===================== LEADS (full CRM) ===================== */
 let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
 let activeLead = null, leadTab = "overview";
-const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Moodboard"],["activity","Activity"],["notes","Notes"]];
+const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["presentations","Moodboard"],["vastu","Vastu"],["activity","Activity"],["notes","Notes"]];
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -1945,6 +1971,7 @@ function drawLeadTab(l){
   if(leadTab==="boq")      return lwBoq(l,body);
   if(leadTab==="meetings") return lwMeetings(l,body);
   if(leadTab==="presentations") return lwPresentations(l,body);
+  if(leadTab==="vastu")    return vastuTab(l,body,"lead");
   if(leadTab==="activity") return lwActivity(l,body);
   if(leadTab==="notes")    return lwNotes(l,body);
 }
@@ -2882,7 +2909,7 @@ async function projCloseProject(p){
   projListTab="closed"; renderProjects();
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"],["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["execution","Execution"],["documents","Documents"],["team","Team"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"],["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"],["execution","Execution"],["documents","Documents"],["team","Team"]];
 // Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
 const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","execution","documents","team"];
 const projTabsFor=()=>isDesignPartner()?PROJ_TABS.filter(t=>PARTNER_PROJ_TABS.includes(t[0])):PROJ_TABS;
@@ -2927,6 +2954,7 @@ async function drawProjectTab(p){
   if(projectTab==="design")     return pwDesign(p,body);
   if(projectTab==="moodboard")  return pwMoodboard(p,body);
   if(projectTab==="canvas")     return pwCanvas(p,body);
+  if(projectTab==="vastu")      return vastuTab(p,body,"project");
   if(projectTab==="execution")  return pwExecution(p,body);
   if(projectTab==="documents")  return pwFiles(p,body,"document");
   if(projectTab==="team")       return pwTeam(p,body);
@@ -5493,6 +5521,411 @@ async function uploadProjectFile(p,kind){
   toast("Uploaded"); pwFiles(p,$("#pwBody"),kind);
 }
 
+/* ================= VASTU CONSULTANT (vt*) =================
+   Manual-marking vastu analysis on an uploaded plan image.
+   Tradition dropdown switches the scoring table (VASTU_RULES).
+   Data: vastu_analyses table (VASTU-01) + plan image in the
+   project-files bucket under vastu/<kind>-<id>/...            */
+
+const VASTU_TRADITIONS=[["north_indian","North Indian (Vastu Shastra)"],["south_indian","South Indian (Traditional)"]];
+const V8=["N","NE","E","SE","S","SW","W","NW"];
+const V8_FULL={N:"North",NE:"North-East (Ishanya)",E:"East",SE:"South-East (Agneya)",S:"South",SW:"South-West (Nairutya)",W:"West",NW:"North-West (Vayavya)",C:"Centre (Brahmasthan)"};
+const V16=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+
+// [key, label, weight, emoji]
+const VASTU_ROOMS=[
+  ["entrance","Main Entrance",20,"🚪"],
+  ["kitchen","Kitchen",15,"🍳"],
+  ["pooja","Pooja Room",12,"🕉️"],
+  ["master","Master Bedroom",12,"🛏️"],
+  ["toilet","Toilet / Bathroom",12,"🚽"],
+  ["living","Living Room",8,"🛋️"],
+  ["bedroom","Bedroom",6,"🛌"],
+  ["stairs","Staircase",6,"🪜"],
+  ["water","Water Tank / Borewell",6,"💧"],
+  ["septic","Septic Tank",6,"🕳️"],
+  ["kids","Kids Bedroom",5,"🧸"],
+  ["dining","Dining",5,"🍽️"],
+  ["guest","Guest Bedroom",4,"🧳"],
+  ["study","Study / Office",4,"📚"],
+  ["store","Store Room",3,"📦"],
+  ["utility","Utility / Wash",3,"🧺"],
+  ["parking","Parking / Garage",3,"🚗"],
+  ["balcony","Balcony / Verandah",2,"🌿"]
+];
+const vtRoomMeta=k=>VASTU_ROOMS.find(r=>r[0]===k)||[k,k,3,"📍"];
+
+// Scores 0-100 per 8-direction zone + C (Brahmasthan).
+const VASTU_RULES={
+  north_indian:{
+    entrance:{N:90,NE:100,E:95,SE:40,S:30,SW:5,W:60,NW:70,C:0},
+    kitchen:{N:30,NE:5,E:60,SE:100,S:50,SW:20,W:45,NW:80,C:5},
+    pooja:{N:80,NE:100,E:85,SE:20,S:15,SW:10,W:50,NW:40,C:70},
+    master:{N:35,NE:10,E:40,SE:25,S:75,SW:100,W:70,NW:45,C:20},
+    toilet:{N:35,NE:0,E:30,SE:35,S:55,SW:15,W:70,NW:95,C:0},
+    living:{N:95,NE:100,E:90,SE:55,S:50,SW:40,W:60,NW:75,C:80},
+    bedroom:{N:60,NE:30,E:70,SE:35,S:65,SW:75,W:80,NW:70,C:20},
+    stairs:{N:30,NE:10,E:35,SE:60,S:85,SW:100,W:80,NW:65,C:5},
+    water:{N:90,NE:100,E:80,SE:25,S:20,SW:30,W:40,NW:50,C:5},
+    septic:{N:30,NE:0,E:25,SE:40,S:50,SW:25,W:80,NW:95,C:0},
+    kids:{N:55,NE:40,E:80,SE:35,S:50,SW:40,W:90,NW:75,C:20},
+    dining:{N:60,NE:45,E:75,SE:60,S:55,SW:45,W:100,NW:65,C:30},
+    guest:{N:60,NE:35,E:55,SE:40,S:45,SW:30,W:65,NW:100,C:20},
+    study:{N:85,NE:95,E:90,SE:45,S:40,SW:55,W:80,NW:50,C:30},
+    store:{N:40,NE:25,E:40,SE:55,S:60,SW:90,W:70,NW:85,C:10},
+    utility:{N:55,NE:25,E:70,SE:80,S:50,SW:35,W:60,NW:75,C:10},
+    parking:{N:60,NE:40,E:70,SE:55,S:50,SW:45,W:65,NW:90,C:5},
+    balcony:{N:90,NE:100,E:95,SE:50,S:40,SW:30,W:55,NW:70,C:0}
+  },
+  // South Indian conventions: East entrance is prime; a South entrance in the
+  // correct pada is traditionally acceptable; kitchen SE with NW as strong
+  // alternate; dining to the West emphasised.
+  south_indian:{}
+};
+VASTU_RULES.south_indian=JSON.parse(JSON.stringify(VASTU_RULES.north_indian));
+Object.assign(VASTU_RULES.south_indian,{
+  entrance:{N:85,NE:95,E:100,SE:45,S:55,SW:10,W:65,NW:70,C:0},
+  kitchen:{N:30,NE:5,E:65,SE:100,S:50,SW:20,W:45,NW:70,C:5},
+  dining:{N:55,NE:40,E:70,SE:55,S:60,SW:45,W:100,NW:60,C:30},
+  pooja:{N:80,NE:100,E:90,SE:20,S:15,SW:10,W:55,NW:40,C:65}
+});
+
+// Remedy text shown when a room scores below 45 in its zone.
+const VASTU_REMEDIES={
+  entrance:"Strengthen the entrance with a threshold (door frame sill), auspicious symbols and bright lighting. A vastu pyramid or copper strip at the door frame is the common correction when relocation is not possible.",
+  kitchen:"If the hob cannot move to the South-East, ensure the cook faces East while cooking and keep the NE corner of the kitchen light and clutter-free. A fire element (red tone) in the SE of the kitchen helps.",
+  pooja:"Shift the altar so the worshipper faces East or North. Keep the pooja space elevated, clutter-free and never under a staircase or beside a toilet wall.",
+  master:"Use the SW corner of the room for the bed with the head towards South or West. Heavy storage on the SW wall compensates for an off-zone master bedroom.",
+  toilet:"Keep the door closed, add an exhaust towards NW/W, and place a bowl of rock salt inside. Avoid NE toilets entirely if any alternative exists.",
+  living:"Keep heavier furniture towards S/SW of the room and the NE corner open and light.",
+  bedroom:"Sleep with the head towards South or East. Avoid mirrors facing the bed.",
+  stairs:"Paint the staircase in light colours and keep the space beneath it free of pooja or water elements. Clockwise ascent is preferred.",
+  water:"Underground water storage belongs in the NE; if placed elsewhere, keep the NE of the plot open, clean and lower than the SW.",
+  septic:"A septic tank in the NE is a serious dosha — consult during renovation. Meanwhile keep the NE zone light, clean and unobstructed.",
+  kids:"Place the study desk so the child faces East or North. West-zone rooms suit children best.",
+  dining:"Dine facing East or West. Avoid dining directly under a toilet block on the floor above.",
+  guest:"Guest rooms sit best in the NW — the zone of movement. Avoid settling guests in the SW (owner's zone).",
+  study:"Face East or North while studying. Keep bookshelves on S/W walls.",
+  store:"Heavy storage belongs in the SW. Avoid storing heavy items in the NE.",
+  utility:"Washing and utility works well in the SE or NW. Keep drainage flowing towards NE/N.",
+  parking:"NW suits vehicles best. Avoid parking heavy vehicles in the NE.",
+  balcony:"Open balconies belong in the N/NE/E. Heavy planters should move towards S/W."
+};
+
+function vtVerdict(s){ return s>=75?["good","✅ Favourable"]:s>=45?["ok","⚠️ Acceptable"]:["bad","❌ Dosha"]; }
+function vtTradLabel(t){ const f=VASTU_TRADITIONS.find(x=>x[0]===t); return f?f[1]:t; }
+
+// ---- geometry ----
+let VT=null; // editor state: {row, ent, kind, img, natW, natH, mode, pendingRoom, drag}
+function vtBearing(x,y,row,natW,natH){
+  // x,y = fractions of natural image size; returns compass bearing 0-360 (0=N)
+  const ax=(x-row.center_x)*natW, ay=(y-row.center_y)*natH;
+  let ang=Math.atan2(ax,-ay)*180/Math.PI; // screen angle, 0=up, clockwise
+  return (ang-row.north_deg+720)%360;
+}
+function vtZoneOf(x,y,row,natW,natH){
+  const ax=(x-row.center_x)*natW, ay=(y-row.center_y)*natH;
+  const rpx=row.radius*Math.min(natW,natH);
+  if(Math.hypot(ax,ay)<rpx*0.25) return "C";
+  return V8[Math.round(vtBearing(x,y,row,natW,natH)/45)%8];
+}
+function vtScoreAll(row,natW,natH){
+  const rules=VASTU_RULES[row.tradition]||VASTU_RULES.north_indian;
+  let sum=0,wsum=0; const rows=[];
+  (row.rooms||[]).forEach((r,i)=>{
+    const meta=vtRoomMeta(r.t);
+    const zone=vtZoneOf(r.x,r.y,row,natW,natH);
+    const sc=(rules[r.t]||{})[zone]??50;
+    sum+=sc*meta[2]; wsum+=meta[2];
+    rows.push({i,t:r.t,label:meta[1],emoji:meta[3],zone,score:sc});
+  });
+  return {score: wsum? Math.round(sum/wsum) : null, rows};
+}
+
+// ---- tab entry (shared by lead + project workspaces) ----
+async function vastuTab(ent,body,kind){
+  const col = kind==="lead" ? "lead_id" : "project_id";
+  const {data:list,error}=await sb.from("vastu_analyses").select("*").eq(col,ent.id).order("updated_at",{ascending:false});
+  if(error) return body.innerHTML=`<div class="pw-card">${esc(error.message)}<br><span class="uphint">Has the VASTU-01 migration been applied?</span></div>`;
+  const w=canWrite();
+  body.innerHTML=`<div class="pw-card">
+    <div class="sec-label" style="border:none;padding-top:0">Vastu analyses</div>
+    ${w?`<div class="upbar">
+      <input type="file" id="vt_file" accept="image/*">
+      <input id="vt_title" placeholder="Title (e.g. Ground Floor)">
+      <select id="vt_trad">${VASTU_TRADITIONS.map(t=>`<option value="${t[0]}">${t[1]}</option>`).join("")}</select>
+      <button class="primary" id="vt_up">Upload plan & start</button>
+    </div><div class="uphint">Upload the floor plan as a JPG/PNG image (screenshot a PDF page if needed), then mark North, the centre, and each room.</div>`:""}
+    <div id="vt_list">${(list&&list.length)?`<table><thead><tr><th>Analysis</th><th>Tradition</th><th>Score</th><th>Updated</th><th></th></tr></thead><tbody>
+      ${list.map(a=>{const v=a.score!=null?vtVerdict(a.score):null;return `<tr>
+        <td><b>${esc(a.title)}</b></td><td>${esc(vtTradLabel(a.tradition))}</td>
+        <td>${a.score!=null?`<span class="vt-pill vt-${v[0]}">${a.score}/100</span>`:"<span class='mono'>—</span>"}</td>
+        <td>${new Date(a.updated_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
+        <td><button class="linkbtn" data-vopen="${a.id}">Open</button>${w?` · <button class="linkbtn del" data-vdel="${a.id}" data-vpath="${esc(a.plan_path||"")}">Delete</button>`:""}</td></tr>`;}).join("")}
+      </tbody></table>`:emptyState("No vastu analysis yet",w?"Upload a plan above to begin.":"")}</div>
+    <div id="vt_editor"></div>
+  </div>`;
+  if(w){
+    $("#vt_up").onclick=async()=>{
+      const f=$("#vt_file").files[0]; if(!f) return toast("Choose a plan image first");
+      if(!f.type.startsWith("image/")) return toast("Please upload an image (JPG/PNG)");
+      toast("Uploading plan…");
+      const path=`vastu/${kind}-${ent.id}/${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+      const {error:ue}=await sb.storage.from("project-files").upload(path,f);
+      if(ue) return toast(ue.message);
+      const rec={title:$("#vt_title").value.trim()||"Vastu Analysis",tradition:$("#vt_trad").value,plan_path:path,created_by:me.id};
+      rec[col]=ent.id;
+      const {data:ins,error:ie}=await sb.from("vastu_analyses").insert(rec).select().single();
+      if(ie) return toast(ie.message);
+      vtOpen(ins,ent,kind);
+    };
+  }
+  body.querySelectorAll("[data-vopen]").forEach(b=>b.onclick=()=>{
+    const row=(list||[]).find(a=>a.id===Number(b.dataset.vopen));
+    if(row) vtOpen(row,ent,kind);
+  });
+  body.querySelectorAll("[data-vdel]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Delete this vastu analysis?")) return;
+    const {error:de}=await sb.from("vastu_analyses").delete().eq("id",Number(b.dataset.vdel));
+    if(de) return toast(de.message);
+    if(b.dataset.vpath) await sb.storage.from("project-files").remove([b.dataset.vpath]).catch?.(()=>{});
+    vastuTab(ent,body,kind);
+  });
+}
+
+// ---- editor ----
+async function vtOpen(row,ent,kind){
+  const host=$("#vt_editor"); if(!host) return;
+  host.innerHTML=`<div class="uphint" style="margin-top:14px">Loading plan…</div>`;
+  const {data:su,error:se}=await sb.storage.from("project-files").createSignedUrl(row.plan_path,3600);
+  if(se) return host.innerHTML=`<div class="uphint">${esc(se.message)}</div>`;
+  const img=new Image(); img.crossOrigin="anonymous";
+  img.onload=()=>{ VT={row:{...row},ent,kind,img,natW:img.naturalWidth,natH:img.naturalHeight,mode:null,pendingRoom:null,drag:null}; vtEditorUi(host); };
+  img.onerror=()=>host.innerHTML=`<div class="uphint">Could not load the plan image.</div>`;
+  img.src=su.signedUrl;
+}
+
+function vtEditorUi(host){
+  const w=canWrite(); const r=VT.row;
+  host.innerHTML=`
+    <div class="sec-label" style="margin-top:16px">${esc(r.title)} — mark the plan</div>
+    <div class="vt-wrap">
+      <div class="vt-canvasbox"><canvas id="vt_c"></canvas></div>
+      <div class="vt-side">
+        <label class="vt-lbl">Tradition</label>
+        <select id="vt_e_trad" ${w?"":"disabled"}>${VASTU_TRADITIONS.map(t=>`<option value="${t[0]}" ${r.tradition===t[0]?"selected":""}>${t[1]}</option>`).join("")}</select>
+        <label class="vt-lbl">North direction <span class="mono" id="vt_deg">${Math.round(r.north_deg)}°</span></label>
+        <input type="range" id="vt_e_north" min="0" max="359" step="1" value="${Math.round(r.north_deg)}" ${w?"":"disabled"}>
+        <div class="vt-quick">
+          <button class="ghost" data-nd="0">N ↑</button><button class="ghost" data-nd="90">N →</button>
+          <button class="ghost" data-nd="180">N ↓</button><button class="ghost" data-nd="270">N ←</button>
+        </div>
+        <label class="vt-lbl">Grid size <span class="mono" id="vt_rad">${Math.round(r.radius*100)}%</span></label>
+        <input type="range" id="vt_e_rad" min="15" max="60" step="1" value="${Math.round(r.radius*100)}" ${w?"":"disabled"}>
+        ${w?`<button class="ghost" id="vt_e_center">🎯 Move centre (tap plan)</button>`:""}
+        ${w?`<label class="vt-lbl" style="margin-top:10px">Add room</label>
+        <div class="vt-addrow">
+          <select id="vt_e_room">${VASTU_ROOMS.map(rm=>`<option value="${rm[0]}">${rm[3]} ${rm[1]}</option>`).join("")}</select>
+          <button class="primary" id="vt_e_place">Place</button>
+        </div>
+        <div class="uphint">Tap the plan where the room sits. Drag a marker to adjust. Mark the entrance at the main door.</div>`:""}
+        <div id="vt_hint" class="vt-hint"></div>
+        <div id="vt_scorebox"></div>
+        <div id="vt_roomlist"></div>
+        <div class="vt-actions">
+          ${w?`<button class="primary" id="vt_e_save">Save analysis</button>`:""}
+          <button class="ghost" id="vt_e_report">📄 Full report</button>
+          <button class="ghost" id="vt_e_wa">💬 WhatsApp</button>
+        </div>
+      </div>
+    </div>`;
+  const cv=$("#vt_c");
+  // fit canvas to container width, keep image aspect
+  const boxW=Math.min($(".vt-canvasbox").clientWidth||820,900);
+  const scale=boxW/VT.natW;
+  cv.width=boxW; cv.height=Math.round(VT.natH*scale);
+  VT.scale=scale;
+  vtRefresh();
+  $("#vt_e_trad").onchange=e=>{VT.row.tradition=e.target.value; vtRefresh();};
+  $("#vt_e_north").oninput=e=>{VT.row.north_deg=Number(e.target.value); $("#vt_deg").textContent=Math.round(VT.row.north_deg)+"°"; vtRefresh();};
+  host.querySelectorAll("[data-nd]").forEach(b=>b.onclick=()=>{VT.row.north_deg=Number(b.dataset.nd); $("#vt_e_north").value=VT.row.north_deg; $("#vt_deg").textContent=VT.row.north_deg+"°"; vtRefresh();});
+  $("#vt_e_rad").oninput=e=>{VT.row.radius=Number(e.target.value)/100; $("#vt_rad").textContent=e.target.value+"%"; vtRefresh();};
+  if(w){
+    $("#vt_e_center").onclick=()=>{VT.mode=VT.mode==="center"?null:"center"; vtHint();};
+    $("#vt_e_place").onclick=()=>{VT.mode="room"; VT.pendingRoom=$("#vt_e_room").value; vtHint();};
+    $("#vt_e_save").onclick=vtSave;
+  }
+  $("#vt_e_report").onclick=vtReport;
+  $("#vt_e_wa").onclick=vtWhatsApp;
+  // pointer interactions
+  cv.onpointerdown=e=>{
+    if(!canWrite()) return;
+    const p=vtPt(e,cv);
+    if(VT.mode==="center"){ VT.row.center_x=p.x; VT.row.center_y=p.y; VT.mode=null; vtHint(); vtRefresh(); return; }
+    if(VT.mode==="room"&&VT.pendingRoom){ (VT.row.rooms=VT.row.rooms||[]).push({x:p.x,y:p.y,t:VT.pendingRoom}); VT.mode=null; VT.pendingRoom=null; vtHint(); vtRefresh(); return; }
+    // start drag if near a marker (within 14 css px)
+    const hit=(VT.row.rooms||[]).findIndex(rm=>Math.hypot((rm.x-p.x)*VT.natW*VT.scale,(rm.y-p.y)*VT.natH*VT.scale)<14);
+    if(hit>=0){ VT.drag=hit; cv.setPointerCapture(e.pointerId); }
+  };
+  cv.onpointermove=e=>{ if(VT.drag==null) return; const p=vtPt(e,cv); const rm=VT.row.rooms[VT.drag]; rm.x=p.x; rm.y=p.y; vtRefresh(); };
+  cv.onpointerup=()=>{ VT.drag=null; };
+  vtHint();
+}
+function vtPt(e,cv){
+  const b=cv.getBoundingClientRect();
+  return {x:Math.min(1,Math.max(0,(e.clientX-b.left)/b.width)), y:Math.min(1,Math.max(0,(e.clientY-b.top)/b.height))};
+}
+function vtHint(){
+  const h=$("#vt_hint"); if(!h) return;
+  h.textContent = VT.mode==="center" ? "Tap the plan to set the centre (Brahmasthan)."
+    : VT.mode==="room" ? `Tap the plan to place: ${vtRoomMeta(VT.pendingRoom)[1]}`
+    : "";
+}
+
+function vtRefresh(){
+  const cv=$("#vt_c"); if(!cv||!VT) return;
+  const ctx=cv.getContext("2d"); const r=VT.row; const s=VT.scale;
+  const cx=r.center_x*VT.natW*s, cy=r.center_y*VT.natH*s;
+  const rad=r.radius*Math.min(VT.natW,VT.natH)*s;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(VT.img,0,0,cv.width,cv.height);
+  ctx.save();
+  // brahmasthan + rings
+  ctx.strokeStyle="rgba(13,13,39,.75)"; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(cx,cy,rad,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.arc(cx,cy,rad*0.25,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  const nd=r.north_deg*Math.PI/180;
+  // 16 fine spokes, 8 bold boundaries
+  for(let i=0;i<16;i++){
+    const a=nd+(11.25+i*22.5)*Math.PI/180;
+    const bold=(i%2===1); // every second fine boundary aligns with 8-dir boundary
+    ctx.strokeStyle=bold?"rgba(13,13,39,.6)":"rgba(13,13,39,.25)";
+    ctx.lineWidth=bold?1.4:0.8;
+    ctx.beginPath(); ctx.moveTo(cx+Math.sin(a)*rad*0.25,cy-Math.cos(a)*rad*0.25);
+    ctx.lineTo(cx+Math.sin(a)*rad,cy-Math.cos(a)*rad); ctx.stroke();
+  }
+  // mandala square (3x3, aligned to north)
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(nd);
+  const half=rad/Math.SQRT2;
+  ctx.strokeStyle="rgba(196,148,58,.85)"; ctx.lineWidth=1.2;
+  ctx.strokeRect(-half,-half,half*2,half*2);
+  for(let i=1;i<3;i++){
+    ctx.beginPath(); ctx.moveTo(-half+i*(half*2/3),-half); ctx.lineTo(-half+i*(half*2/3),half); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-half,-half+i*(half*2/3)); ctx.lineTo(half,-half+i*(half*2/3)); ctx.stroke();
+  }
+  ctx.fillStyle="rgba(196,148,58,.15)";
+  ctx.fillRect(-half/3,-half/3,half*2/3,half*2/3);
+  ctx.restore();
+  // direction labels
+  ctx.font="700 12px system-ui"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  V16.forEach((d,i)=>{
+    const a=nd+i*22.5*Math.PI/180;
+    const lx=cx+Math.sin(a)*rad*1.1, ly=cy-Math.cos(a)*rad*1.1;
+    if(lx<8||ly<8||lx>cv.width-8||ly>cv.height-8) return;
+    const primary=i%2===0;
+    ctx.fillStyle=d==="N"?"#c0392b":primary?"#0D0D27":"rgba(13,13,39,.45)";
+    ctx.font=(primary?"800 13px":"600 10px")+" system-ui";
+    ctx.fillText(d,lx,ly);
+  });
+  ctx.restore();
+  // room markers coloured by verdict
+  const res=vtScoreAll(r,VT.natW,VT.natH);
+  const colors={good:"#1e9e5a",ok:"#d4930d",bad:"#d64545"};
+  res.rows.forEach(rr=>{
+    const rm=r.rooms[rr.i];
+    const mx=rm.x*VT.natW*s, my=rm.y*VT.natH*s;
+    const v=vtVerdict(rr.score)[0];
+    ctx.beginPath(); ctx.arc(mx,my,11,0,Math.PI*2);
+    ctx.fillStyle=colors[v]; ctx.globalAlpha=.9; ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+    ctx.font="12px system-ui"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(rr.emoji,mx,my+0.5);
+  });
+  vtScorePanel(res);
+}
+
+function vtScorePanel(res){
+  const sb2=$("#vt_scorebox"), rl=$("#vt_roomlist"); if(!sb2) return;
+  if(res.score==null){ sb2.innerHTML=`<div class="uphint">Place rooms on the plan to see the score.</div>`; rl.innerHTML=""; return; }
+  const v=vtVerdict(res.score);
+  sb2.innerHTML=`<div class="vt-score vt-${v[0]}"><div class="vt-scoreN mono">${res.score}<span>/100</span></div>
+    <div class="vt-scoreV">${v[1].slice(2)}</div>
+    <div class="vt-bar"><div style="width:${res.score}%"></div></div></div>`;
+  const w=canWrite();
+  rl.innerHTML=`<div class="vt-rooms">${res.rows.map(rr=>{
+    const vv=vtVerdict(rr.score);
+    return `<div class="vt-roomrow"><span>${rr.emoji} ${esc(rr.label)}</span>
+      <span class="mono">${rr.zone}</span><span class="vt-pill vt-${vv[0]}">${rr.score}</span>
+      ${w?`<button class="linkbtn del" data-vrm="${rr.i}">×</button>`:""}</div>`;
+  }).join("")}</div>`;
+  if(w) rl.querySelectorAll("[data-vrm]").forEach(b=>b.onclick=()=>{ VT.row.rooms.splice(Number(b.dataset.vrm),1); vtRefresh(); });
+}
+
+async function vtSave(){
+  const r=VT.row;
+  const res=vtScoreAll(r,VT.natW,VT.natH);
+  const {error}=await sb.from("vastu_analyses").update({
+    tradition:r.tradition,north_deg:r.north_deg,center_x:r.center_x,center_y:r.center_y,
+    radius:r.radius,rooms:r.rooms||[],score:res.score,updated_at:new Date().toISOString()
+  }).eq("id",r.id);
+  if(error) return toast(error.message);
+  toast("Vastu analysis saved");
+}
+
+function vtEntityName(){ return VT.ent.name||VT.ent.client_name||("#"+VT.ent.id); }
+
+function vtWhatsApp(){
+  const res=vtScoreAll(VT.row,VT.natW,VT.natH);
+  if(res.score==null) return toast("Place rooms first");
+  const lines=res.rows.map(rr=>`• ${rr.label}: ${V8_FULL[rr.zone]} — ${vtVerdict(rr.score)[1]}`);
+  const msg=`*Vastu Analysis — ${vtEntityName()}*\n${vtTradLabel(VT.row.tradition)}\n\n*Score: ${res.score}/100*\n\n${lines.join("\n")}\n\n— Lintel Space`;
+  window.open("https://wa.me/?text="+encodeURIComponent(msg),"_blank");
+}
+
+function vtReport(){
+  const r=VT.row;
+  const res=vtScoreAll(r,VT.natW,VT.natH);
+  if(res.score==null) return toast("Place rooms on the plan first");
+  let snap="";
+  try{ snap=$("#vt_c").toDataURL("image/jpeg",0.88); }catch(e){ snap=""; }
+  const v=vtVerdict(res.score);
+  const doshas=res.rows.filter(rr=>rr.score<45);
+  const win=window.open("","_blank");
+  if(!win) return toast("Allow popups to open the report");
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Vastu Report — ${esc(vtEntityName())}</title>
+  <style>
+    body{font-family:Georgia,serif;color:#1a1a2e;margin:0;padding:32px;max-width:820px;margin:auto}
+    h1{font-size:26px;margin:0}
+    .sub{color:#666;font-size:13px;margin:4px 0 20px}
+    .score{display:flex;align-items:center;gap:18px;background:#f6f4ee;border:1px solid #e3ddd0;border-radius:12px;padding:18px 22px;margin:18px 0}
+    .score .n{font-size:44px;font-weight:800}
+    .score .n span{font-size:18px;color:#888}
+    img.plan{width:100%;border:1px solid #ddd;border-radius:8px;margin:10px 0}
+    table{width:100%;border-collapse:collapse;font-size:14px;margin:14px 0}
+    th,td{padding:8px 10px;border-bottom:1px solid #e5e5e5;text-align:left}
+    th{background:#0D0D27;color:#fff;font-size:12px;letter-spacing:.04em}
+    .good{color:#1e7a46;font-weight:700}.ok{color:#a06f00;font-weight:700}.bad{color:#b83232;font-weight:700}
+    .rem{background:#fdf8ef;border-left:3px solid #c4943a;padding:10px 14px;margin:8px 0;font-size:13.5px}
+    .foot{margin-top:28px;font-size:11.5px;color:#888;border-top:1px solid #eee;padding-top:12px}
+    @media print{.noprint{display:none}}
+  </style></head><body>
+  <h1>Vastu Analysis Report</h1>
+  <div class="sub">${esc(vtEntityName())} · ${esc(r.title)} · ${esc(vtTradLabel(r.tradition))} · ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"long",year:"numeric"})} · Lintel Space, Bengaluru</div>
+  <div class="score"><div class="n">${res.score}<span>/100</span></div><div><b>${v[1].slice(2)}</b><br>Weighted across ${res.rows.length} marked rooms — entrance, kitchen, pooja, master bedroom and toilets carry the highest weight.</div></div>
+  ${snap?`<img class="plan" src="${snap}" alt="Plan with vastu overlay">`:""}
+  <table><thead><tr><th>Room</th><th>Zone</th><th>Score</th><th>Verdict</th></tr></thead><tbody>
+    ${res.rows.map(rr=>{const vv=vtVerdict(rr.score);return `<tr><td>${rr.emoji} ${esc(rr.label)}</td><td>${esc(V8_FULL[rr.zone])}</td><td>${rr.score}/100</td><td class="${vv[0]}">${vv[1]}</td></tr>`;}).join("")}
+  </tbody></table>
+  ${doshas.length?`<h3>Suggested remedies</h3>${doshas.map(rr=>`<div class="rem"><b>${rr.emoji} ${esc(rr.label)} in ${esc(V8_FULL[rr.zone])}:</b> ${esc(VASTU_REMEDIES[rr.t]||"Consult our design team for a tailored correction.")}</div>`).join("")}`:`<div class="rem"><b>No major doshas found.</b> The marked layout aligns well with ${esc(vtTradLabel(r.tradition))} principles.</div>`}
+  <div class="foot">Prepared by Lintel Space · This analysis follows classical ${esc(vtTradLabel(r.tradition))} placement principles and is intended as design guidance.</div>
+  <div class="noprint" style="margin-top:16px"><button onclick="window.print()" style="padding:10px 22px;font-size:14px;cursor:pointer">Print / Save as PDF</button></div>
+  </body></html>`);
+  win.document.close();
+}
+/* ================= end VASTU CONSULTANT ================= */
+
 /* ---- Project Team ---- */
 async function pwTeam(p,body){
   const {data:members}=await sb.from("project_members").select("*").eq("project_id",p.id);
@@ -6115,6 +6548,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b23",date:"30 Jul 2026",title:"Vastu consultant — score any floor plan",points:[
+    "Open a lead or project and go to the new <b>Vastu</b> tab. Upload the floor plan as a JPG/PNG (screenshot a PDF page if needed) and press <b>Upload plan &amp; start</b>.",
+    "Set the <b>North direction</b> with the slider (or the N ↑ → ↓ ← quick buttons), tap <b>🎯 Move centre</b> to place the Brahmasthan, then <b>Place</b> each room by tapping where it sits on the plan — drag a marker to adjust.",
+    "Pick <b>North Indian</b> or <b>South Indian</b> tradition from the dropdown — the scoring rules switch accordingly. The vastu grid and mandala plot live on the plan and the 0–100 score updates as you mark.",
+    "Press <b>📄 Full report</b> for a branded printable report with per-room verdicts and remedies, or <b>💬 WhatsApp</b> to send the client a summary. <b>Save analysis</b> keeps it on the lead/project."]},
   {build:"b21",date:"21 Jul 2026",title:"This update popup",points:[
     "Lintel OS now shows what changed the moment you sign in after an update — with steps on how to use each feature.",
     "Reopen it any time from the <b>🔔</b> at the top right. A red dot means something new is waiting."]},
@@ -7130,7 +7568,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b22 · 21 Jul 2026";
+const APP_BUILD = "b23 · 30 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
