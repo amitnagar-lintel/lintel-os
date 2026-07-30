@@ -6103,10 +6103,9 @@ function classifyStream(cat){
   if(/panel|panelling|paneling|trim|carpentry|\bdoor/.test(c)) return 'carpentry';
   return 'modular';
 }
-// Categories available for a section + space. space 'all' -> no filter; else space-matched or 'general'.
-function catsFor(stream, space){
+// Categories for a space across ALL sections (section is auto-derived from the item, not chosen).
+function catsForSpace(space){
   return [...new Set(G.rates.filter(r=>{
-    if(normStream(r.stream||classifyStream(r.cat))!==stream) return false;
     if(!space||space==='all') return true;
     const sp=r.space||null;
     return sp===space || sp==='general';
@@ -6659,10 +6658,9 @@ function gEstimator(p){
   G.ctx=p;                                   // remember context so add/import can fully re-render
   if(!G.section) G.section='all';
   if(!G.space) G.space='all';
-  const addSec=(G.section!=='all')?G.section:'modular';   // section the add forms target
   const addSpace=G.space||'all';                          // space filter for the add pickers
-  const addCats=catsFor(addSec, addSpace);
-  const secOpts=STREAMS.map(s=>`<option value="${s[0]}"${s[0]===addSec?' selected':''}>${esc(s[1])}</option>`).join("");
+  const addCats=catsForSpace(addSpace);                   // categories across all sections for this space
+  const addRoom=(addSpace!=='all'&&addSpace!=='general')?(SPACE_LABEL[addSpace]||''):'';  // pre-fill Room from Space
   const spaceOpts=SPACES.map(s=>`<option value="${s[0]}"${s[0]===addSpace?' selected':''}>${esc(s[1])}</option>`).join("");
   const b=$("#gBody");
   const createdBy=v.created_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.created_by):""):"";
@@ -6695,25 +6693,23 @@ function gEstimator(p){
     <div class="sec-label" style="border:none;padding-top:0">Add from rate library</div>
     <div class="addgrid">
       <div class="field"><label>Space</label><select id="in-space">${spaceOpts}</select></div>
-      <div class="field"><label>Section</label><select id="in-stream">${secOpts}</select></div>
-      <div class="field"><label>Room</label><input id="in-room" list="roomdl" placeholder="Living Room"><datalist id="roomdl">${gRooms().map(r=>`<option value="${esc(r)}">`).join("")}</datalist></div>
+      <div class="field"><label>Room</label><input id="in-room" list="roomdl" value="${esc(addRoom)}" placeholder="Living Room"><datalist id="roomdl">${gRooms().map(r=>`<option value="${esc(r)}">`).join("")}</datalist></div>
       <div class="field"><label>Category</label><select id="in-cat"><option value="">— select —</option>${addCats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
       <div class="field"><label>Item</label><select id="in-item"><option value="">— select category —</option></select></div>
+      <div class="field"><label>Qty</label><input id="in-qty" type="number" step="0.5"></div>
       <div class="field"><label>W</label><input id="in-w" type="number" step="0.1"></div>
       <div class="field"><label>H</label><input id="in-h" type="number" step="0.1"></div>
-      <div class="field"><label>Qty</label><input id="in-qty" type="number" step="0.5"></div>
       <div class="field"><label>Unit</label><input id="in-unit" readonly></div>
       <button class="primary" id="addLib">+ Add</button>
     </div>
-    <div class="hint">Pick a <b>Space</b> (e.g. Kitchen) to see only that space's items · category &amp; item lists follow Space + Section · rate auto-fills</div>
+    <div class="hint">Pick a <b>Space</b> (e.g. Kitchen) → only its items show · the section is set automatically from the item · rate &amp; unit auto-fill</div>
   </div>
 
   <div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add custom item (not in library)</div>
     <div class="addgrid">
       <div class="field"><label>Space</label><select id="ci-space">${spaceOpts}</select></div>
-      <div class="field"><label>Section</label><select id="ci-stream">${secOpts}</select></div>
-      <div class="field"><label>Room</label><input id="ci-room" list="roomdl" placeholder="Terrace"></div>
+      <div class="field"><label>Room</label><input id="ci-room" list="roomdl" value="${esc(addRoom)}" placeholder="Terrace"></div>
       <div class="field"><label>Category</label><input id="ci-cat" placeholder="Special Work"></div>
       <div class="field"><label>Item</label><input id="ci-item" placeholder="MS railing"></div>
       <div class="field"><label>Rate ₹</label><input id="ci-rate" type="number"></div>
@@ -6758,8 +6754,7 @@ function gEstimator(p){
   $$(".gsecbar button").forEach(bt=>bt.onclick=()=>{ G.section=bt.dataset.sec; gEstimator(p); });
 
   if(!ro){
-    const fillCats=()=>{ const st=$("#in-stream").value, sp=$("#in-space")?$("#in-space").value:'all'; if($("#in-space"))G.space=sp; const cs=catsFor(st,sp); $("#in-cat").innerHTML='<option value="">— select —</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join(""); $("#in-item").innerHTML='<option value="">— select category —</option>'; $("#in-unit").value=''; };
-    if($("#in-stream")) $("#in-stream").onchange=fillCats;
+    const fillCats=()=>{ const sp=$("#in-space")?$("#in-space").value:'all'; if($("#in-space"))G.space=sp; const cs=catsForSpace(sp); $("#in-cat").innerHTML='<option value="">— select —</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join(""); $("#in-item").innerHTML='<option value="">— select category —</option>'; $("#in-unit").value=''; const rm=$("#in-room"); if(rm&&!rm.value&&sp!=='all'&&sp!=='general')rm.value=(SPACE_LABEL[sp]||''); };
     if($("#in-space")) $("#in-space").onchange=fillCats;
     $("#in-cat").onchange=()=>{ const c=$("#in-cat").value, sp=$("#in-space")?$("#in-space").value:'all'; const items=itemsFor(c,sp); $("#in-item").innerHTML='<option value="">— select item —</option>'+items.map(r=>`<option>${esc(r.item)}</option>`).join(""); $("#in-unit").value=''; };
     $("#in-item").onchange=()=>{ const f=G.rates.find(r=>r.item===$("#in-item").value&&r.cat===$("#in-cat").value); $("#in-unit").value=f?f.unit:''; };
@@ -6985,10 +6980,10 @@ async function kgSuggest(rowId,item,cat,room){
 }
 
 function gAddLib(){
-  const stream=normStream($("#in-stream")?$("#in-stream").value:'modular');
   const room=$("#in-room").value.trim(),cat=$("#in-cat").value,item=$("#in-item").value,qty=parseFloat($("#in-qty").value)||0,w=parseFloat($("#in-w").value)||0,h=parseFloat($("#in-h").value)||0;
   if(!room||!cat||!item||!qty) return toast("Fill Room, Category, Item and Qty");
   const f=G.rates.find(r=>r.item===item&&r.cat===cat); const rate=f?f.rate:0,unit=f?f.unit:'';
+  const stream=normStream((f&&f.stream)||classifyStream(cat));   // section auto-derived from the item
   G.rows.push({id:G.uid++,room,cat,item,unit,rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:false,cost:f?f.cost:0,stream,lineDisc:0});
   G.dirty=true; $("#in-qty").value='';$("#in-w").value='';$("#in-h").value='';
   if(G.section!=='all') G.section=stream;   // keep the added line in view
@@ -6996,9 +6991,9 @@ function gAddLib(){
   kgSuggest(G.rows[G.rows.length-1].id,item,cat,room);
 }
 function gAddCustom(){
-  const stream=normStream($("#ci-stream")?$("#ci-stream").value:'modular');
   const space=($("#ci-space")&&$("#ci-space").value&&$("#ci-space").value!=='all')?$("#ci-space").value:null;
   const room=$("#ci-room").value.trim(),cat=$("#ci-cat").value.trim()||'Custom',item=$("#ci-item").value.trim(),rate=parseFloat($("#ci-rate").value)||0,qty=parseFloat($("#ci-qty").value)||0,w=parseFloat($("#ci-w").value)||0,h=parseFloat($("#ci-h").value)||0;
+  const stream=normStream(classifyStream(cat));   // section auto-derived from the category (fixable per-line)
   if(!room||!item||!qty) return toast("Fill Room, Item and Qty");
   G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true,cost:0,stream,lineDisc:0});
   G.dirty=true; ["ci-room","ci-cat","ci-item","ci-rate","ci-w","ci-h","ci-qty"].forEach(i=>$("#"+i).value='');
