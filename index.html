@@ -6548,6 +6548,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b24",date:"30 Jul 2026",title:"Spec intelligence in the BOQ estimator",points:[
+    "Add a <b>drawer</b> item (or any shutter/cabinet/wardrobe item) in the estimator — a gold <b>✦ Spec intelligence</b> card appears with the exact Hettich hardware spec: model, load rating, EN standard and article numbers, pulled from the new Lintel knowledge graph.",
+    "Press <b>+ Add spec to item remarks</b> to stamp the spec on the line — it prints on the client quotation like any other note.",
+    "Type <b>Kitchen</b> as the room and the card also shows the key NKBA design checks (counter height, aisle width, chimney clearance) so the quote matches what site can actually build. Press <b>×</b> to dismiss — it stays quiet for the rest of the session."]},
   {build:"b23",date:"30 Jul 2026",title:"Vastu consultant — score any floor plan",points:[
     "Open a lead or project and go to the new <b>Vastu</b> tab. Upload the floor plan as a JPG/PNG (screenshot a PDF page if needed) and press <b>Upload plan &amp; start</b>.",
     "Set the <b>North direction</b> with the slider (or the N ↑ → ↓ ← quick buttons), tap <b>🎯 Move centre</b> to place the Brahmasthan, then <b>Place</b> each room by tapping where it sits on the plan — drag a marker to adjust.",
@@ -6701,6 +6705,8 @@ function gEstimator(p){
       <button class="ghost" id="importFull">⬇ Import entire BOQ from another project</button>
     </div>
   </div>`}
+
+  <div id="kgHint"></div>
 
   <div class="gsecbar" style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px">
     <button data-sec="all" class="ghost" style="${G.section==='all'?'border-color:var(--brass);color:var(--brass-deep);font-weight:600':''}">All sections</button>
@@ -6877,6 +6883,79 @@ function gBindTable(ro){
   });
 }
 function gReRenderEst(){ if(G.ctx){ gEstimator(G.ctx); } else { gDrawTable(false); gTotals(); refreshRoomDL(); } }
+/* ---- Spec intelligence: LDOS knowledge-graph suggestions in the estimator.
+   Reads the kg_entities / kg_attributes / kg_rules tables (read-only for all
+   signed-in staff via RLS). Fails silent — the estimator never depends on it. ---- */
+const KG={loaded:false,loading:null,rules:[],ents:[],attrs:[],dismissed:{},kitchenShown:false};
+function kgLoad(){
+  if(KG.loaded) return Promise.resolve();
+  if(KG.loading) return KG.loading;
+  KG.loading=Promise.all([
+    sb.from("kg_rules").select("id,category,severity,explanation").eq("status","active"),
+    sb.from("kg_entities").select("id,name,entity_type,domain").eq("status","active"),
+    sb.from("kg_attributes").select("entity_id,name,value_text,value_numeric,unit")
+  ]).then(rs=>{ KG.rules=rs[0].data||[]; KG.ents=rs[1].data||[]; KG.attrs=rs[2].data||[]; KG.loaded=true; })
+    .catch(()=>{ KG.loaded=true; });
+  return KG.loading;
+}
+function kgEnt(id){ return KG.ents.find(e=>e.id===id); }
+function kgRule(id){ return KG.rules.find(r=>r.id===id); }
+function kgAttr(id,name){
+  const a=KG.attrs.find(x=>x.entity_id===id&&x.name===name); if(!a) return '';
+  return a.value_text!=null?String(a.value_text):String(a.value_numeric)+(a.unit?' '+a.unit:'');
+}
+function kgSuggestions(item,cat,room){
+  const t=((item||'')+' '+(cat||'')).toLowerCase(), rm=(room||'').toLowerCase(), out=[];
+  const sld=kgEnt('HRD-HET-SLD-0001'), hng=kgEnt('HRD-HET-HNG-0001');
+  if(/drawer|tandem|trolley/.test(t)&&sld){
+    const rule=kgRule('RUL-KIT-012');
+    out.push({key:'sld',title:'Drawer runner spec',lines:[
+      sld.name+' — '+(kgAttr(sld.id,'load_capacity')||'30 kg')+' · '+kgAttr(sld.id,'quality_standard'),
+      rule?rule.explanation:'',
+      'Articles: '+kgAttr(sld.id,'article_numbers')].filter(Boolean),
+      remark:'Spec: '+sld.name+', '+(kgAttr(sld.id,'load_capacity')||'30 kg')+' ('+(kgAttr(sld.id,'quality_standard')||'EN 15338 L3')+'), soft-close'});
+  }
+  else if(/shutter|cabinet|wardrobe|vanity|crockery|tall unit|kitchen/.test(t)&&hng){
+    const wr=kgRule('RUL-KIT-011');
+    out.push({key:'hng',title:'Hinge spec',lines:[
+      hng.name+' — '+(kgAttr(hng.id,'opening_angle')||'110 deg')+' · door '+(kgAttr(hng.id,'door_thickness_min')||'15')+'–'+(kgAttr(hng.id,'door_thickness_max')||'24')+' mm · '+kgAttr(hng.id,'quality_standard'),
+      wr?wr.explanation:''].filter(Boolean),
+      remark:'Spec: '+hng.name+' ('+(kgAttr(hng.id,'quality_standard')||'EN 15570 L3')+'), soft-close'});
+  }
+  if(/kitchen/.test(rm)&&!KG.kitchenShown){
+    const picks=['RUL-KIT-001','RUL-KIT-006','RUL-KIT-007'].map(kgRule).filter(Boolean);
+    if(picks.length) out.push({key:'kit',title:'Kitchen design checks',
+      lines:picks.map(r=>(r.severity==='mandatory'?'⚠ ':'')+r.explanation)});
+  }
+  return out.filter(s=>!KG.dismissed[s.key]);
+}
+async function kgSuggest(rowId,item,cat,room){
+  try{
+    await kgLoad();
+    const host=$("#kgHint"); if(!host) return;
+    const sugg=kgSuggestions(item,cat,room);
+    if(!sugg.length){ host.innerHTML=''; return; }
+    if(sugg.some(s=>s.key==='kit')) KG.kitchenShown=true;
+    host.innerHTML='<div class="pw-card" style="border-color:#B9A05C;background:#FCFAF3">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<div class="sec-label" style="border:none;padding:0;color:var(--brass-deep)">✦ Spec intelligence <span style="font-weight:400;font-size:11px;color:var(--ink-soft)">from the Lintel knowledge graph</span></div>'
+      +'<button class="ghost" id="kg-x" style="padding:2px 8px">×</button></div>'
+      +sugg.map(s=>'<div style="margin-top:8px"><b style="font-size:12.5px">'+esc(s.title)+'</b>'
+        +s.lines.map(l=>'<div style="font-size:12px;color:var(--ink-soft);margin-top:2px">'+esc(l)+'</div>').join("")
+        +(s.remark&&rowId!=null?'<button class="ghost kg-rm" data-row="'+rowId+'" data-rm="'+esc(s.remark)+'" style="margin-top:5px;font-size:12px">+ Add spec to item remarks</button>':'')
+        +'</div>').join("")
+      +'</div>';
+    const x=$("#kg-x"); if(x) x.onclick=()=>{ sugg.forEach(s=>KG.dismissed[s.key]=1); host.innerHTML=''; };
+    host.querySelectorAll(".kg-rm").forEach(b=>b.onclick=()=>{
+      const r=G.rows.find(x2=>String(x2.id)===String(b.dataset.row));
+      if(!r) return toast("Item row not found");
+      if((r.remarks||'').indexOf(b.dataset.rm)>=0) return toast("Spec already in remarks");
+      r.remarks=(r.remarks?r.remarks+' · ':'')+b.dataset.rm; G.dirty=true;
+      gReRenderEst(); toast("Spec added to item remarks");
+    });
+  }catch(e){ console.error("kgSuggest:",e); }
+}
+
 function gAddLib(){
   const stream=normStream($("#in-stream")?$("#in-stream").value:'modular');
   const room=$("#in-room").value.trim(),cat=$("#in-cat").value,item=$("#in-item").value,qty=parseFloat($("#in-qty").value)||0,w=parseFloat($("#in-w").value)||0,h=parseFloat($("#in-h").value)||0;
@@ -6886,6 +6965,7 @@ function gAddLib(){
   G.dirty=true; $("#in-qty").value='';$("#in-w").value='';$("#in-h").value='';
   if(G.section!=='all') G.section=stream;   // keep the added line in view
   gReRenderEst();
+  kgSuggest(G.rows[G.rows.length-1].id,item,cat,room);
 }
 function gAddCustom(){
   const stream=normStream($("#ci-stream")?$("#ci-stream").value:'modular');
@@ -6895,6 +6975,7 @@ function gAddCustom(){
   G.dirty=true; ["ci-room","ci-cat","ci-item","ci-rate","ci-w","ci-h","ci-qty"].forEach(i=>$("#"+i).value='');
   if(G.section!=='all') G.section=stream;
   gReRenderEst();
+  kgSuggest(G.rows[G.rows.length-1].id,item,cat,room);
   // Feature 4: auto-save to rate library if not already there (tagged to the chosen section)
   if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
     sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream}).select().single().then(({data,error})=>{
@@ -7568,7 +7649,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b23 · 30 Jul 2026";
+const APP_BUILD = "b24 · 30 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
