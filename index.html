@@ -2466,7 +2466,7 @@ async function leadBoqGenerator(l, host){
   G.projectId=null; G.leadId=l.id;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
   }
   const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
@@ -6043,7 +6043,7 @@ async function pwBoq(p, body){
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
   }
   // find or offer to create a BOQ version for this project
   const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
@@ -6080,12 +6080,16 @@ async function pwBoq(p, body){
   gRender(p, body);
 }
 
-/* ---- BOQ sections (streams) + per-section financials ---- */
-const STREAMS=[['modular','Modular / KWS'],['carpentry','Lintel — On-site Carpentry'],['services','Lintel — Services'],['furnishing','Loose Furniture, Decor & Appliances']];
+/* ---- BOQ sections (streams) + spaces + per-section financials ---- */
+const STREAMS=[['modular','Modular / KWS'],['accessories','Hettich Accessories'],['carpentry','Lintel — On-site Carpentry'],['services','Lintel — Services'],['furnishing','Loose Furniture, Decor & Appliances']];
 const STREAM_KEYS=STREAMS.map(s=>s[0]);
 const STREAM_LABEL=Object.fromEntries(STREAMS);
 const STREAM_DEFAULTS={fee:9,gst:18,disc:0,boost:0}; // owner default: 9% fee / 18% GST on every section
 const FURNISHING='furnishing'; // the only section with per-line discount
+// Spaces scope the item pickers. 'all' = no filter; 'general' items surface under every space.
+const SPACES=[['all','All spaces'],['kitchen','Kitchen'],['wardrobe','Wardrobe'],['general','General (all spaces)']];
+const SPACE_KEYS=SPACES.map(s=>s[0]);
+const SPACE_LABEL=Object.fromEntries(SPACES);
 function normStream(s){ return STREAM_KEYS.indexOf(s)>=0?s:'modular'; }
 // Classify a category into a section: rate-library tag first, then keyword fallback (mirrors boq_category_trade_map).
 function classifyStream(cat){
@@ -6093,10 +6097,29 @@ function classifyStream(cat){
   const c=String(cat).trim().toLowerCase();
   const hit=(G.rates||[]).find(r=>r.cat&&r.cat.trim().toLowerCase()===c&&r.stream);
   if(hit) return normStream(hit.stream);
+  if(/hettich|accessor|tandem|arcitech|architech|carousel|cutlery|pull.?out|magic corner|larder|aventos|\bbasket\b|soft.?close hinge|drawer channel/.test(c)) return 'accessories';
   if(/wallpaper|mural|mirror|glass|curtain|sofa|console|dining|appliance|chimney|hob|decor|furnish|furniture/.test(c)) return 'furnishing';
-  if(/civil|demolition|demolish|plumb|electric|false ?ceiling|ceiling|paint|texture|tile|tiling|stone|granite|quartz|marble|water ?proof|plaster|masonry|brick|\bpop\b|pelmet|window|partition|dado|counter|flooring/.test(c)) return 'services';
+  if(/civil|demolition|demolish|plumb|electric|false ?ceiling|ceiling|paint|texture|tile|tiling|stone|granite|quartz|marble|water ?proof|plaster|masonry|brick|\bpop\b|pelmet|window|partition|dado|counter|flooring|core cut|gas pipe/.test(c)) return 'services';
   if(/panel|panelling|paneling|trim|carpentry|\bdoor/.test(c)) return 'carpentry';
   return 'modular';
+}
+// Categories available for a section + space. space 'all' -> no filter; else space-matched or 'general'.
+function catsFor(stream, space){
+  return [...new Set(G.rates.filter(r=>{
+    if(normStream(r.stream||classifyStream(r.cat))!==stream) return false;
+    if(!space||space==='all') return true;
+    const sp=r.space||null;
+    return sp===space || sp==='general';
+  }).map(r=>r.cat))];
+}
+// Items available for a category + space (used by the item dropdown).
+function itemsFor(cat, space){
+  return G.rates.filter(r=>{
+    if(r.cat!==cat) return false;
+    if(!space||space==='all') return true;
+    const sp=r.space||null;
+    return sp===space || sp==='general';
+  });
 }
 // Resolved section for a row: persisted stream wins; else classify from its category.
 function rowStream(r){ return normStream(r&&r.stream?r.stream:classifyStream(r&&r.cat)); }
@@ -6631,14 +6654,16 @@ function gBody(p){
 }
 
 /* ================= ESTIMATOR ================= */
-function catsForStream(stream){ return [...new Set(G.rates.filter(r=>normStream(r.stream||classifyStream(r.cat))===stream).map(r=>r.cat))]; }
 function gEstimator(p){
   const v=G.ver||{}, ro=!gCanEdit();   // locked BOQs render read-only for everyone but Amit
   G.ctx=p;                                   // remember context so add/import can fully re-render
   if(!G.section) G.section='all';
+  if(!G.space) G.space='all';
   const addSec=(G.section!=='all')?G.section:'modular';   // section the add forms target
-  const addCats=catsForStream(addSec);
+  const addSpace=G.space||'all';                          // space filter for the add pickers
+  const addCats=catsFor(addSec, addSpace);
   const secOpts=STREAMS.map(s=>`<option value="${s[0]}"${s[0]===addSec?' selected':''}>${esc(s[1])}</option>`).join("");
+  const spaceOpts=SPACES.map(s=>`<option value="${s[0]}"${s[0]===addSpace?' selected':''}>${esc(s[1])}</option>`).join("");
   const b=$("#gBody");
   const createdBy=v.created_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.created_by):""):"";
   const editedBy=v.last_edited_by?(typeof staffNameByProfile==="function"?staffNameByProfile(v.last_edited_by):""):"";
@@ -6669,6 +6694,7 @@ function gEstimator(p){
   ${ro?'':`<div class="pw-card">
     <div class="sec-label" style="border:none;padding-top:0">Add from rate library</div>
     <div class="addgrid">
+      <div class="field"><label>Space</label><select id="in-space">${spaceOpts}</select></div>
       <div class="field"><label>Section</label><select id="in-stream">${secOpts}</select></div>
       <div class="field"><label>Room</label><input id="in-room" list="roomdl" placeholder="Living Room"><datalist id="roomdl">${gRooms().map(r=>`<option value="${esc(r)}">`).join("")}</datalist></div>
       <div class="field"><label>Category</label><select id="in-cat"><option value="">— select —</option>${addCats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
@@ -6679,12 +6705,13 @@ function gEstimator(p){
       <div class="field"><label>Unit</label><input id="in-unit" readonly></div>
       <button class="primary" id="addLib">+ Add</button>
     </div>
-    <div class="hint">Category list follows the chosen section · Rate auto-fills · Qty = W × H if both given · rate editable inline after adding</div>
+    <div class="hint">Pick a <b>Space</b> (e.g. Kitchen) to see only that space's items · category &amp; item lists follow Space + Section · rate auto-fills</div>
   </div>
 
   <div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add custom item (not in library)</div>
     <div class="addgrid">
+      <div class="field"><label>Space</label><select id="ci-space">${spaceOpts}</select></div>
       <div class="field"><label>Section</label><select id="ci-stream">${secOpts}</select></div>
       <div class="field"><label>Room</label><input id="ci-room" list="roomdl" placeholder="Terrace"></div>
       <div class="field"><label>Category</label><input id="ci-cat" placeholder="Special Work"></div>
@@ -6731,9 +6758,10 @@ function gEstimator(p){
   $$(".gsecbar button").forEach(bt=>bt.onclick=()=>{ G.section=bt.dataset.sec; gEstimator(p); });
 
   if(!ro){
-    const fillCats=()=>{ const st=$("#in-stream").value; const cs=catsForStream(st); $("#in-cat").innerHTML='<option value="">— select —</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join(""); $("#in-item").innerHTML='<option value="">— select category —</option>'; $("#in-unit").value=''; };
+    const fillCats=()=>{ const st=$("#in-stream").value, sp=$("#in-space")?$("#in-space").value:'all'; if($("#in-space"))G.space=sp; const cs=catsFor(st,sp); $("#in-cat").innerHTML='<option value="">— select —</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join(""); $("#in-item").innerHTML='<option value="">— select category —</option>'; $("#in-unit").value=''; };
     if($("#in-stream")) $("#in-stream").onchange=fillCats;
-    $("#in-cat").onchange=()=>{ const c=$("#in-cat").value; const items=G.rates.filter(r=>r.cat===c); $("#in-item").innerHTML='<option value="">— select item —</option>'+items.map(r=>`<option>${esc(r.item)}</option>`).join(""); $("#in-unit").value=''; };
+    if($("#in-space")) $("#in-space").onchange=fillCats;
+    $("#in-cat").onchange=()=>{ const c=$("#in-cat").value, sp=$("#in-space")?$("#in-space").value:'all'; const items=itemsFor(c,sp); $("#in-item").innerHTML='<option value="">— select item —</option>'+items.map(r=>`<option>${esc(r.item)}</option>`).join(""); $("#in-unit").value=''; };
     $("#in-item").onchange=()=>{ const f=G.rates.find(r=>r.item===$("#in-item").value&&r.cat===$("#in-cat").value); $("#in-unit").value=f?f.unit:''; };
     const aq=(w,h,q)=>{ const W=parseFloat($(w).value)||0,H=parseFloat($(h).value)||0; if(W&&H)$(q).value=Math.round(W*H*10)/10; };
     $("#in-w").oninput=()=>aq("#in-w","#in-h","#in-qty"); $("#in-h").oninput=()=>aq("#in-w","#in-h","#in-qty");
@@ -6969,6 +6997,7 @@ function gAddLib(){
 }
 function gAddCustom(){
   const stream=normStream($("#ci-stream")?$("#ci-stream").value:'modular');
+  const space=($("#ci-space")&&$("#ci-space").value&&$("#ci-space").value!=='all')?$("#ci-space").value:null;
   const room=$("#ci-room").value.trim(),cat=$("#ci-cat").value.trim()||'Custom',item=$("#ci-item").value.trim(),rate=parseFloat($("#ci-rate").value)||0,qty=parseFloat($("#ci-qty").value)||0,w=parseFloat($("#ci-w").value)||0,h=parseFloat($("#ci-h").value)||0;
   if(!room||!item||!qty) return toast("Fill Room, Item and Qty");
   G.rows.push({id:G.uid++,room,cat,item,unit:'LS',rate,originalRate:rate,w,h,qty,amount:rate*qty,remarks:'',custom:true,cost:0,stream,lineDisc:0});
@@ -6978,8 +7007,8 @@ function gAddCustom(){
   kgSuggest(G.rows[G.rows.length-1].id,item,cat,room);
   // Feature 4: auto-save to rate library if not already there (tagged to the chosen section)
   if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
-    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream}).select().single().then(({data,error})=>{
-      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id,stream:stream}); toast("Added to rate library: "+item); }
+    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream,space:space}).select().single().then(({data,error})=>{
+      if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id,stream:stream,space:space}); toast("Added to rate library: "+item); }
       else if(error) console.error("Library add error:",error.message);
     });
   }
@@ -7214,40 +7243,49 @@ function gClient(p){
 /* ================= RATES (library editor) ================= */
 function gRates(p){
   const b=$("#gBody"); const cats=[...new Set(G.rates.map(r=>r.cat))];
+  const otherSpaces=SPACES.filter(s=>s[0]!=='all');           // Kitchen, General (+ future)
+  const rowSpaceOpts=(cur)=>`<option value=""${!cur?' selected':''}>— untagged —</option>`+otherSpaces.map(s=>`<option value="${s[0]}"${cur===s[0]?' selected':''}>${esc(s[1])}</option>`).join("");
   b.innerHTML=`<div class="pw-card">
     <div class="mrcbar"><input id="rsearch" placeholder="Search items…" class="lf-in" style="max-width:240px">
-      <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div>
-    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
-    <div class="hint">Editing a rate updates the shared library for future items. Existing line items keep their rate.</div>
+      <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select>
+      <select id="rspace" class="lf-sel"><option value="">All spaces</option>${otherSpaces.map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}<option value="__none">Untagged</option></select></div>
+    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Space</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
+    <div class="hint">Editing a rate updates the shared library. Set <b>Space</b> to scope an item to a room type (e.g. Kitchen) in the estimator's space filter.</div>
   </div>
   ${canWrite()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add new item to library</div>
     <div class="addgrid">
       <div class="field"><label>Category</label><input id="rl-cat" list="rlcatdl" placeholder="Carpentry"><datalist id="rlcatdl">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></div>
       <div class="field" style="flex:2"><label>Item name</label><input id="rl-item" placeholder="Wardrobe with laminate finish"></div>
+      <div class="field"><label>Space</label><select id="rl-space"><option value="general" selected>General (all spaces)</option>${otherSpaces.filter(s=>s[0]!=='general').map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}</select></div>
       <div class="field"><label>Unit</label><input id="rl-unit" placeholder="sqft" value="sqft"></div>
       <div class="field"><label>Rate ₹</label><input id="rl-rate" type="number" placeholder="850"></div>
       <button class="primary" id="rl-add">+ Add to library</button>
     </div>
-  </div>`:''}`; 
+  </div>`:''}`;
   const draw=()=>{
-    const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value;
-    const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q)));
-    $("#rbody").innerHTML=rows.map(r=>`<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`).join("")||'<tr><td colspan="6" class="empty">No items match</td></tr>';
+    const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value, fs=$("#rspace").value;
+    const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q))&&(!fs||(fs==='__none'?!r.space:r.space===fs)));
+    $("#rbody").innerHTML=rows.map(r=>{
+      const spCell=canWrite()?`<select class="ii" style="width:120px" data-rspace="${r.id}">${rowSpaceOpts(r.space)}</select>`:(r.space?esc(SPACE_LABEL[r.space]||r.space):'—');
+      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
+    }).join("")||'<tr><td colspan="7" class="empty">No items match</td></tr>';
     if(canWrite()){
       $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.rate=nr; toast("Rate updated"); });
+      $$("#rbody [data-rspace]").forEach(sel=>sel.onchange=async()=>{ const sp=sel.value||null; const rid=sel.dataset.rspace; const {error}=await sb.from("rate_library").update({space:sp}).eq("id",rid); if(error) return toast(error.message); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.space=sp; toast("Space updated"); });
       $$("#rbody [data-rldel]").forEach(btn=>btn.onclick=async()=>{ if(!confirm("Remove this item from the library?")) return; await sb.from("rate_library").update({is_active:false}).eq("id",btn.dataset.rldel); G.rates=G.rates.filter(x=>x.id!=btn.dataset.rldel); draw(); toast("Removed from library"); });
     }
   };
-  $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; draw();
+  $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; $("#rspace").onchange=draw; draw();
   if(canWrite()&&$("#rl-add")) $("#rl-add").onclick=async()=>{
     const cat=$("#rl-cat").value.trim(), item=$("#rl-item").value.trim(), unit=$("#rl-unit").value.trim()||'nos', rate=parseFloat($("#rl-rate").value)||0;
+    const space=($("#rl-space")&&$("#rl-space").value)?$("#rl-space").value:null;
     if(!cat||!item) return toast("Category and Item name needed");
     if(G.rates.find(r=>r.item===item&&r.cat===cat)) return toast("This item already exists in the library");
     const stream=classifyStream(cat);
-    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true,stream:stream}).select().single();
+    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true,stream:stream,space:space}).select().single();
     if(error) return toast(error.message);
-    G.rates.push({cat,item,unit,rate,cost:0,id:data.id,stream:stream});
+    G.rates.push({cat,item,unit,rate,cost:0,id:data.id,stream:stream,space:space});
     ["rl-cat","rl-item","rl-unit","rl-rate"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
     draw(); toast("Added to library: "+item);
   };
