@@ -6722,6 +6722,14 @@ function gEstimator(p){
   </div>
 
   <div class="pw-card">
+    <div class="sec-label" style="border:none;padding-top:0">Kitchen package</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="primary" id="kpkgOpen">+ Add Kitchen Package</button>
+      <span class="hint" style="margin:0">Enter base &amp; top run lengths and shutter finishes — carcass (BWP base · BWR top), shutters, accessories &amp; services fill in automatically.</span>
+    </div>
+  </div>
+
+  <div class="pw-card">
     <div class="sec-label" style="border:none;padding-top:0">Import from another project</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="ghost" id="importRoom">⬇ Import a room from another BOQ</button>
@@ -6762,6 +6770,7 @@ function gEstimator(p){
     $("#in-w").oninput=()=>aq("#in-w","#in-h","#in-qty"); $("#in-h").oninput=()=>aq("#in-w","#in-h","#in-qty");
     $("#ci-w").oninput=()=>aq("#ci-w","#ci-h","#ci-qty"); $("#ci-h").oninput=()=>aq("#ci-w","#ci-h","#ci-qty");
     $("#addLib").onclick=gAddLib; $("#addCustom").onclick=gAddCustom;
+    if($("#kpkgOpen")) $("#kpkgOpen").onclick=kpkgOpen;
     if($("#importRoom")) $("#importRoom").onclick=()=>gImportFrom(p,false);
     if($("#importFull")) $("#importFull").onclick=()=>gImportFrom(p,true);
     gBindTable(ro);   // bind section tables + per-section setting inputs on first render
@@ -7007,6 +7016,85 @@ function gAddCustom(){
       else if(error) console.error("Library add error:",error.message);
     });
   }
+}
+
+/* ---- Kitchen Package wizard: one-shot kitchen BOQ from run lengths + finishes ----
+   Standard modules: base 720mm high x 540mm deep (2.36 ft), top 600mm high x 320mm deep (1.97 ft).
+   Carcass defaults: BWP for base cabinets, BWR for top cabinets. Quantities are front-face
+   Sft = run length x module height; the consultant only enters the two run lengths. */
+const KPKG_BASE_H=2.36, KPKG_TOP_H=1.97;
+const KPKG_SERVICES=[
+  {cat:'Kitchen Electrical',item:'Kitchen Electrical Points (package)',q:(b,t)=>1,on:true,note:'1 LS'},
+  {cat:'Kitchen Plumbing',item:'Kitchen Plumbing Points (package)',q:(b,t)=>1,on:true,note:'1 LS'},
+  {cat:'Copper Gas Pipe',item:'Copper Gas Pipe with fittings',q:(b,t)=>10,on:true,note:'10 Rft default'},
+  {cat:'Core Cutting',item:'Core Cutting (chimney / exhaust / pipe)',q:(b,t)=>2,on:true,note:'2 Nos default'},
+  {cat:'Dado tiles',item:'Dado',q:(b,t)=>1,on:true,note:'1 LS'},
+  {cat:'Kitchen counter top',item:'quartz stone with installation',q:(b,t)=>1,on:true,note:'1 LS'},
+  {cat:'Lighting for kitchen and crockery unit - Profile lights',item:'Havells brand',q:(b,t)=>t||b||1,on:false,note:'qty = top run'},
+  {cat:'Demolition',item:'Kitchen Package',q:(b,t)=>1,on:false,note:'renovations only'}
+];
+function kpkgRate(cat,item){ return G.rates.find(r=>r.cat===cat&&r.item===item)||null; }
+function kpkgOpen(){
+  if(!gCanEdit()) return;
+  const fins=G.rates.filter(r=>r.cat==='Kitchen Shutter').map(r=>r.item);
+  if(!fins.length) return toast("No 'Kitchen Shutter' finishes in the rate library");
+  const finOpts=sel=>fins.map(f=>`<option${f===sel?' selected':''}>${esc(f)}</option>`).join("");
+  const pkgs=G.rates.filter(r=>r.cat==='Kitchen Accessories'&&/Accessories$/.test(r.item)).map(r=>r.item);
+  const pkgOpts='<option value="">— none —</option>'+pkgs.map(f=>`<option>${esc(f)}</option>`).join("");
+  const hdls=G.rates.filter(r=>r.cat==='Kitchen Handles').map(r=>r.item);
+  const hdlOpts='<option value="">— none —</option>'+hdls.map(f=>`<option>${esc(f)}</option>`).join("");
+  const svcHtml=KPKG_SERVICES.map((s,i)=>{ const f=kpkgRate(s.cat,s.item); if(!f) return '';
+    return `<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0">
+      <input type="checkbox" id="kp-svc-${i}"${s.on?' checked':''} style="width:auto">
+      <span>${esc(s.item)} <span style="color:var(--ink-soft)">· ${gFmt(f.rate)}/${esc(f.unit)} · ${esc(s.note)}</span></span></label>`; }).join("");
+  openModal(`
+    <div class="modal-h">Add Kitchen Package</div>
+    <div class="modal-b">
+      <div class="hint" style="margin-top:0">Base: BWP carcass, 720 × 540 mm modules · Top: BWR carcass, 600 × 320 mm modules. Shutter Sft is computed from run length — every line stays editable after adding.</div>
+      <div class="grid4" style="grid-template-columns:1fr 1fr">
+        <div class="field"><label>Base run length (ft)</label><input id="kp-base" type="number" step="0.5" placeholder="e.g. 10"></div>
+        <div class="field"><label>Top run length (ft)</label><input id="kp-top" type="number" step="0.5" placeholder="e.g. 8"></div>
+        <div class="field"><label>Base shutter finish</label><select id="kp-fin-base">${finOpts()}</select></div>
+        <div class="field"><label>Top shutter finish</label><select id="kp-fin-top">${finOpts()}</select></div>
+        <div class="field"><label>Accessory package</label><select id="kp-pkg">${pkgOpts}</select></div>
+        <div class="field"><label>Handle type</label><select id="kp-hdl">${hdlOpts}</select></div>
+      </div>
+      <div class="sec-label" style="margin-top:10px">Kitchen services</div>
+      ${svcHtml}
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="kp-add">Add kitchen to BOQ</button>
+    </div>`);
+  // top finish mirrors base until the consultant touches it (single-finish kitchens = one pick)
+  let topTouched=false;
+  $("#kp-fin-top").onchange=()=>{ topTouched=true; };
+  $("#kp-fin-base").onchange=()=>{ if(!topTouched) $("#kp-fin-top").value=$("#kp-fin-base").value; };
+  $("#kp-add").onclick=kpkgAdd;
+}
+function kpkgAdd(){
+  const bl=parseFloat($("#kp-base").value)||0, tl=parseFloat($("#kp-top").value)||0;
+  if(!bl&&!tl) return toast("Enter the base and/or top run length");
+  const rows=[], missing=[];
+  const push=(cat,item,qty,w,h)=>{ const f=kpkgRate(cat,item); if(!f){ missing.push(item); return; }
+    const q=Math.round(qty*10)/10;
+    rows.push({id:G.uid++,room:'Kitchen',cat,item,unit:f.unit,rate:f.rate,originalRate:f.rate,w:w||0,h:h||0,qty:q,amount:f.rate*q,remarks:'',custom:false,cost:f.cost||0,stream:normStream(f.stream||classifyStream(cat)),lineDisc:0}); };
+  if(bl){ push('Kitchen Carcass','Kitchen Base BWP',bl*KPKG_BASE_H,bl,KPKG_BASE_H);
+          push('Kitchen Shutter',$("#kp-fin-base").value,bl*KPKG_BASE_H,bl,KPKG_BASE_H); }
+  if(tl){ push('Kitchen Carcass','Kitchen Wall BWR',tl*KPKG_TOP_H,tl,KPKG_TOP_H);
+          push('Kitchen Shutter',$("#kp-fin-top").value,tl*KPKG_TOP_H,tl,KPKG_TOP_H); }
+  const pkg=$("#kp-pkg").value; if(pkg) push('Kitchen Accessories',pkg,1);
+  const hdl=$("#kp-hdl").value;
+  if(hdl){ const f=kpkgRate('Kitchen Handles',hdl);
+    // profile handles run in Rft along both runs; piece handles ~1 per 1.5 ft of shutter run
+    const q=(f&&/rft/i.test(f.unit))?(bl+tl):Math.max(1,Math.round((bl+tl)/1.5));
+    push('Kitchen Handles',hdl,q); }
+  KPKG_SERVICES.forEach((s,i)=>{ const cb=$("#kp-svc-"+i); if(cb&&cb.checked) push(s.cat,s.item,s.q(bl,tl)); });
+  if(!rows.length) return toast("Nothing to add — items missing from the rate library");
+  rows.forEach(r=>G.rows.push(r));
+  G.dirty=true; closeModal(); G.section='all';
+  gReRenderEst();
+  toast(rows.length+" kitchen lines added"+(missing.length?" · not in library: "+missing.join(", "):""));
 }
 
 /* ---- Feature 2: Import room or full BOQ from another project ---- */
@@ -7682,7 +7770,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b24 · 30 Jul 2026";
+const APP_BUILD = "b25 · 30 Jul 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
