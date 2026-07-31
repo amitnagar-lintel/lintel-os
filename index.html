@@ -745,13 +745,30 @@
   .dash-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
   @media(max-width:900px){.dash-kpis{grid-template-columns:repeat(2,1fr)}}
   .pw-sub{margin-bottom:16px;width:max-content;max-width:100%}
+  /* ===== DS-3 polish (2026-07-31): svg icons · unified tables · mobile stepper ===== */
+  .icn{vertical-align:-3px;flex:none}
+  .tl-ic{color:var(--slate)}
+  .mini-item .icn{color:var(--ink-soft)}
+  .col-empty{min-height:0;opacity:.55}
+  .col-empty .col-h{padding-bottom:4px}
+  @media(min-width:641px){
+    .dash-tbl th{padding:12px 14px;background:var(--paper-2);border-bottom:1px solid var(--line)}
+    .dash-tbl td{padding:12px 14px;border-bottom:1px solid var(--line)}
+    .lead-table thead th,.lead-table tbody td{padding:12px 14px}
+  }
+  @media(max-width:640px){
+    .wf-bar{flex-direction:column;align-items:stretch;gap:10px}
+    .wf-line{display:none}
+    .pw-title{flex-wrap:wrap}
+    .lw-pills{margin-left:0;width:100%;justify-content:flex-start}
+    .pw-val{margin-left:0}
+  }
 </style>
 </head>
 <body>
 
 <!-- ===================== LOGIN ===================== -->
 <section id="login">
-  <div class="blueprint-line" style="top:18%"></div>
   <div class="blueprint-line" style="top:82%"></div>
   <div class="login-card">
     <img class="login-logo" id="loginLogo" alt="Lintel Space Atelier">
@@ -1110,7 +1127,7 @@ function s2lRenderTodayCalls(calls){
       <span class="s2l-call-p" style="--c:${pc}">${plabel}</span>
       <div class="s2l-call-main"><div class="s2l-call-nm">${esc(c.name||"—")}</div>
         <div class="s2l-call-sub">${esc(c.locality||"")}${c.budget_band?" · "+esc(fmtBand(c.budget_band)):""}</div></div>
-      ${tel?`<a class="s2l-call-btn" href="tel:${esc(tel)}" onclick="event.stopPropagation()">☎ Call</a>`:""}
+      ${tel?`<a class="s2l-call-btn" href="tel:${esc(tel)}" onclick="event.stopPropagation()">${icn("phone")} Call</a>`:""}
       <button class="s2l-call-btn log" data-logcall="${c.id}">Log</button>
     </div>`;
   };
@@ -1614,6 +1631,20 @@ function fmtBand(b){
   const m=s.match(/^₹\s*(\d+(?:\.\d+)?)\s*to\s*₹\s*(\d+(?:\.\d+)?)\s*lakhs?$/i);
   return m?`₹${m[1]}–${m[2]} L`:s;
 }
+/* DS-3 (2026-07-31): 16px stroke icon set — replaces platform emoji in app chrome */
+const ICN={
+  note:'<path d="M11.3 2.7a1.4 1.4 0 0 1 2 2L5 13l-2.8.8L3 11z"/>',
+  phone:'<path d="M6.2 2.9l1.2 2.6-1.3 1.2a9.5 9.5 0 0 0 3.2 3.2l1.2-1.3 2.6 1.2v2.3a1.3 1.3 0 0 1-1.4 1.3A11.5 11.5 0 0 1 2.6 4.3 1.3 1.3 0 0 1 3.9 2.9z"/>',
+  chat:'<path d="M13.5 8a5.5 5.5 0 0 1-8 4.9L2.5 13.5l.6-3A5.5 5.5 0 1 1 13.5 8z"/>',
+  users:'<circle cx="5.5" cy="5.5" r="2.2"/><path d="M2 13.5a3.5 3.5 0 0 1 7 0"/><circle cx="11.2" cy="6" r="1.8"/><path d="M10.8 13.5a3.2 3.2 0 0 1 3.2-2.9"/>',
+  mail:'<rect x="2" y="3.5" width="12" height="9" rx="1.2"/><path d="M2.5 4.5L8 9l5.5-4.5"/>',
+  pin:'<path d="M8 14s4.5-4 4.5-7.5a4.5 4.5 0 1 0-9 0C3.5 10 8 14 8 14z"/><circle cx="8" cy="6.5" r="1.6"/>',
+  file:'<path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3"/><path d="M6 8.5h4M6 11h4"/>',
+  spark:'<path d="M8 2.5l1.2 3.3L12.5 7l-3.3 1.2L8 11.5 6.8 8.2 3.5 7l3.3-1.2z"/>',
+  calendar:'<rect x="2.2" y="3" width="11.6" height="10.5" rx="1.2"/><path d="M2.2 6.5h11.6M5.5 1.8v2.4M10.5 1.8v2.4"/>',
+  bell:'<path d="M8 2a4 4 0 0 1 4 4c0 3 .8 4 1.5 4.7H2.5C3.2 10 4 9 4 6a4 4 0 0 1 4-4z"/><path d="M6.7 13a1.4 1.4 0 0 0 2.6 0"/>'
+};
+function icn(n){const p=ICN[n];return p?'<svg class="icn" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>':"";}
 function dueClass(d){ if(!d) return ""; const t=todayISO(); return d<t?"overdue":d===t?"today":""; }
 
 async function renderLeads(){
@@ -1761,7 +1792,7 @@ async function drawBoard(){
   STAGES.forEach(([key,label,color])=>{
     const items=filtered.filter(l=>l.stage===key);
     const val=items.reduce((s,l)=>s+Number(l.expected_value||0),0);
-    const col=document.createElement("div");col.className="col";
+    const col=document.createElement("div");col.className="col"+(items.length?"":" col-empty");
     col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}
       <span class="col-count">${items.length}</span></div>
       ${val&&key!=="won"?`<div class="col-val mono">${fmt(val)}</div>`:""}`;
@@ -2270,12 +2301,12 @@ async function lwActivity(l,body){
   const w=canWrite();
   $("#actInner").innerHTML=`
     ${w?`<div class="actadd">
-      <select id="act_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option><option value="Quote">📄 Quote</option></select>
+      <select id="act_type"><option value="Note">Client note</option><option value="Call">Call</option><option value="WhatsApp">WhatsApp</option><option value="Meeting">Meeting</option><option value="Email">Email</option><option value="Site Visit">Site visit</option><option value="Quote">Quote</option></select>
       <input id="act_text" placeholder="What did the client say? Record the note…">
       <input id="act_followup" type="date" title="Set next follow-up (optional)" style="flex:0 0 148px;max-width:148px">
       <button class="primary" id="act_add">Log</button></div>`:""}
     <div class="timeline" id="timeline">${(acts||[]).map(a=>{
-        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",Quote:"📄",created:"✨"}[a.type]||"•";
+        const k={Note:"note",Call:"phone",WhatsApp:"chat",Meeting:"users",Email:"mail","Site Visit":"pin",Quote:"file",created:"spark"}[a.type]; const icon=k?icn(k):"•";
         const who=a.by_user?staffNameByProfile(a.by_user):"";
         const dt=new Date(a.created_at);
         const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
@@ -3029,11 +3060,11 @@ async function renderProjectActivity(p){
   const w=canWorkProject();
   box.innerHTML=`
     ${w?`<div class="actadd">
-      <select id="pact_type"><option value="Note">📝 Client note</option><option value="Call">📞 Call</option><option value="WhatsApp">💬 WhatsApp</option><option value="Meeting">🤝 Meeting</option><option value="Email">✉️ Email</option><option value="Site Visit">📍 Site visit</option><option value="Quote">📄 Quote</option></select>
+      <select id="pact_type"><option value="Note">Client note</option><option value="Call">Call</option><option value="WhatsApp">WhatsApp</option><option value="Meeting">Meeting</option><option value="Email">Email</option><option value="Site Visit">Site visit</option><option value="Quote">Quote</option></select>
       <input id="pact_text" placeholder="Log a project update, call, or client note…">
       <button class="primary" id="pact_add">Log</button></div>`:""}
     <div class="timeline">${(acts||[]).map(a=>{
-        const icon={Note:"📝",Call:"📞",WhatsApp:"💬",Meeting:"🤝",Email:"✉️","Site Visit":"📍",Quote:"📄",created:"✨"}[a.type]||"•";
+        const k={Note:"note",Call:"phone",WhatsApp:"chat",Meeting:"users",Email:"mail","Site Visit":"pin",Quote:"file",created:"spark"}[a.type]; const icon=k?icn(k):"•";
         const who=a.by_user?staffNameByProfile(a.by_user):"";
         const dt=new Date(a.created_at);
         const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
@@ -3169,7 +3200,7 @@ async function pwOverview(p,body){
         <div class="pw-card">
           <div class="sec-label" style="border:none;padding:0">Upcoming meetings</div>
           ${upMeets.length?`<div class="mini-list">${upMeets.slice(0,4).map(m=>`
-            <div class="mini-item">📅 <span>${esc(m.title)}</span>
+            <div class="mini-item">${icn("calendar")} <span>${esc(m.title)}</span>
               <span class="mi-due">${new Date(m.scheduled_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span></div>`).join("")}</div>`
           :`<div style="font-size:13px;color:var(--ink-soft)">No meetings scheduled.</div>`}
           <button class="linkbtn" data-go="design" style="margin-top:8px">Open Design → Meetings</button>
@@ -6667,7 +6698,7 @@ function wnPaintBadge(){ const d=document.getElementById("wnDot"); if(d) d.style
 function wnOpen(list,manual){
   if(!list||!list.length) return;
   openModal(`<div style="max-width:540px">
-    <h3 style="margin:0 0 4px">🔔 What's new in Lintel OS</h3>
+    <h3 style="margin:0 0 4px">What's new in Lintel OS</h3>
     <div style="font-size:11px;color:var(--ink-soft);margin-bottom:12px">${manual?"Everything that shipped recently":"Updated since you last signed in"} — and how to use it.</div>
     <div style="max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:12px;padding-right:4px">
       ${list.map(e=>`<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px">
@@ -6678,7 +6709,7 @@ function wnOpen(list,manual){
       </div>`).join("")}
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:14px">
-      <button class="primary" id="wnGotIt">Got it 👍</button>
+      <button class="primary" id="wnGotIt">Got it</button>
     </div>
   </div>`);
   const b=$("#wnGotIt");
@@ -6696,7 +6727,7 @@ function wnOpen(list,manual){
       const b=document.createElement("button");
       b.id="wnBell"; b.className="ghost"; b.title="What's new in Lintel OS";
       b.style.cssText="position:relative;padding:5px 9px;font-size:14px;line-height:1";
-      b.innerHTML=`🔔<span id="wnDot" style="display:none;position:absolute;top:2px;right:3px;width:7px;height:7px;border-radius:50%;background:#C0392B"></span>`;
+      b.innerHTML=`${icn("bell")}<span id="wnDot" style="display:none;position:absolute;top:2px;right:3px;width:7px;height:7px;border-radius:50%;background:#C0392B"></span>`;
       b.onclick=()=>wnOpen(WHATS_NEW,true);
       who.insertBefore(b,who.firstChild);
     }
@@ -7662,7 +7693,7 @@ function remFire(r){
     <div class="rem-name">${esc(r.title)}</div>
     <div class="rem-sub">${mins>0?("Call in "+mins+" min"):"It's time"}${r.phone?(" · "+esc(r.phone)):""}</div>
     <div class="rem-btns">
-      ${r.phone?`<a class="rem-call" href="tel:${esc(r.phone)}">☎ Call now</a>`:""}
+      ${r.phone?`<a class="rem-call" href="tel:${esc(r.phone)}">${icn("phone")} Call now</a>`:""}
       <button onclick="remSnooze(${r.id})">＋5 min</button>
       <button class="rem-done" onclick="remDone(${r.id})">✓ Done</button>
     </div></div>`;
