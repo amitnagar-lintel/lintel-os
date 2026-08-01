@@ -204,8 +204,9 @@ footer a{color:var(--gold-pale)}
 footer .addr{max-width:300px}
 footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08);font-size:.78rem;color:#7d7a92}
 
-/* Floating WhatsApp + mobile action bar */
-.wa-float{position:fixed;right:18px;bottom:96px;z-index:60;width:56px;height:56px;border-radius:50%;background:#25D366;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+/* Floating book button + mobile action bar */
+.book-float{position:fixed;right:18px;bottom:96px;z-index:60;display:inline-flex;align-items:center;gap:8px;padding:13px 20px;border-radius:40px;background:linear-gradient(135deg,#d9b463,var(--gold) 45%,var(--gold-deep));color:var(--navy);font-weight:600;font-size:.92rem;box-shadow:0 8px 24px rgba(201,162,75,.45)}
+.book-float:hover{transform:translateY(-2px)}
 .actionbar{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;background:rgba(13,13,39,.97);backdrop-filter:blur(8px);border-top:1px solid rgba(201,162,75,.3);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
 .actionbar .btn{flex:1;padding:13px 6px;font-size:.9rem}
 .actionbar .inner{display:flex;gap:10px;max-width:560px;margin:0 auto}
@@ -214,11 +215,11 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
 @media(max-width:860px){
   .consult .inner{grid-template-columns:1fr;gap:34px}
   .actionbar{display:block}
-  .wa-float{bottom:88px}
+  .book-float{bottom:88px}
   .section{padding:56px 0}
   .hero{min-height:78svh}
 }
-@media(min-width:861px){ .wa-float{bottom:26px} }
+@media(min-width:861px){ .book-float{bottom:26px} }
 </style>
 </head>
 <body>
@@ -251,7 +252,7 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
     <p class="qualifier" style="margin:-8px 0 26px;font-size:.85rem;letter-spacing:.02em;color:#e7dcc4;opacity:.9;max-width:46ch;text-shadow:0 1px 10px rgba(0,0,0,.45)">Full-home projects, typically ₹10L–40L · for 2–4BHK apartments &amp; villas in Bengaluru.</p>
     <div class="cta-row">
       <a class="btn btn-gold" href="#consult">Book a Free Design Consultation</a>
-      <a class="btn btn-ghost" href="https://wa.me/919916558777?text=Hi%20Lintel%20Space%20Atelier%2C%20I%27d%20like%20to%20discuss%20interiors%20for%20my%20home%20in%20Bangalore." target="_blank" rel="noopener">Chat on WhatsApp</a>
+      <a class="btn btn-ghost" href="#consult">Get a Free Quote</a>
     </div>
     <div class="trust-strip">
       <span><svg width="14" height="14" viewBox="0 0 24 24" fill="#C9A24B"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17l-6.1 3.6 1.4-6.8L2.2 9.1l6.9-.8z"/></svg> 5.0&#9733; on Google &middot; 42 reviews</span>
@@ -410,8 +411,8 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
       <div class="thanks" id="thanksBox">
         <div class="big">✦</div>
         <h3>Thank you — we've got it!</h3>
-        <p>A Lintel Space design consultant will call you shortly. Want to jump the queue?</p>
-        <a class="btn wa-green" href="https://wa.me/919916558777?text=Hi%2C%20I%20just%20booked%20a%20consultation%20on%20your%20website%20%E2%80%94%20keen%20to%20talk%20interiors!" target="_blank" rel="noopener">Chat with us on WhatsApp now</a>
+        <p>A Lintel Space design consultant will call you shortly. Prefer to reach us right away?</p>
+        <a class="btn wa-green" style="background:linear-gradient(135deg,#d9b463,#C9A24B 45%,#A87F2F);color:#0D0D27" href="tel:+919916558777">Call us now — +91 99165 58777</a>
       </div>
     </div>
   </div>
@@ -460,24 +461,24 @@ footer .legal{margin-top:34px;padding-top:18px;border-top:1px solid rgba(255,255
       </div>
       <div>
         Mon–Sat · 10:00 am – 7:00 pm<br>
-        <a href="https://wa.me/919916558777" target="_blank" rel="noopener">WhatsApp us</a>
+        <a href="#consult">Book a free consultation</a>
       </div>
     </div>
     <p class="legal">© <span id="yr"></span> Lintel Space Atelier, Bengaluru. All rights reserved.</p>
   </div>
 </footer>
 
-<!-- Floating WhatsApp -->
-<a class="wa-float" aria-label="Chat on WhatsApp" href="https://wa.me/919916558777?text=Hi%20Lintel%20Space%20Atelier%2C%20I%27d%20like%20to%20discuss%20interiors%20for%20my%20home." target="_blank" rel="noopener">
-  <svg width="30" height="30" viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.7-1.3 1.3-1.9 1.4-.5.1-1.1.1-1.8-.1-.4-.1-1-.3-1.7-.6-2.9-1.3-4.8-4.2-5-4.4-.1-.2-1.2-1.6-1.2-3s.7-2.1 1-2.4c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6-.5.5c-.2.2-.3.3-.1.6.2.3.8 1.4 1.8 2.2 1.2 1.1 2.3 1.5 2.6 1.6.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2.1 1c.3.1.5.2.5.4.1.1.1.6-.1 1.3z"/></svg>
+<!-- Floating book-consultation button -->
+<a class="book-float" aria-label="Book a free consultation" href="#consult">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+  <span>Book Free Visit</span>
 </a>
 
 <!-- Mobile action bar -->
 <div class="actionbar">
   <div class="inner">
     <a class="btn btn-line" href="tel:+919916558777">Call</a>
-    <a class="btn btn-line" href="https://wa.me/919916558777?text=Hi%20Lintel%20Space%20Atelier%2C%20I%27d%20like%20to%20discuss%20interiors." target="_blank" rel="noopener">WhatsApp</a>
-    <a class="btn btn-gold" href="#consult">Book&nbsp;Free&nbsp;Visit</a>
+    <a class="btn btn-gold" href="#consult">Book&nbsp;a&nbsp;Free&nbsp;Consultation</a>
   </div>
 </div>
 
@@ -541,7 +542,7 @@ form.addEventListener('submit', async function(e){
     if (typeof fbq === 'function')
       fbq('track','Lead');
   }catch(err){
-    showErr('Could not submit right now — please retry, or WhatsApp us at +91 99165 58777.');
+    showErr('Could not submit right now — please retry, or call us at +91 99165 58777.');
   }
   btn.disabled = false; btn.textContent = 'Request My Free Consultation';
 });
