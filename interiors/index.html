@@ -522,6 +522,9 @@ form.addEventListener('submit', async function(e){
   try{ attr = JSON.parse(sessionStorage.getItem('lsa_attr')||'{}'); }catch(e){}
 
   btn.disabled = true; btn.textContent = 'Sending…';
+  // Shared event id + Meta cookies so the browser Lead and the server (CAPI) Lead dedupe.
+  var ck = function(n){ var m = document.cookie.match('(?:^|; )'+n+'=([^;]*)'); return m ? decodeURIComponent(m[1]) : ''; };
+  var leadEventId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'lead_'+Date.now()+'_'+Math.random().toString(36).slice(2);
   try{
     var res = await fetch(FN_URL, {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -530,6 +533,7 @@ form.addEventListener('submit', async function(e){
         config: form.config.value, budget: form.budget.value,
         locality: form.locality.value.trim(),
         website: form.website.value,           // honeypot
+        event_id: leadEventId, fbp: ck('_fbp'), fbc: ck('_fbc'),
         attr: attr, page: location.href.slice(0,300)
       })
     });
@@ -540,7 +544,7 @@ form.addEventListener('submit', async function(e){
     if (typeof gtag === 'function')
       gtag('event','conversion',{send_to:'AW-17680531496/r5TiCNjvrdUcEKiA3u5B'});
     if (typeof fbq === 'function')
-      fbq('track','Lead');
+      fbq('track','Lead', {}, {eventID: leadEventId});
   }catch(err){
     showErr('Could not submit right now — please retry, or call us at +91 99165 58777.');
   }
