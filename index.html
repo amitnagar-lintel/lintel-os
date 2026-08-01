@@ -665,6 +665,21 @@
   .rem-btns button{border-radius:10px;padding:9px 16px;font-weight:600;font-size:14px;border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer}
   .rem-btns .rem-done{background:var(--navy);color:var(--brass);border:none}
 
+  /* ---- Conversion celebration (confetti) ---------------------------- */
+  #convParty{position:fixed;inset:0;z-index:950;background:rgba(13,13,39,.55);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s}
+  #convParty.show{opacity:1}
+  #convParty canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .party-card{position:relative;background:var(--paper);border:1px solid var(--brass);border-radius:18px;
+    box-shadow:0 24px 80px rgba(13,13,39,.45);padding:38px 44px;text-align:center;max-width:400px;width:calc(100vw - 40px);
+    transform:scale(.85);transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+  #convParty.show .party-card{transform:scale(1)}
+  .party-emoji{font-size:52px;display:inline-block;animation:partyPop .6s cubic-bezier(.34,1.56,.64,1)}
+  @keyframes partyPop{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}
+  .party-kicker{font-family:'IBM Plex Mono';font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--brass-deep);margin-top:10px}
+  .party-name{font-family:'Bricolage Grotesque',sans-serif;font-size:26px;font-weight:700;margin:6px 0 4px}
+  .party-sub{font-size:14px;color:var(--ink-soft);margin-bottom:20px;line-height:1.55}
+  .party-btn{background:var(--navy);color:var(--brass);border:none;border-radius:10px;padding:11px 22px;font-weight:600;font-size:14px;cursor:pointer}
+
   /* ---- Lintel Assistant (chat bot) --------------------------------- */
   #assistFab{position:fixed;right:20px;bottom:20px;z-index:600;width:52px;height:52px;border-radius:50%;
     border:none;background:var(--navy);color:var(--brass);font-size:20px;box-shadow:var(--shadow);
@@ -2570,6 +2585,46 @@ async function leadBoqGenerator(l, host){
   gRender(l, host); // generator uses l like a project; gSave guards the project-only write
 }
 
+/* ── Conversion celebration: confetti + congratulations for the converter ── */
+function celebrateConversion(code, clientName){
+  const old=document.getElementById("convParty"); if(old) old.remove();
+  const wrap=document.createElement("div"); wrap.id="convParty";
+  wrap.innerHTML=`<canvas></canvas>
+    <div class="party-card">
+      <div class="party-emoji">🎉</div>
+      <div class="party-kicker">Lead converted</div>
+      <div class="party-name">Congratulations, ${esc(myName||"champion")}!</div>
+      <div class="party-sub"><b>${esc(clientName||"")}</b> is now project <b>${esc(code)}</b>.<br>Another one for the books — keep them coming.</div>
+      <button class="party-btn">On to the project →</button>
+    </div>`;
+  document.body.appendChild(wrap);
+  void wrap.offsetWidth; wrap.classList.add("show");
+  const cv=wrap.querySelector("canvas"), cx=cv.getContext("2d");
+  cv.width=innerWidth; cv.height=innerHeight;
+  const colors=["#DFB05E","#B08433","#0D0D27","#C96F4A","#7A9E7E","#FFFFFF"];
+  const P=[]; for(let i=0;i<160;i++){P.push({
+    x:Math.random()*cv.width, y:-20-Math.random()*cv.height*0.5,
+    w:6+Math.random()*6, h:8+Math.random()*8, c:colors[i%colors.length],
+    vy:2+Math.random()*3.5, vx:-1.5+Math.random()*3,
+    rot:Math.random()*Math.PI, vr:-0.1+Math.random()*0.2});}
+  let run=true; const t0=performance.now();
+  (function tick(t){
+    if(!run) return;
+    cx.clearRect(0,0,cv.width,cv.height);
+    P.forEach(p=>{
+      p.x+=p.vx; p.y+=p.vy; p.rot+=p.vr; p.vy+=0.02;
+      if(p.y>cv.height+20 && t-t0<5200){p.y=-20; p.x=Math.random()*cv.width;}
+      cx.save(); cx.translate(p.x,p.y); cx.rotate(p.rot);
+      cx.fillStyle=p.c; cx.fillRect(-p.w/2,-p.h/2,p.w,p.h); cx.restore();
+    });
+    if(t-t0<9000) requestAnimationFrame(tick); else run=false;
+  })(t0);
+  const close=()=>{run=false; wrap.classList.remove("show"); setTimeout(()=>wrap.remove(),250);};
+  wrap.querySelector(".party-btn").onclick=close;
+  wrap.addEventListener("click",e=>{if(e.target===wrap) close();});
+  setTimeout(close,12000);
+}
+
 async function convertLead(l){
   await ensureStaff();
   const {data:bv}=await sb.from("boq_versions").select("id,total").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
@@ -2624,8 +2679,9 @@ async function convertLead(l){
     await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
     await sb.from("leads").update({stage:"won",designer_id:designer,updated_at:new Date().toISOString()}).eq("id",l.id);
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code} · advance ${fmt(adv)} received${designer?" · designer "+staffName(designer):""} · BOQ locked`,by_user:me.id});
-    closeModal(); activeLead=null; toast(`Project ${code} created`); render("projects");
+    closeModal(); activeLead=null; render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    celebrateConversion(code, l.name);
   };
 }
 
@@ -7860,7 +7916,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b25 · 30 Jul 2026";
+const APP_BUILD = "b26 · 01 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
