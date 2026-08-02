@@ -7470,6 +7470,31 @@ function gClient(p){
           <div>&#10003; GST &amp; design/handling — no hidden extras</div>
         </div>
       </div>`;
+  // ── Smart Buyer's Checklist: a fair rubric the client (and their AI) can apply to EVERY quote they receive ──
+  const CHECKLIST=[
+    ['Plywood / core grade','BWP &amp; BWR (IS-grade), branded — Century / Greenply'],
+    ['Hardware brand &amp; warranty','Authorized <b>Hettich</b> (Germany), soft-close, brand-warrantied'],
+    ['Edge &amp; finish','Machine edge-banding on imported Italian lines — seamless, chip-free'],
+    ['Accessories &amp; loft','Itemised &amp; included where listed — never a vague "extra"'],
+    ['Civil / electrical / plumbing','Quoted as a clear, separate section — nothing hidden'],
+    ['Warranty &amp; service','10 years + 1 year free service'],
+    ['Quality control','150+ checks on every unit before dispatch'],
+    ['Pricing &amp; GST','Itemised rates, GST included — no hidden extras'],
+    ['Company','GST-registered, written contract, factory-made units']
+  ];
+  const buyerChecklist=`
+      <div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Smart Buyer's Checklist — Comparing Quotations</div>
+      <div style="background:#FAFAF8;border:1px solid #E0DCD4;border-radius:10px;padding:18px 20px;margin-bottom:28px">
+        <div style="font-size:11.5px;color:#6B6560;line-height:1.7;margin-bottom:14px">A lower headline price often hides a lower board grade, missing scope, or a shorter warranty. Ask <b>every</b> quotation you receive the same questions — then compare like-for-like.</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="border-bottom:2px solid #E0DCD4">
+            <th style="text-align:left;padding:7px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">What to check</th>
+            <th style="text-align:left;padding:7px 10px;font-size:10px;color:#0D0D27;text-transform:uppercase">Lintel Space</th>
+            <th style="text-align:center;padding:7px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Any other quote?</th>
+          </tr></thead>
+          <tbody>${CHECKLIST.map(r=>`<tr style="border-bottom:1px solid #EFEBE3"><td style="padding:7px 10px;color:#6B6560;font-weight:500;vertical-align:top">${r[0]}</td><td style="padding:7px 10px;color:#0D0D27;vertical-align:top"><span style="color:#3E7D34;font-weight:700">&#10003;</span> ${r[1]}</td><td style="padding:7px 10px;text-align:center;color:#C9C3B8;vertical-align:top">&mdash;</td></tr>`).join("")}</tbody>
+        </table>
+      </div>`;
   $("#gBody").innerHTML=`
   <div class="print-hint">🖨 Use Print / PDF to save — formatted for client delivery</div>
   <div id="client-sheet">
@@ -7564,6 +7589,7 @@ function gClient(p){
         </div>
         <div style="text-align:center"><div style="font-size:11px;font-weight:600;color:#0D0D27;margin-bottom:8px">Scan to Pay</div><div id="upi-qr" style="width:140px;height:140px"></div><div style="font-size:10px;color:#A09A93;margin-top:6px">UPI / GPay / PhonePe</div></div>
       </div>
+      ${buyerChecklist}
       <div style="background:#FEFCF7;border:1px solid #D4B06A;border-radius:10px;padding:24px;text-align:center">
         <div style="font-family:'Times New Roman',serif;font-size:16px;color:#0D0D27;margin-bottom:8px">Your Dream Home Awaits</div>
         <div style="font-size:11px;color:#6B6560;line-height:1.8">We are honoured to be part of this journey. At Lintel Space Atelier, every detail is crafted with purpose.<br><strong style="color:#946F33">Contact us:</strong> +91 9916558777 • contact@lintelspace.com • www.lintelspace.com</div>
