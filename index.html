@@ -2689,8 +2689,13 @@ async function convertLead(l){
       converted_at:new Date().toISOString()
     }).select().single();
     if(error) return toast(error.message);
-    // Re-pointing the BOQ at the project is what locks it (boq_versions_lock_guard).
-    if(bv&&bv[0]) await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
+    // Re-pointing the BOQ at the project locks it (or keeps an existing finalise-lock —
+    // the guard allows this one transition for staff). NEVER swallow a failure here:
+    // a silent miss is how project 27 ended up with no BOQ on 1 Aug.
+    if(bv&&bv[0]){
+      const {error:linkErr}=await sb.from("boq_versions").update({project_id:proj.id}).eq("id",bv[0].id);
+      if(linkErr) toast("⚠ Project created, but the BOQ could not be linked: "+linkErr.message+" — tell Amit.");
+    }
     // Record the advance that permitted this conversion as the project's first payment.
     const {error:payErr}=await sb.from("project_payments").insert({
       project_id:proj.id, amount:adv, paid_on:$("#cv_adv_date").value||new Date().toISOString().slice(0,10),
