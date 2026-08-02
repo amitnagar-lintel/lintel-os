@@ -1265,7 +1265,7 @@ async function enter(session){
       b.onclick=()=>{ document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
         b.classList.add("active"); activeLead=null; activeProject=null; if(typeof gStopAutosave==="function")gStopAutosave(); render(b.dataset.view); };
     });
-    render(isDesignPartner()?"projects":"dashboard");
+    osRestoreRoute();
   } catch(e) {
     window.__entered = false;
     const el=$("#loginErr"); if(el){ el.style.display="block"; el.textContent="Could not load workspace: "+(e&&e.message?e.message:"unknown")+". Refresh and try again."; }
@@ -1355,8 +1355,27 @@ function openModal(html){$("#scrim").innerHTML=`<div class="modal">${html}</div>
   $("#scrim").onclick=e=>{if(e.target===$("#scrim"))closeModal();};}
 
 /* ===================== ROUTER ===================== */
+/* ---------- hash router: the current view lives in the URL so a refresh restores it ---------- */
+function osSetRoute(h){ try{ history.replaceState(null,"","#"+h); }catch(_){} }
+function osRestoreRoute(){
+  const def=isDesignPartner()?"projects":"dashboard";
+  const h=String(location.hash||"").replace(/^#/,"");
+  let m=h.match(/^(lead|project)\/(\d+)(?:\/([a-z0-9_-]+))?$/i);
+  if(m){
+    const kind=m[1].toLowerCase(), id=Number(m[2]), tab=(m[3]||"overview").toLowerCase();
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===(kind==="lead"?"leads":"projects")));
+    if(kind==="lead"){ activeLead=id; activeProject=null; leadTab=tab; return renderLeadWorkspace(id); }
+    activeProject=id; activeLead=null; projectTab=tab; return renderProjectWorkspace(id);
+  }
+  m=h.match(/^(dashboard|leads|boq|projects|team)$/i);
+  let v=m?m[1].toLowerCase():def;
+  if(v==="team"&&!canManageStaff()) v=def;
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
+  return render(v);
+}
 function render(view){
   if(isDesignPartner()&&view!=="projects") view="projects"; // partners see projects only
+  osSetRoute(view);
   if(view==="dashboard") return renderDashboard();
   if(view==="leads") return renderLeads();
   if(view==="boq")   return renderBOQ();
@@ -2042,6 +2061,7 @@ async function renderLeadWorkspace(id){
 }
 
 function drawLeadTab(l){
+  osSetRoute("lead/"+l.id+"/"+leadTab);
   const body=$("#lwBody"); if(!body) return;
   if(leadTab==="overview") return lwOverview(l,body);
   if(leadTab==="briefing") return lwBriefing(l,body);
@@ -3079,6 +3099,7 @@ async function renderProjectWorkspace(pid){
 }
 
 async function drawProjectTab(p){
+  osSetRoute("project/"+p.id+"/"+projectTab);
   const body=$("#pwBody"); if(!body) return;
   if(projectTab==="overview")   return pwOverview(p,body);
   if(projectTab==="client")     return pwClient(p,body);
