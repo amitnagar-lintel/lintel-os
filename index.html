@@ -7437,6 +7437,38 @@ function gClient(p){
   const discRow=f.disc>0?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4;color:#946F33"><span>Discount</span><span style="font-weight:600">−${gFmt(f.disc)}</span></div>`:'';
   const hasOpt=G.rows.some(r=>gScope(r)==='optional'), hasExc=G.rows.some(r=>gScope(r)==='excluded');
   const scopeNote=(hasOpt||hasExc)?`<div style="font-size:10px;color:#9A9490;line-height:1.7;margin:-20px 0 28px">${hasOpt?'* Items marked <b style="color:#946F33">Optional</b> are quoted for reference and are not included in the totals above; they can be added on request. ':''}${hasExc?'Items marked <b style="color:#A33C3C">Excluded</b> are outside the scope of this quotation and are not included in the totals.':''}</div>`:'';
+  // ── AI-ready scope + inclusions panels: make what's in / optional / out of the price explicit and machine-legible ──
+  const inclCount=gIncluded().length, roomsCount=gRooms().length;
+  const optNames=G.rows.filter(r=>gScope(r)==='optional').map(r=>esc(r.item));
+  const excNames=G.rows.filter(r=>gScope(r)==='excluded').map(r=>esc(r.item));
+  const STD_EXCL='Chimney, hob, sink, gas piping, granite/quartz supply, loose light fittings, geyser, bathroom CP fittings &amp; fans — unless listed as a line item above';
+  const scopePanel=`
+      <div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Scope of this Quotation</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;font-size:11px">
+        <div style="background:#F3F8F1;border:1px solid #CFE3C6;border-radius:10px;padding:14px 16px">
+          <div style="font-weight:700;color:#3E7D34;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-bottom:6px">&#10003; Included in price</div>
+          <div style="color:#4A5A45;line-height:1.7">${inclCount} item${inclCount===1?'':'s'} across ${roomsCount} area${roomsCount===1?'':'s'}, supplied &amp; installed — ${active.map(st=>esc(STREAM_LABEL[st])).join(', ')||'as listed below'}. Design &amp; handling, GST and the 10-year warranty are all included.</div>
+        </div>
+        <div style="background:#FBF7EC;border:1px solid #E3D3A6;border-radius:10px;padding:14px 16px">
+          <div style="font-weight:700;color:#946F33;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-bottom:6px">&#9671; Optional (on request)</div>
+          <div style="color:#6B6560;line-height:1.7">${optNames.length?optNames.join(', ')+' — quoted for reference, not in the total.':'None — everything quoted is part of the main scope.'}</div>
+        </div>
+        <div style="background:#FBF2F2;border:1px solid #E3C0C0;border-radius:10px;padding:14px 16px">
+          <div style="font-weight:700;color:#A33C3C;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-bottom:6px">&#10007; Not included</div>
+          <div style="color:#6B6560;line-height:1.7">${excNames.length?excNames.join(', ')+'. ':''}${STD_EXCL}.</div>
+        </div>
+      </div>
+      <div style="background:#0D0D27;border-radius:10px;padding:16px 22px;margin-bottom:28px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;color:#DFB05E;text-transform:uppercase;margin-bottom:10px">What our price includes — that many quotes leave out</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 20px;font-size:11px;color:rgba(255,255,255,0.86);line-height:1.6">
+          <div>&#10003; HETTICH soft-close hardware (not generic)</div>
+          <div>&#10003; BWP ply in all wet areas</div>
+          <div>&#10003; Edge-banding on every exposed edge</div>
+          <div>&#10003; Full back &amp; top panels — no open backs</div>
+          <div>&#10003; 10-year warranty + 1 year free service</div>
+          <div>&#10003; GST &amp; design/handling — no hidden extras</div>
+        </div>
+      </div>`;
   $("#gBody").innerHTML=`
   <div class="print-hint">🖨 Use Print / PDF to save — formatted for client delivery</div>
   <div id="client-sheet">
@@ -7464,6 +7496,7 @@ function gClient(p){
         <div><div class="cpl">Valid Till</div><div class="cpv">${vF}</div></div>
         <div><div class="cpl">Warranty</div><div class="cpv" style="color:#0D0D27">10 Years ✓</div></div>
       </div>
+      ${scopePanel}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px">
         <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Section Summary</div>
           <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:2px solid #E0DCD4"><th style="text-align:left;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Section</th><th style="text-align:right;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Total</th></tr></thead><tbody>${roomSummary}</tbody></table></div>
