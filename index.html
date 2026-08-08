@@ -1757,7 +1757,17 @@ async function dashConsultantProjects(cid, name){
 
 
 /* ===================== LEADS (full CRM) ===================== */
-let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false, closeMonth:"", createdMonth:"" };
+let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false, closeMonth:"", createdMonth:"", avail:"active" };
+/* Availability: on-hold leads flip back to active automatically once resume_at passes. */
+const leadAvail=l=>{const s=l.activity_status||"active";return (s==="on_hold"&&l.resume_at&&new Date(l.resume_at)<=new Date())?"active":s;};
+function leadAutoResume(leads){
+  if(typeof canWrite==="function"&&!canWrite()) return;
+  const ids=(leads||[]).filter(l=>l.activity_status==="on_hold"&&l.resume_at&&new Date(l.resume_at)<=new Date()).map(l=>l.id);
+  if(ids.length) sb.from("leads").update({activity_status:"active",status_reason:null,resume_at:null}).in("id",ids).then(()=>{});
+}
+const leadAvailBadge=l=>{const a=leadAvail(l);
+  return a==="on_hold"?`<span title="${esc(l.status_reason||"")}">⏸ till ${psWhen(l.resume_at)}</span>`
+       : a==="inactive"?`<span title="${esc(l.status_reason||"")}">🚫 inactive</span>`:"";};
 /* Won/Lost are month-scoped: default = current month (IST), auto-rolls; picker overrides. */
 const leadMonthNow=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7);
 const leadMonthOf=ts=>ts?new Date(ts).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7):"";
@@ -1862,6 +1872,7 @@ async function renderLeads(){
       <select id="lf_channel" class="lf-sel"><option value="">All channels</option>${CHANNELS.map(([k,lab])=>`<option value="${k}" ${leadFilters.channel===k?"selected":""}>${lab}</option>`).join("")}</select>
       <select id="lf_owner" class="lf-sel"><option value="">All owners</option><option value="__none__" ${leadFilters.owner==="__none__"?"selected":""}>— Unassigned —</option>${STAFF.map(s=>`<option value="${s.id}" ${leadFilters.owner===s.id?"selected":""}>${esc(s.full_name||s.email)}</option>`).join("")}</select>
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
+      <select id="lf_avail" class="lf-sel" title="Lead status"><option value="active" ${leadFilters.avail==="active"?"selected":""}>Active</option><option value="on_hold" ${leadFilters.avail==="on_hold"?"selected":""}>⏸ On hold</option><option value="inactive" ${leadFilters.avail==="inactive"?"selected":""}>🚫 Inactive</option><option value="all" ${leadFilters.avail==="all"?"selected":""}>All statuses</option></select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
       <label class="lf-due"><input type="checkbox" id="lf_dup" ${leadFilters.dupOnly?"checked":""}> Agency duplicates</label>
       <label class="lf-due" title="Filter every stage by the month the lead came in — blank = all months">Created in <input type="month" id="lf_cmonth" class="lf-sel" style="padding:5px 8px" value="${leadFilters.createdMonth}"></label>
@@ -1878,6 +1889,7 @@ async function renderLeads(){
   $("#lf_dup").onchange=e=>{leadFilters.dupOnly=e.target.checked;drawLeadsView();};
   $("#lf_month").onchange=e=>{leadFilters.closeMonth=e.target.value;drawLeadsView();};
   $("#lf_cmonth").onchange=e=>{leadFilters.createdMonth=e.target.value;drawLeadsView();};
+  $("#lf_avail").onchange=e=>{leadFilters.avail=e.target.value;drawLeadsView();};
   renderClientReplies("#leadsClientReplies");
   drawLeadsView();
 }
@@ -1909,6 +1921,7 @@ async function drawPresalesSheet(){
     sb.from("lead_activities").select("lead_id,type,text,created_at").gte("created_at",new Date(new Date(oldest+"T00:00:00").getTime()-6*3600000).toISOString()).order("created_at",{ascending:false})
   ]);
   if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
+  leadAutoResume(leads);
   const R={}; (rem||[]).forEach(x=>{ (R[x.lead_id]=R[x.lead_id]||{})[x.remark_date]=x; });
   const A={}; (acts||[]).forEach(a=>{ const d=psDateIST(new Date(a.created_at)); const m=(A[a.lead_id]=A[a.lead_id]||{}); (m[d]=m[d]||[]).push(a); });
   const f=leadFilters, q=f.search.toLowerCase();
@@ -1919,6 +1932,7 @@ async function drawPresalesSheet(){
     else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.createdMonth && leadMonthOf(l.created_at)!==f.createdMonth) return false;
+    const _av=f.avail||"active"; if(_av!=="all" && leadAvail(l)!==_av) return false;
     return true;
   });
   const remOf=(l,d)=>{const x=R[l.id]&&R[l.id][d];return x&&(x.remark||"").trim()?x:null;};
@@ -2121,6 +2135,7 @@ async function drawLeadsTable(){
   const host=$("#board"); if(!host) return;
   host.className="lead-table-wrap";
   const {data:leads,error}=await sb.from("leads").select("*").order("updated_at",{ascending:false});
+  leadAutoResume(leads);
   if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
   const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
   const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
@@ -2137,6 +2152,7 @@ async function drawLeadsTable(){
     if(f.dupOnly && !l.is_duplicate) return false;
     if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
     if(leadFilters.createdMonth && leadMonthOf(l.created_at)!==leadFilters.createdMonth) return false;
+    const _av=leadFilters.avail||"active"; if(_av!=="all" && leadAvail(l)!==_av) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
@@ -2172,7 +2188,7 @@ async function drawLeadsTable(){
             <td class="hide-md"><div class="ltd-ph">${esc(l.phone||"—")}</div><div class="ltd-sub">${esc(l.email||"")}</div></td>
             <td class="hide-lg">${esc(l.project_type||l.bhk||"—")}</td>
             <td class="hide-sm ltd-val">${leadPipelineValue(l)?fmt(leadPipelineValue(l)):"—"}</td>
-            <td>${pr?`<span class="stpill" style="--c:#2E7D5B">✓ ${esc(pr.code||"Won")}</span>`:`<span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>`}</td>
+            <td>${pr?`<span class="stpill" style="--c:#2E7D5B">✓ ${esc(pr.code||"Won")}</span>`:`<span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>`}${leadAvailBadge(l)?`<div class="ltd-sub">${leadAvailBadge(l)}</div>`:""}</td>
             <td class="hide-md">${channelChipHtml(l)}</td>
             <td class="hide-lg"><span class="scorepill ${sCls}">${score}</span></td>
             <td class="hide-xl ltd-sub">${esc(owner(l)||"—")}</td>
@@ -2192,6 +2208,7 @@ async function drawLeadsTable(){
 
 async function drawBoard(){
   const {data:leads,error}=await sb.from("leads").select("*").order("next_follow_up",{ascending:true,nullsFirst:false});
+  leadAutoResume(leads);
   const board=$("#board"); if(!board) return;
   if(error){board.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
   // fetch projects to link won leads to their converted project
@@ -2210,6 +2227,7 @@ async function drawBoard(){
     if(f.dupOnly && !l.is_duplicate) return false;
     if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
     if(leadFilters.createdMonth && leadMonthOf(l.created_at)!==leadFilters.createdMonth) return false;
+    const _av=leadFilters.avail||"active"; if(_av!=="all" && leadAvail(l)!==_av) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
@@ -2244,7 +2262,7 @@ async function drawBoard(){
       const dc=dueClass(l.next_follow_up);
       const c=document.createElement("div");c.className="card";
       c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
-        <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`].filter(Boolean).join(" · ")}</div>
+        <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`,leadAvailBadge(l)].filter(Boolean).join(" · ")}</div>
         <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
@@ -2695,7 +2713,17 @@ function lwOverview(l,body){
             <select id="ld_stage" class="lf-sel" style="width:100%">${STAGES.map(s=>`<option value="${s[0]}" ${l.stage===s[0]?"selected":""}>${s[1]}</option>`).join("")}</select></div>
           <div class="field"><label>Design consultant</label>
             <select id="ld_consultant" class="lf-sel" style="width:100%">${staffOpts(l.consultant_id)}</select></div>
-        </div>`:`<div class="kv"><span class="k">Stage</span><span class="v">${esc((STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1])}</span></div>`}
+        </div>
+        <div class="grid2" style="margin-top:8px">
+          <div class="field"><label>Lead status</label>
+            <select id="ld_avail" class="lf-sel" style="width:100%">
+              <option value="active" ${(l.activity_status||"active")==="active"?"selected":""}>Active</option>
+              <option value="on_hold" ${l.activity_status==="on_hold"?"selected":""}>⏸ On hold</option>
+              <option value="inactive" ${l.activity_status==="inactive"?"selected":""}>🚫 Inactive</option>
+            </select></div>
+          <div class="field"><label>&nbsp;</label><div class="hint" style="margin:0">${l.activity_status==="on_hold"?`Back on <b>${psWhen(l.resume_at)}</b> · ${esc(l.status_reason||"")}`:l.activity_status==="inactive"?esc(l.status_reason||""):"Shown on the lead board"}</div></div>
+        </div>`:`<div class="kv"><span class="k">Stage</span><span class="v">${esc((STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1])}</span></div>
+        ${(l.activity_status&&l.activity_status!=="active")?`<div class="kv"><span class="k">Status</span><span class="v">${l.activity_status==="on_hold"?"⏸ On hold till "+psWhen(l.resume_at):"🚫 Inactive"} · ${esc(l.status_reason||"")}</span></div>`:""}`}
       </div>
       <div class="panel">
         <h3>Contact</h3>
@@ -2852,11 +2880,52 @@ function lwNotes(l,body){
   };
 }
 
+/* ---- lead availability: active / on hold / inactive, reason mandatory ---- */
+async function leadAvailChange(l, sel){
+  const to=sel.value, from=l.activity_status||"active";
+  if(to===from) return;
+  const revert=()=>{ sel.value=from; };
+  if(to==="active"){
+    const {error}=await sb.from("leads").update({activity_status:"active",status_reason:null,resume_at:null,status_set_by:me.id,status_set_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",l.id);
+    if(error){ revert(); return toast(error.message); }
+    sb.from("lead_activities").insert({lead_id:l.id,type:"status",text:"Lead marked ACTIVE again",by_user:me.id});
+    Object.assign(l,{activity_status:"active",status_reason:null,resume_at:null});
+    toast("Lead is active again"); renderLeadWorkspace(l.id); return;
+  }
+  const isHold=to==="on_hold";
+  openModal(`<div class="modal-h">${isHold?"Put lead on hold":"Mark lead inactive"}</div>
+    <div class="modal-b">
+      <div class="field"><label>Reason (required)</label><textarea id="av_reason" rows="3" placeholder="${isHold?"e.g. travelling — will decide after Diwali":"e.g. bought elsewhere / not reachable"}"></textarea></div>
+      ${isHold?`<div class="field"><label>Becomes active again on (required)</label><input id="av_resume" type="datetime-local"></div>`:""}
+      <div class="hint">The lead disappears from the board — find it with the <b>${isHold?"⏸ On hold":"🚫 Inactive"}</b> filter.${isHold?" It returns to the board automatically at this date &amp; time.":""}</div>
+    </div>
+    <div class="modal-f"><button class="ghost" id="av_cancel">Cancel</button><button class="primary" id="av_go">${isHold?"Put on hold":"Mark inactive"}</button></div>`);
+  $("#av_cancel").onclick=()=>{ revert(); closeModal(); };
+  $("#av_go").onclick=async()=>{
+    const reason=$("#av_reason").value.trim();
+    if(!reason) return toast("Reason is required");
+    let resume=null;
+    if(isHold){
+      const v=$("#av_resume").value;
+      if(!v) return toast("Date & time to become active again is required");
+      if(new Date(v)<=new Date()) return toast("Pick a future date & time");
+      resume=new Date(v).toISOString();
+    }
+    const {error}=await sb.from("leads").update({activity_status:to,status_reason:reason,resume_at:resume,status_set_by:me.id,status_set_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("id",l.id);
+    if(error) return toast(error.message);
+    sb.from("lead_activities").insert({lead_id:l.id,type:"status",text:(isHold?"On HOLD till "+psWhen(resume):"Marked INACTIVE")+" — "+reason,by_user:me.id});
+    Object.assign(l,{activity_status:to,status_reason:reason,resume_at:resume});
+    closeModal(); toast(isHold?"On hold — back on "+psWhen(resume):"Marked inactive");
+    renderLeadWorkspace(l.id);
+  };
+}
+
 /* ---- shared handlers across lead tabs ---- */
 function bindLeadCommon(l){
   if(!canWrite()) return;
   const ed=$("#dEdit"); if(ed) ed.onclick=()=>leadForm(l);
   const cv=$("#dConv"); if(cv) cv.onclick=()=>convertLead(l);
+  const av=$("#ld_avail"); if(av) av.onchange=()=>leadAvailChange(l,av);
   const sd=$("#ld_stage");
   if(sd) sd.onchange=async()=>{
     const newStage=sd.value, oldLabel=(STAGES.find(s=>s[0]===l.stage)||["",l.stage])[1], newLabel=(STAGES.find(s=>s[0]===newStage)||["",newStage])[1];
