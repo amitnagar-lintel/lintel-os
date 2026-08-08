@@ -160,16 +160,25 @@
   .lead-count{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px}
   .ltbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 2px 10px -6px rgba(13,13,39,.12)}
   .lead-table{width:100%;border-collapse:collapse;font-size:14px;min-width:680px}
-  /* presales call sheet */
-  .ps-tbl{min-width:1150px}
+  /* presales call sheet — Notes-style cards + cloud editor */
+  .ps-tbl{min-width:1200px}
   .ps-tbl th.ps-lead,.ps-tbl td.ps-lead{position:sticky;left:0;background:var(--paper,#fff);z-index:2;min-width:180px;box-shadow:2px 0 0 var(--line,#E5E1D8)}
-  .ps-tbl th.ps-day,.ps-tbl td.ps-day{min-width:130px;max-width:170px}
-  .ps-tbl .ps-today{background:#FBF5E6}
+  .ps-tbl th.ps-day,.ps-tbl td.ps-day{min-width:150px;max-width:190px;vertical-align:top}
+  .ps-tbl th.ps-today{color:var(--brass-deep,#946F33)}
+  .ps-tbl td.ps-today{background:#FDFAF0}
   .ps-tbl tr.ps-pend td.ps-lead .ltd-name::after{content:" 📞";font-size:12px}
-  .ps-tbl tr.ps-pend{background:#FDF9EE}
-  .ps-in{width:100%;border:1px solid var(--line-2,#D8D3C8);border-radius:6px;padding:5px 7px;font-size:12.5px;background:#fff}
-  .ps-in:focus{outline:none;border-color:var(--brass,#C9A45C)}
-  .ps-note{font-size:12px;color:var(--ink-soft,#6B6560);line-height:1.4;white-space:normal;word-break:break-word}
+  .ps-card{background:#FFFCF2;border:1px solid #EFE6CE;border-radius:10px;padding:7px 9px;min-height:34px;box-shadow:0 1px 2px rgba(60,50,20,.05)}
+  .ps-card.ps-click{cursor:pointer}
+  .ps-card.ps-click:hover{border-color:var(--brass,#C9A45C)}
+  .ps-emptycard{background:transparent;border-style:dashed;box-shadow:none}
+  .ps-note{font-size:12.5px;color:var(--ink,#2B2620);line-height:1.45;white-space:pre-wrap;word-break:break-word}
+  .ps-add{font-size:12px;color:#B8B2AA}
+  .ps-act{margin-top:5px;padding-top:4px;border-top:1px dashed #EBE3CD;font-size:10.5px;color:#9A9490;line-height:1.35}
+  #psCloud{position:absolute;z-index:1000;width:280px;background:#fff;border:1px solid #E3DCC9;border-radius:14px;box-shadow:0 12px 32px rgba(40,32,12,.18);padding:10px}
+  #psCloud::before{content:"";position:absolute;top:-7px;left:26px;width:12px;height:12px;background:#fff;border-left:1px solid #E3DCC9;border-top:1px solid #E3DCC9;transform:rotate(45deg)}
+  .ps-cloud-h{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--brass-deep,#946F33);margin:2px 2px 6px}
+  .ps-cloud-t{width:100%;min-height:84px;border:none;resize:vertical;font:inherit;font-size:13px;line-height:1.5;outline:none;background:#FFFCF2;border-radius:8px;padding:8px}
+  .ps-cloud-f{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
   .lead-table thead th{text-align:left;padding:12px 14px;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-soft);background:var(--sand,#F6F3EA);border-bottom:1px solid var(--line);white-space:nowrap}
   .lead-table tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
   .lead-table tbody tr{cursor:pointer;transition:background .12s}
@@ -1862,14 +1871,17 @@ async function drawPresalesSheet(){
   host.className="lead-table-wrap";
   window.psWeekOff=window.psWeekOff||0;
   const end=new Date(Date.now()-window.psWeekOff*7*86400000);
-  const dates=[...Array(7)].map((_,i)=>psDateIST(new Date(end-(6-i)*86400000)));
+  const dates=[...Array(7)].map((_,i)=>psDateIST(new Date(end-i*86400000)));   // TODAY first, going back
+  const oldest=dates[6], newest=dates[0];
   const todayI=psDateIST(new Date());
-  const [{data:leads,error},{data:rem}]=await Promise.all([
+  const [{data:leads,error},{data:rem},{data:acts}]=await Promise.all([
     sb.from("leads").select("*").not("stage","in","(won,lost)").order("created_at",{ascending:false}),
-    sb.from("lead_daily_remarks").select("*").gte("remark_date",dates[0]).lte("remark_date",dates[6])
+    sb.from("lead_daily_remarks").select("*").gte("remark_date",oldest).lte("remark_date",newest),
+    sb.from("lead_activities").select("lead_id,type,text,created_at").gte("created_at",new Date(new Date(oldest+"T00:00:00").getTime()-6*3600000).toISOString()).order("created_at",{ascending:false})
   ]);
   if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
   const R={}; (rem||[]).forEach(x=>{ (R[x.lead_id]=R[x.lead_id]||{})[x.remark_date]=x; });
+  const A={}; (acts||[]).forEach(a=>{ const d=psDateIST(new Date(a.created_at)); const m=(A[a.lead_id]=A[a.lead_id]||{}); (m[d]=m[d]||[]).push(a); });
   const f=leadFilters, q=f.search.toLowerCase();
   const rows=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""}`.toLowerCase().includes(q))) return false;
@@ -1888,7 +1900,8 @@ async function drawPresalesSheet(){
   const ro=!canWrite();
   const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];   // local everywhere else too — not global
   const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
-  const dHead=d=>{const dt=new Date(d+"T00:00:00");return `<th class="ps-day${d===todayI?' ps-today':''}">${dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}${d===todayI?' · today':''}</th>`;};
+  const yestI=psDateIST(new Date(Date.now()-86400000));
+  const dHead=d=>{const dt=new Date(d+"T00:00:00");const lab=d===todayI?"Today":d===yestI?"Yesterday":dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});return `<th class="ps-day${d===todayI?' ps-today':''}">${lab}</th>`;};
   const pend=rows.filter(l=>!doneToday(l)).length;
   host.innerHTML=`
     <div class="lead-count" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
@@ -1912,9 +1925,11 @@ async function drawPresalesSheet(){
           <td>${l.next_follow_up?`<span class="fu ${dueClass(l.next_follow_up)}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
           ${dates.map(d=>{
             const x=R[l.id]&&R[l.id][d];
-            if(d===todayI&&!ro) return `<td class="ps-day ps-today"><input class="ps-in" data-lead="${l.id}" data-date="${d}" value="${esc(x?x.remark:"")}" placeholder="remark…"></td>`;
             const who=x&&x.by_user&&typeof staffNameByProfile==="function"?staffNameByProfile(x.by_user):"";
-            return `<td class="ps-day${d===todayI?' ps-today':''}"><div class="ps-note" ${who?`title="${esc(who)}"`:""}>${x?esc(x.remark):""}</div></td>`;
+            const dayActs=(A[l.id]&&A[l.id][d])||[];
+            const actLine=dayActs.length?`<div class="ps-act">${esc(dayActs[0].type||"")}${dayActs[0].text?": "+esc(String(dayActs[0].text).slice(0,60)):""}${dayActs.length>1?` · +${dayActs.length-1} more`:""}</div>`:"";
+            const has=x&&(x.remark||"").trim();
+            return `<td class="ps-day${d===todayI?' ps-today':''}"><div class="ps-card${has?'':' ps-emptycard'}${ro?'':' ps-click'}"${ro?'':` data-cloud="${l.id}|${d}"`}${who?` title="note by ${esc(who)}"`:""}>${has?`<div class="ps-note">${esc(x.remark)}</div>`:(ro?'':'<div class="ps-add">+ note</div>')}${actLine}</div></td>`;
           }).join("")}
         </tr>`;}).join("")||`<tr><td colspan="${4+dates.length}"><div class="empty" style="padding:30px">No active leads match your filters.</div></td></tr>`}
       </tbody></table></div>`;
@@ -1922,19 +1937,34 @@ async function drawPresalesSheet(){
   $("#psNext").onclick=()=>{if(window.psWeekOff){window.psWeekOff--;drawPresalesSheet();}};
   host.querySelectorAll("[data-psopen]").forEach(el=>el.onclick=()=>openLead(Number(el.dataset.psopen)));
   host.querySelectorAll("[data-pswa]").forEach(b=>b.onclick=e=>{e.stopPropagation();const l=rows.find(x=>String(x.id)===b.dataset.pswa);if(l)waMenu(l,b);});
-  host.querySelectorAll(".ps-in").forEach(inp=>{
-    inp.onkeydown=e=>{ if(e.key==="Enter") inp.blur(); };
-    inp.onchange=async()=>{
-      const id=Number(inp.dataset.lead), d=inp.dataset.date, val=inp.value.trim();
+  // "cloud" note editor — a floating bubble anchored to the clicked day cell
+  const closeCloud=()=>{ const c=document.getElementById("psCloud"); if(c) c.remove(); document.removeEventListener("mousedown",psCloudAway,true); };
+  function psCloudAway(e){ const c=document.getElementById("psCloud"); if(c&&!c.contains(e.target)) closeCloud(); }
+  host.querySelectorAll("[data-cloud]").forEach(cell=>cell.onclick=e=>{
+    e.stopPropagation();
+    const [idS,d]=cell.dataset.cloud.split("|"); const id=Number(idS);
+    const x=R[id]&&R[id][d]; const dt=new Date(d+"T00:00:00");
+    closeCloud();
+    const c=document.createElement("div"); c.id="psCloud";
+    c.innerHTML=`<div class="ps-cloud-h">${d===todayI?"Today":dt.toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short"})}</div>
+      <textarea class="ps-cloud-t" placeholder="Write a note…">${esc(x?x.remark:"")}</textarea>
+      <div class="ps-cloud-f"><button class="ghost" id="psCloudX">Cancel</button><button class="primary" id="psCloudOk">Done</button></div>`;
+    document.body.appendChild(c);
+    const rc=cell.getBoundingClientRect(), cw=280;
+    const left=Math.min(Math.max(8,rc.left+window.scrollX), window.scrollX+document.documentElement.clientWidth-cw-8);
+    c.style.left=left+"px"; c.style.top=(rc.bottom+window.scrollY+8)+"px";
+    const ta=c.querySelector(".ps-cloud-t"); ta.focus(); ta.setSelectionRange(ta.value.length,ta.value.length);
+    setTimeout(()=>document.addEventListener("mousedown",psCloudAway,true),0);
+    c.querySelector("#psCloudX").onclick=closeCloud;
+    c.querySelector("#psCloudOk").onclick=async()=>{
+      const val=ta.value.trim();
       const {error:err}=await sb.from("lead_daily_remarks").upsert(
         {lead_id:id, remark_date:d, remark:val, by_user:me.id, updated_at:new Date().toISOString()},
         {onConflict:"lead_id,remark_date"});
-      if(err){ toast("Could not save remark: "+err.message); return; }
+      if(err){ toast("Could not save note: "+err.message); return; }
       (R[id]=R[id]||{})[d]={lead_id:id,remark_date:d,remark:val,by_user:me.id};
-      const tr=inp.closest("tr"); if(tr) tr.classList.toggle("ps-pend", !val);
-      inp.style.background=val?"#EDF5EE":"";
-      const p2=rows.filter(l=>!remOf(l,todayI)).length;
-      const cnt=host.querySelector(".lead-count b"); if(cnt){ cnt.textContent=p2?p2+" not yet updated today":"all updated today ✓"; cnt.style.color=p2?"var(--clay)":"#2E7D5B"; }
+      closeCloud();
+      drawPresalesSheet();   // re-sort + refresh counter with the note pinned to its date
     };
   });
 }
