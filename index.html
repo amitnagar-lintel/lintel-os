@@ -1710,7 +1710,7 @@ async function dashConsultantProjects(cid, name){
 
 
 /* ===================== LEADS (full CRM) ===================== */
-let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false, closeMonth:"" };
+let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false, closeMonth:"", createdMonth:"" };
 /* Won/Lost are month-scoped: default = current month (IST), auto-rolls; picker overrides. */
 const leadMonthNow=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7);
 const leadMonthOf=ts=>ts?new Date(ts).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7):"";
@@ -1807,6 +1807,7 @@ async function renderLeads(){
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
       <label class="lf-due"><input type="checkbox" id="lf_dup" ${leadFilters.dupOnly?"checked":""}> Agency duplicates</label>
+      <label class="lf-due" title="Filter every stage by the month the lead came in — blank = all months">Created in <input type="month" id="lf_cmonth" class="lf-sel" style="padding:5px 8px" value="${leadFilters.createdMonth}"></label>
       <label class="lf-due" title="Won & Lost show only leads closed in this month">Closed in <input type="month" id="lf_month" class="lf-sel" style="padding:5px 8px" value="${leadFilters.closeMonth||leadMonthNow()}"></label>
     </div>
     <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">Loading…</div>`;
@@ -1819,6 +1820,7 @@ async function renderLeads(){
   $("#lf_due").onchange=e=>{leadFilters.dueOnly=e.target.checked;drawLeadsView();};
   $("#lf_dup").onchange=e=>{leadFilters.dupOnly=e.target.checked;drawLeadsView();};
   $("#lf_month").onchange=e=>{leadFilters.closeMonth=e.target.value;drawLeadsView();};
+  $("#lf_cmonth").onchange=e=>{leadFilters.createdMonth=e.target.value;drawLeadsView();};
   renderClientReplies("#leadsClientReplies");
   drawLeadsView();
 }
@@ -1846,6 +1848,7 @@ async function drawLeadsTable(){
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
     if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
+    if(leadFilters.createdMonth && leadMonthOf(l.created_at)!==leadFilters.createdMonth) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
@@ -1917,6 +1920,7 @@ async function drawBoard(){
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
     if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
+    if(leadFilters.createdMonth && leadMonthOf(l.created_at)!==leadFilters.createdMonth) return false;
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
