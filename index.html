@@ -1894,6 +1894,7 @@ function drawLeadsView(){
    Leads with NO remark today float to the top and are highlighted — "who is
    left to call" is answered by the sheet, not by anyone's memory. */
 const psDateIST=d=>d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+const psWhen=ts=>ts?new Date(ts).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",hour:"numeric",minute:"2-digit",hour12:true}):"";
 async function drawPresalesSheet(){
   const host=$("#board"); if(!host) return;
   host.className="lead-table-wrap";
@@ -1922,9 +1923,9 @@ async function drawPresalesSheet(){
   });
   const remOf=(l,d)=>{const x=R[l.id]&&R[l.id][d];return x&&(x.remark||"").trim()?x:null;};
   const doneToday=l=>!!remOf(l,todayI);
-  rows.sort((a,b)=>(doneToday(a)?1:0)-(doneToday(b)?1:0)
-    || String(a.next_follow_up||"9999").localeCompare(String(b.next_follow_up||"9999"))
-    || String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  rows.sort((a,b)=>(doneToday(a)?1:0)-(doneToday(b)?1:0)                       // pending first…
+    || String(b.created_at||"").localeCompare(String(a.created_at||""))        // …then strict date+time sequence, newest lead first
+    || String(a.next_follow_up||"9999").localeCompare(String(b.next_follow_up||"9999")));
   const ro=!canWrite();
   const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];   // local everywhere else too — not global
   const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
@@ -1948,7 +1949,8 @@ async function drawPresalesSheet(){
         return `<tr class="${today?'':'ps-pend'}">
           <td class="ps-lead"><div class="ltd-lead"><span class="ltd-av">${initials(l.name)}</span>
             <div><div class="ltd-name" data-psopen="${l.id}" style="cursor:pointer">${esc(l.name)}</div>
-            <div class="ltd-sub">${esc(l.phone||"")}${l.phone?` <button class="linkbtn" data-pswa="${l.id}">WA</button>`:""}</div></div></div></td>
+            <div class="ltd-sub">${esc(l.phone||"")}${l.phone?` <button class="linkbtn" data-pswa="${l.id}">WA</button>`:""}</div>
+            <div class="ltd-sub" style="font-size:10.5px;color:#B0AAA2">in: ${psWhen(l.created_at)}</div></div></div></td>
           <td><span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span></td>
           <td class="ltd-sub">${leadAgeDays(l)}d</td>
           <td>${l.next_follow_up?`<span class="fu ${dueClass(l.next_follow_up)}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
@@ -2049,6 +2051,7 @@ function psSlideView(S){
       <div class="ps-sv-sub">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div>
       <div class="ps-sv-chips">
         <span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>
+        <span class="ps-sv-chip">in: ${psWhen(l.created_at)}</span>
         <span class="ps-sv-chip">${leadAgeDays(l)}d old</span>
         ${l.next_follow_up?`<span class="ps-sv-chip">f/up ${l.next_follow_up.slice(5)}</span>`:""}
       </div>
