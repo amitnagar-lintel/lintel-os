@@ -1501,6 +1501,54 @@ function gotoTab(view){
   render(view);
 }
 
+/* ---- Founder Intel panel (INTEL-02): latest weekly report, admin/sales_head only ---- */
+async function renderFounderIntel(){
+  const box=$("#dashIntelBody"); if(!box) return;
+  const {data,error}=await sb.from("intel_reports").select("week_start,report,metrics,created_at").order("week_start",{ascending:false}).limit(1).maybeSingle();
+  const runBtn=`<button class="chip" id="intelRun">⟳ Run now</button>`;
+  if(error||!data||!data.report){
+    box.innerHTML=`<div style="font-size:13px;color:var(--ink-soft);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      No weekly report yet — the first one lands Monday 9:00 IST, or generate one now. ${runBtn}</div>`;
+  } else {
+    const r=data.report||{}, m=data.metrics||{}, tw=m.this_week||{}, pw=m.prev_week||{}, mv=tw.moves_to||{}, pv=pw.moves_to||{};
+    const stat=(label,cur,prev)=>`<div class="kpi" style="--kc:#B08433;min-width:120px"><div class="kpi-val" style="font-size:19px">${cur}</div><div class="kpi-lbl">${label}${prev!==""?` <span style="opacity:.55">· ${prev} last wk</span>`:""}</div></div>`;
+    box.innerHTML=`
+      <div style="font-size:14.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${esc(r.headline||"")}</div>
+      <div style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin-bottom:12px">${esc(r.summary||"")}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        ${stat("New leads",tw.leads_created||0,pw.leads_created||0)}
+        ${stat("Proposals",mv.proposal||0,pv.proposal||0)}
+        ${stat("Won",`${mv.won||0} · ${fmt(tw.won_value||0)}`,pv.won||0)}
+        ${stat("Lost",`${mv.lost||0} · ${fmt(tw.lost_value||0)}`,pv.lost||0)}
+        ${stat("Stalled 14d+",`${(m.stalled_pipeline||{}).count||0} · ${fmt((m.stalled_pipeline||{}).value||0)}`,"")}
+      </div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:6px">Top actions this week</div>
+      <ol style="margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.5">
+        ${(r.actions||[]).map(a=>`<li style="margin-bottom:5px"><b>${esc(a.action)}</b><span style="color:var(--ink-soft)"> — ${esc(a.why)}</span></li>`).join("")}
+      </ol>
+      <details style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--brass);font-weight:600">Findings${(r.coaching||[]).length?" & coaching":""} (${(r.findings||[]).length})</summary>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.5">
+          ${(r.findings||[]).map(f=>`<li style="margin-bottom:5px"><b>${esc(f.area)}:</b> ${esc(f.finding)} <span style="color:var(--ink-soft)">(${esc(f.evidence)})</span></li>`).join("")}
+          ${(r.coaching||[]).map(c=>`<li style="margin-bottom:5px">🎯 <b>${esc(c.who)}</b> — ${esc(c.skill)} <span style="color:var(--ink-soft)">(${esc(c.evidence)})</span></li>`).join("")}
+        </ul>
+      </details>
+      ${(r.data_gaps||[]).length?`<div style="font-size:12px;color:#92400e;background:#FEF3C7;border-radius:6px;padding:8px 10px;margin-bottom:10px">⚠ ${r.data_gaps.map(g=>esc(g)).join(" · ")}</div>`:""}
+      <div style="display:flex;gap:10px;align-items:center;font-size:12px;color:var(--ink-soft)">
+        Week of ${esc(data.week_start)} · generated ${dShort(data.created_at)} · emailed every Monday 9:00 ${runBtn}
+      </div>`;
+  }
+  const b=$("#intelRun");
+  if(b) b.onclick=async()=>{
+    b.disabled=true; b.textContent="Analysing… ~30 s";
+    const {data:res,error:e}=await sb.functions.invoke("weekly-intel",{body:{skip_email:true}});
+    b.disabled=false; b.textContent="⟳ Run now";
+    if(e||(res&&res.error)) return toast((e&&e.message)||(res&&res.error)||"Analysis failed");
+    toast("Fresh report generated");
+    renderFounderIntel();
+  };
+}
+
 async function renderDashboard(){
   await ensureStaff();
   const m=$("#main");
@@ -1522,6 +1570,10 @@ async function renderDashboard(){
       <span id="dashKpisCore" style="display:contents"><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div></span>
       <span id="dashS2lKpis" style="display:contents"></span>
     </section>
+    ${isAdminLevel()?`<section class="pw-card" id="dashIntel" style="margin-bottom:14px">
+      <div class="sec-label">Founder Intel — weekly sales analysis</div>
+      <div id="dashIntelBody"><div class="empty" style="padding:10px 0">Loading…</div></div>
+    </section>`:""}
     <section class="dash-recent">
       <div class="dash-recent-head">
         <div class="viewtoggle" id="dashLowTabs"><button data-k="recent" class="on">Recent leads</button><button data-k="team">Team performance</button></div>
@@ -1558,6 +1610,7 @@ async function renderDashboard(){
   s2lRenderDashKpis(s2l||{});
   s2lRenderTodayCalls(calls||[]);
   renderClientReplies("#dashClientReplies");
+  if(isAdminLevel()) renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
   // name-wise team performance (this month for activity; assigned & value are current totals)
@@ -8169,7 +8222,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b27 · 08 Aug 2026";
+const APP_BUILD = "b28 · 08 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
