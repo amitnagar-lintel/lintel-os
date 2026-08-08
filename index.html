@@ -1730,8 +1730,9 @@ const leadMonthLabel=()=>new Date((leadFilters.closeMonth||leadMonthNow())+"-01T
    guess and goes stale — the Negotiation column once showed ₹12L against ₹44L quoted). */
 let leadQuoteTotals={};
 async function loadLeadQuoteTotals(){
-  const {data}=await sb.from("boq_versions").select("lead_id,total,version,id").not("lead_id","is",null).order("version",{ascending:false}).order("id",{ascending:false});
-  leadQuoteTotals={}; (data||[]).forEach(v=>{ if(v.lead_id!=null && !(v.lead_id in leadQuoteTotals)) leadQuoteTotals[v.lead_id]=Number(v.total)||0; });
+  // ex-GST by policy; total_ex_gst is exact (per-section rates) — /1.18 only as a legacy fallback
+  const {data}=await sb.from("boq_versions").select("lead_id,total,total_ex_gst,version,id").not("lead_id","is",null).order("version",{ascending:false}).order("id",{ascending:false});
+  leadQuoteTotals={}; (data||[]).forEach(v=>{ if(v.lead_id!=null && !(v.lead_id in leadQuoteTotals)) leadQuoteTotals[v.lead_id]=(Number(v.total_ex_gst)>0)?Number(v.total_ex_gst):Math.round((Number(v.total)||0)/1.18); });
 }
 const leadPipelineValue=l=>{ const q=leadQuoteTotals[l.id]; return q>0?q:Number(l.expected_value||0); };
 let activeLead = null, leadTab = "overview";
@@ -7890,7 +7891,7 @@ async function gSave(p, silent){
       consultant:v.consultant,consultant_phone:v.consultant_phone,validity_date:v.validity_date||null,version_label:v.version_label,
       // total = client-facing grand (discounts + GST, excluded/optional out) — same number as
       // projects.contract_value below; the recalc_boq_total trigger that overwrote it is dropped
-      total:grand.total, last_edited_by:me.id, last_edited_at:new Date().toISOString()
+      total:grand.total, total_ex_gst:grand.base, last_edited_by:me.id, last_edited_at:new Date().toISOString()
     }).eq("id",G.boqId);
     if(vErr) throw vErr;
     // replace items atomically via RPC — a mid-save failure can no longer wipe the sheet
