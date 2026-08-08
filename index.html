@@ -1570,7 +1570,7 @@ async function renderDashboard(){
       <span id="dashKpisCore" style="display:contents"><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div></span>
       <span id="dashS2lKpis" style="display:contents"></span>
     </section>
-    ${isAdminLevel()?`<section class="pw-card" id="dashIntel" style="margin-bottom:14px">
+    ${myRole==="admin"?`<section class="pw-card" id="dashIntel" style="margin-bottom:14px">
       <div class="sec-label">Founder Intel — weekly sales analysis</div>
       <div id="dashIntelBody"><div class="empty" style="padding:10px 0">Loading…</div></div>
     </section>`:""}
@@ -1610,7 +1610,7 @@ async function renderDashboard(){
   s2lRenderDashKpis(s2l||{});
   s2lRenderTodayCalls(calls||[]);
   renderClientReplies("#dashClientReplies");
-  if(isAdminLevel()) renderFounderIntel();
+  if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
   // name-wise team performance (this month for activity; assigned & value are current totals)
@@ -8222,7 +8222,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b28 · 08 Aug 2026";
+const APP_BUILD = "b29 · 08 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
