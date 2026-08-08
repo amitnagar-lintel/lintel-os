@@ -1886,6 +1886,8 @@ async function drawPresalesSheet(){
     || String(a.next_follow_up||"9999").localeCompare(String(b.next_follow_up||"9999"))
     || String(b.created_at||"").localeCompare(String(a.created_at||"")));
   const ro=!canWrite();
+  const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];   // local everywhere else too — not global
+  const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
   const dHead=d=>{const dt=new Date(d+"T00:00:00");return `<th class="ps-day${d===todayI?' ps-today':''}">${dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}${d===todayI?' · today':''}</th>`;};
   const pend=rows.filter(l=>!doneToday(l)).length;
   host.innerHTML=`
