@@ -1726,6 +1726,14 @@ const leadAgeDays=l=>{
   return Math.max(0,Math.round(((end?new Date(end):new Date())-new Date(l.created_at))/86400000));
 };
 const leadMonthLabel=()=>new Date((leadFilters.closeMonth||leadMonthNow())+"-01T00:00:00").toLocaleDateString("en-IN",{month:"short",year:"numeric"});
+/* Pipeline value = the latest QUOTE total once a BOQ exists (expected_value is a manual
+   guess and goes stale — the Negotiation column once showed ₹12L against ₹44L quoted). */
+let leadQuoteTotals={};
+async function loadLeadQuoteTotals(){
+  const {data}=await sb.from("boq_versions").select("lead_id,total,version,id").not("lead_id","is",null).order("version",{ascending:false}).order("id",{ascending:false});
+  leadQuoteTotals={}; (data||[]).forEach(v=>{ if(v.lead_id!=null && !(v.lead_id in leadQuoteTotals)) leadQuoteTotals[v.lead_id]=Number(v.total)||0; });
+}
+const leadPipelineValue=l=>{ const q=leadQuoteTotals[l.id]; return q>0?q:Number(l.expected_value||0); };
 let activeLead = null, leadTab = "overview";
 const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["studio","Studio"],["journal","Activity & Notes"]];
 const LEAD_GROUPS={studio:[["presentations","Moodboard"],["vastu","Vastu"]]};
@@ -1837,6 +1845,7 @@ async function drawLeadsTable(){
   if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
   const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
   const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
+  await loadLeadQuoteTotals();
   const f=leadFilters, q=f.search.toLowerCase();
   const rows=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
@@ -1883,7 +1892,7 @@ async function drawLeadsTable(){
             </div></td>
             <td class="hide-md"><div class="ltd-ph">${esc(l.phone||"—")}</div><div class="ltd-sub">${esc(l.email||"")}</div></td>
             <td class="hide-lg">${esc(l.project_type||l.bhk||"—")}</td>
-            <td class="hide-sm ltd-val">${l.expected_value?fmt(l.expected_value):"—"}</td>
+            <td class="hide-sm ltd-val">${leadPipelineValue(l)?fmt(leadPipelineValue(l)):"—"}</td>
             <td>${pr?`<span class="stpill" style="--c:#2E7D5B">✓ ${esc(pr.code||"Won")}</span>`:`<span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>`}</td>
             <td class="hide-md">${channelChipHtml(l)}</td>
             <td class="hide-lg"><span class="scorepill ${sCls}">${score}</span></td>
@@ -1909,6 +1918,7 @@ async function drawBoard(){
   // fetch projects to link won leads to their converted project
   const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
   const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
+  await loadLeadQuoteTotals();
   const f=leadFilters, q=f.search.toLowerCase();
   const filtered=(leads||[]).filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
@@ -1930,7 +1940,7 @@ async function drawBoard(){
   if(badge) badge.style.display=dueN?"inline-flex":"none";
   STAGES.forEach(([key,label,color])=>{
     const items=filtered.filter(l=>l.stage===key);
-    const val=items.reduce((s,l)=>s+Number(l.expected_value||0),0);
+    const val=items.reduce((s,l)=>s+leadPipelineValue(l),0);
     const col=document.createElement("div");col.className="col"+(items.length?"":" col-empty");
     col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}${(key==="won"||key==="lost")?` <span style="font-size:10.5px;font-weight:500;color:var(--ink-soft)">· ${leadMonthLabel()}</span>`:""}
       <span class="col-count">${items.length}</span></div>
@@ -1960,7 +1970,7 @@ async function drawBoard(){
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
-        <span class="val">${l.expected_value?fmt(l.expected_value):""}</span></div>
+        <span class="val">${leadPipelineValue(l)?fmt(leadPipelineValue(l)):""}</span></div>
         ${(l.pm_id||l.consultant_id)?`<div class="avrow">${[l.consultant_id,l.designer_id,l.pm_id].filter(Boolean).map(id=>`<span class="av" title="${esc(staffName(id))}">${initials(staffName(id))}</span>`).join("")}</div>`:""}`;
       c.onclick=()=>openLead(l.id);
       const waBtn=c.querySelector(".card-wa");
