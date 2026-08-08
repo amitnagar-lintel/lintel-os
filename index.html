@@ -179,6 +179,34 @@
   .ps-cloud-h{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--brass-deep,#946F33);margin:2px 2px 6px}
   .ps-cloud-t{width:100%;min-height:84px;border:none;resize:vertical;font:inherit;font-size:13px;line-height:1.5;outline:none;background:#FFFCF2;border-radius:8px;padding:8px}
   .ps-cloud-f{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+  /* slide view */
+  #psSlideView{position:fixed;inset:0;z-index:900;background:rgba(13,13,39,.93);backdrop-filter:blur(4px);display:flex;flex-direction:column;overflow:hidden}
+  .ps-sv-top{display:flex;align-items:center;gap:14px;padding:14px 18px}
+  .ps-sv-progwrap{flex:1;display:flex;align-items:center;gap:12px}
+  .ps-sv-prog{flex:1;height:10px;background:rgba(255,255,255,.15);border-radius:6px;overflow:hidden}
+  .ps-sv-fill{height:100%;width:0;background:linear-gradient(90deg,#C9A45C,#DFB05E);border-radius:6px;transition:width .5s cubic-bezier(.22,1,.36,1)}
+  .ps-sv-count{color:#EDE6D6;font-size:13px;white-space:nowrap}
+  .ps-sv-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px}
+  .ps-sv-card{width:min(520px,92vw);background:#FFFDF6;border-radius:18px;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.4)}
+  .ps-sv-in{animation:psIn .22s ease-out}
+  @keyframes psIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+  .ps-sv-out{transform:translateX(-120%);opacity:0;transition:all .18s ease-in}
+  .ps-sv-outr{transform:translateX(120%);opacity:0;transition:all .18s ease-in}
+  .ps-sv-n{font-size:11px;color:#9A9490;text-transform:uppercase;letter-spacing:.6px}
+  .ps-sv-name{font-size:24px;font-weight:700;color:#0D0D27;margin-top:2px}
+  .ps-sv-sub{font-size:13px;color:#6B6560}
+  .ps-sv-chips{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+  .ps-sv-chip{font-size:11.5px;background:#F2EDE2;border-radius:8px;padding:3px 8px;color:#6B6560}
+  .ps-sv-contact{display:flex;gap:10px;margin:8px 0 10px;flex-wrap:wrap}
+  .ps-sv-btn{text-decoration:none;display:inline-flex;align-items:center;padding:8px 14px;border-radius:9px}
+  .ps-sv-last{font-size:12px;background:#F7F2E6;border-radius:8px;padding:6px 9px;margin:4px 0;color:#57503F}
+  .ps-sv-ta{min-height:96px;margin-top:10px;border:1px solid #E3DCC9}
+  .ps-sv-row{display:flex;justify-content:space-between;gap:10px;margin-top:12px}
+  .ps-sv-msg{text-align:center;color:#DFB05E;font-size:15px;font-weight:600;padding:14px;min-height:46px}
+  .ps-sv-msg.pop{animation:psPop .5s ease}
+  @keyframes psPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+  .ps-conf{position:absolute;top:-12px;width:9px;height:14px;border-radius:2px;animation:psFall linear forwards}
+  @keyframes psFall{to{transform:translateY(105vh) rotate(720deg)}}
   .lead-table thead th{text-align:left;padding:12px 14px;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-soft);background:var(--sand,#F6F3EA);border-bottom:1px solid var(--line);white-space:nowrap}
   .lead-table tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
   .lead-table tbody tr{cursor:pointer;transition:background .12s}
@@ -1911,6 +1939,7 @@ async function drawPresalesSheet(){
         <span>${new Date(dates[0]+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})} – ${new Date(dates[6]+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span>
         <button class="ghost" id="psNext" style="padding:2px 10px" ${window.psWeekOff?'':'disabled'}>›</button>
       </span>
+      ${ro?'':`<button class="primary" id="psSlide" style="margin-left:auto">▶ Slide view</button>`}
     </div>
     <div class="ltbl-scroll"><table class="lead-table ps-tbl">
       <thead><tr><th class="ps-lead">Lead</th><th>Stage</th><th>Age</th><th>Next f/up</th>${dates.map(dHead).join("")}</tr></thead>
@@ -1935,6 +1964,7 @@ async function drawPresalesSheet(){
       </tbody></table></div>`;
   $("#psPrev").onclick=()=>{window.psWeekOff++;drawPresalesSheet();};
   $("#psNext").onclick=()=>{if(window.psWeekOff){window.psWeekOff--;drawPresalesSheet();}};
+  const svBtn=$("#psSlide"); if(svBtn) svBtn.onclick=()=>psSlideView({rows,R,A,todayI});
   host.querySelectorAll("[data-psopen]").forEach(el=>el.onclick=()=>openLead(Number(el.dataset.psopen)));
   host.querySelectorAll("[data-pswa]").forEach(b=>b.onclick=e=>{e.stopPropagation();const l=rows.find(x=>String(x.id)===b.dataset.pswa);if(l)waMenu(l,b);});
   // "cloud" note editor — a floating bubble anchored to the clicked day cell
@@ -1967,6 +1997,121 @@ async function drawPresalesSheet(){
       drawPresalesSheet();   // re-sort + refresh counter with the note pinned to its date
     };
   });
+}
+
+/* ---- Slide view: card-by-card focus mode with a goal bar ----
+   Enter = save & next · Shift+Enter = newline · → = skip · Esc = exit.
+   Progress fills as leads get updated; milestones cheer, 100% = confetti. */
+function psSlideView(S){
+  const {rows,R,A,todayI}=S;
+  const total=rows.length;
+  const hasNote=l=>{const x=R[l.id]&&R[l.id][todayI];return !!(x&&(x.remark||"").trim());};
+  let queue=rows.filter(l=>!hasNote(l));
+  let done=total-queue.length, idx=0, nSaved=0;
+  const MSGS=["Nice one! 🔥","Keep going 💪","Another one done ✅","On a roll! 🚀","Great pace 👏","Clients feel the follow-up ✨"];
+  const old=document.getElementById("psSlideView"); if(old) old.remove();
+  const ov=document.createElement("div"); ov.id="psSlideView";
+  ov.innerHTML=`<div class="ps-sv-top">
+      <button class="ghost" id="psSvExit" style="color:#EDE6D6;border-color:rgba(255,255,255,.3)">✕ Exit</button>
+      <div class="ps-sv-progwrap"><div class="ps-sv-prog"><div class="ps-sv-fill" id="psSvFill"></div></div>
+      <div class="ps-sv-count"><b id="psSvDone">${done}</b> / ${total} updated today</div></div>
+    </div>
+    <div class="ps-sv-stage" id="psSvStage"></div>
+    <div class="ps-sv-msg" id="psSvMsg">Enter = save &amp; next · Shift+Enter = new line · → = skip · Esc = exit</div>`;
+  document.body.appendChild(ov);
+  const fill=()=>{ const p=total?Math.round(done/total*100):100; ov.querySelector("#psSvFill").style.width=p+"%"; ov.querySelector("#psSvDone").textContent=done; return p; };
+  fill();
+  const exit=()=>{ document.removeEventListener("keydown",keys,true); ov.remove(); drawPresalesSheet(); };
+  ov.querySelector("#psSvExit").onclick=exit;
+  function keys(e){ if(e.key==="Escape"){e.preventDefault();exit();} else if(e.key==="ArrowRight"&&document.activeElement&&document.activeElement.id!=="psSvTa"){e.preventDefault();next(false);} }
+  document.addEventListener("keydown",keys,true);
+  const stageLabel=s=>(STAGES.find(x=>x[0]===s)||["",s])[1];
+  const stageColor=s=>(STAGES.find(x=>x[0]===s)||["","","#888"])[2];
+  const lastNoteHtml=l=>{
+    const m=R[l.id]||{}; const ds=Object.keys(m).filter(d=>d!==todayI&&(m[d].remark||"").trim()).sort().reverse();
+    if(!ds.length) return "";
+    const d=ds[0], dt=new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+    return `<div class="ps-sv-last"><b>${dt}:</b> ${esc(m[ds[0]].remark)}</div>`;
+  };
+  const lastActHtml=l=>{
+    const m=A[l.id]||{}; const ds=Object.keys(m).sort().reverse();
+    if(!ds.length) return "";
+    const a=m[ds[0]][0];
+    return `<div class="ps-sv-last" style="color:#9A9490">${esc(a.type||"")}${a.text?": "+esc(String(a.text).slice(0,80)):""}</div>`;
+  };
+  function renderCard(){
+    const st=ov.querySelector("#psSvStage");
+    if(!queue.length||idx>=queue.length) return finish();
+    const l=queue[idx];
+    st.innerHTML=`<div class="ps-sv-card ps-sv-in">
+      <div class="ps-sv-n">${queue.length-idx} to go</div>
+      <div class="ps-sv-name">${esc(l.name)}</div>
+      <div class="ps-sv-sub">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div>
+      <div class="ps-sv-chips">
+        <span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span>
+        <span class="ps-sv-chip">${leadAgeDays(l)}d old</span>
+        ${l.next_follow_up?`<span class="ps-sv-chip">f/up ${l.next_follow_up.slice(5)}</span>`:""}
+      </div>
+      <div class="ps-sv-contact">
+        ${l.phone?`<a class="primary ps-sv-btn" href="tel:${esc(String(l.phone).replace(/\s/g,""))}">📞 ${esc(l.phone)}</a><button class="ghost ps-sv-btn" id="psSvWa">WhatsApp</button>`:""}
+      </div>
+      ${lastNoteHtml(l)}${lastActHtml(l)}
+      <textarea class="ps-cloud-t ps-sv-ta" id="psSvTa" placeholder="Today's note — Enter saves & moves to the next lead…"></textarea>
+      <div class="ps-sv-row"><button class="ghost" id="psSvSkip">Skip →</button><button class="primary" id="psSvSave">Save &amp; next ⏎</button></div>
+    </div>`;
+    const wa=st.querySelector("#psSvWa"); if(wa) wa.onclick=()=>waMenu(l,wa);
+    const ta=st.querySelector("#psSvTa"); ta.focus();
+    ta.onkeydown=e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); save(l,ta.value); } };
+    st.querySelector("#psSvSave").onclick=()=>save(l,st.querySelector("#psSvTa").value);
+    st.querySelector("#psSvSkip").onclick=()=>next(false);
+  }
+  async function save(l,val){
+    val=(val||"").trim();
+    if(!val) return next(false);           // nothing typed = skip, no fake updates
+    const {error:err}=await sb.from("lead_daily_remarks").upsert(
+      {lead_id:l.id, remark_date:todayI, remark:val, by_user:me.id, updated_at:new Date().toISOString()},
+      {onConflict:"lead_id,remark_date"});
+    if(err){ toast("Could not save: "+err.message); return; }
+    (R[l.id]=R[l.id]||{})[todayI]={lead_id:l.id,remark_date:todayI,remark:val,by_user:me.id};
+    done++; nSaved++;
+    const p=fill();
+    const msg=ov.querySelector("#psSvMsg");
+    msg.textContent=p>=100?"":(p>=50&&p-Math.round(100/total)<50?"Halfway there! 🎯":MSGS[nSaved%MSGS.length]);
+    msg.classList.remove("pop"); void msg.offsetWidth; msg.classList.add("pop");
+    if(p>=100) psConfetti(ov);
+    next(true);
+  }
+  function next(wasSaved){
+    const card=ov.querySelector(".ps-sv-card");
+    if(card) card.classList.add(wasSaved?"ps-sv-out":"ps-sv-outr");
+    if(wasSaved) queue.splice(idx,1); else idx++;
+    setTimeout(renderCard,180);
+  }
+  function finish(){
+    const st=ov.querySelector("#psSvStage");
+    const allDone=done>=total;
+    st.innerHTML=`<div class="ps-sv-card ps-sv-in" style="text-align:center">
+      <div style="font-size:52px">${allDone?"🎉":"👏"}</div>
+      <div class="ps-sv-name">${allDone?"Goal complete!":"Session done"}</div>
+      <div class="ps-sv-sub" style="margin-top:4px">${done} of ${total} leads updated today${allDone?" — every client heard from us today. Brilliant!":""}</div>
+      <div class="ps-sv-row" style="justify-content:center;margin-top:18px"><button class="primary" id="psSvClose">Back to sheet</button></div>
+    </div>`;
+    if(allDone) psConfetti(ov);
+    st.querySelector("#psSvClose").onclick=exit;
+  }
+  renderCard();
+}
+function psConfetti(host){
+  const colors=["#DFB05E","#A4503E","#4F7D52","#C9A45C","#946F33","#EDE6D6"];
+  for(let i=0;i<40;i++){
+    const s=document.createElement("span"); s.className="ps-conf";
+    s.style.left=(Math.random()*100)+"%";
+    s.style.background=colors[i%colors.length];
+    s.style.animationDelay=(Math.random()*0.6)+"s";
+    s.style.animationDuration=(1.6+Math.random())+"s";
+    host.appendChild(s);
+    setTimeout(()=>s.remove(),3200);
+  }
 }
 
 async function drawLeadsTable(){
