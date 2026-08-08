@@ -1710,7 +1710,22 @@ async function dashConsultantProjects(cid, name){
 
 
 /* ===================== LEADS (full CRM) ===================== */
-let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false };
+let leadFilters = { search:"", channel:"", owner:"", tag:"", dueOnly:false, dupOnly:false, closeMonth:"" };
+/* Won/Lost are month-scoped: default = current month (IST), auto-rolls; picker overrides. */
+const leadMonthNow=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7);
+const leadMonthOf=ts=>ts?new Date(ts).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}).slice(0,7):"";
+const leadCloseGate=l=>{
+  const cm=leadFilters.closeMonth||leadMonthNow();
+  if(l.stage==="won")  return leadMonthOf(l.won_at||l.updated_at)===cm;
+  if(l.stage==="lost") return leadMonthOf(l.lost_at||l.updated_at)===cm;
+  return true;
+};
+const leadAgeDays=l=>{
+  if(!l.created_at) return 0;
+  const end=l.stage==="won"?(l.won_at||null):l.stage==="lost"?(l.lost_at||null):null;
+  return Math.max(0,Math.round(((end?new Date(end):new Date())-new Date(l.created_at))/86400000));
+};
+const leadMonthLabel=()=>new Date((leadFilters.closeMonth||leadMonthNow())+"-01T00:00:00").toLocaleDateString("en-IN",{month:"short",year:"numeric"});
 let activeLead = null, leadTab = "overview";
 const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["studio","Studio"],["journal","Activity & Notes"]];
 const LEAD_GROUPS={studio:[["presentations","Moodboard"],["vastu","Vastu"]]};
@@ -1792,6 +1807,7 @@ async function renderLeads(){
       <select id="lf_tag" class="lf-sel"><option value="">All tags</option>${TAG_OPTIONS.map(t=>`<option ${leadFilters.tag===t?"selected":""}>${t}</option>`).join("")}</select>
       <label class="lf-due"><input type="checkbox" id="lf_due" ${leadFilters.dueOnly?"checked":""}> Follow-ups due <span id="dueCount" class="due-badge"></span></label>
       <label class="lf-due"><input type="checkbox" id="lf_dup" ${leadFilters.dupOnly?"checked":""}> Agency duplicates</label>
+      <label class="lf-due" title="Won & Lost show only leads closed in this month">Closed in <input type="month" id="lf_month" class="lf-sel" style="padding:5px 8px" value="${leadFilters.closeMonth||leadMonthNow()}"></label>
     </div>
     <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">Loading…</div>`;
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
@@ -1802,6 +1818,7 @@ async function renderLeads(){
   $("#lf_tag").onchange=e=>{leadFilters.tag=e.target.value;drawLeadsView();};
   $("#lf_due").onchange=e=>{leadFilters.dueOnly=e.target.checked;drawLeadsView();};
   $("#lf_dup").onchange=e=>{leadFilters.dupOnly=e.target.checked;drawLeadsView();};
+  $("#lf_month").onchange=e=>{leadFilters.closeMonth=e.target.value;drawLeadsView();};
   renderClientReplies("#leadsClientReplies");
   drawLeadsView();
 }
@@ -1828,6 +1845,7 @@ async function drawLeadsTable(){
     else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
+    if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
@@ -1845,7 +1863,7 @@ async function drawLeadsTable(){
       <thead><tr>
         <th>Lead</th><th class="hide-md">Contact</th><th class="hide-lg">Property</th>
         <th class="hide-sm">Value</th><th>Stage</th><th class="hide-md">Channel</th>
-        <th class="hide-lg">Score</th><th class="hide-xl">Owner</th><th class="hide-sm">Follow-up</th>
+        <th class="hide-lg">Score</th><th class="hide-xl">Owner</th><th class="hide-sm">Follow-up</th><th class="hide-sm" title="Days from creation to today (open) or to close (won/lost)">Age</th>
       </tr></thead>
       <tbody>
         ${rows.map(l=>{
@@ -1868,8 +1886,9 @@ async function drawLeadsTable(){
             <td class="hide-lg"><span class="scorepill ${sCls}">${score}</span></td>
             <td class="hide-xl ltd-sub">${esc(owner(l)||"—")}</td>
             <td class="hide-sm">${l.next_follow_up?`<span class="fu ${dc}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
+            <td class="hide-sm ltd-sub">${leadAgeDays(l)}d</td>
           </tr>`;
-        }).join("")||`<tr><td colspan="9"><div class="empty" style="padding:30px">No leads match your filters.</div></td></tr>`}
+        }).join("")||`<tr><td colspan="10"><div class="empty" style="padding:30px">No leads match your filters.</div></td></tr>`}
       </tbody>
     </table></div>`;
   host.querySelectorAll("[data-leadrow]").forEach(tr=>tr.onclick=()=>{
@@ -1897,6 +1916,7 @@ async function drawBoard(){
     else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
     if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
     if(f.dupOnly && !l.is_duplicate) return false;
+    if(!leadCloseGate(l)) return false;   // Won/Lost: only the selected month
     if(f.dueOnly && (!l.next_follow_up || l.next_follow_up>todayISO())) return false;
     return true;
   });
@@ -1908,7 +1928,7 @@ async function drawBoard(){
     const items=filtered.filter(l=>l.stage===key);
     const val=items.reduce((s,l)=>s+Number(l.expected_value||0),0);
     const col=document.createElement("div");col.className="col"+(items.length?"":" col-empty");
-    col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}
+    col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}${(key==="won"||key==="lost")?` <span style="font-size:10.5px;font-weight:500;color:var(--ink-soft)">· ${leadMonthLabel()}</span>`:""}
       <span class="col-count">${items.length}</span></div>
       ${val&&key!=="won"?`<div class="col-val mono">${fmt(val)}</div>`:""}`;
     items.forEach(l=>{
@@ -1917,7 +1937,7 @@ async function drawBoard(){
         const pr=projByLead[l.id];
         const c=document.createElement("div");c.className="card card-won";
         c.innerHTML=`<div class="nm">${esc(l.name)}</div>
-          <div class="meta">${pr?`✓ Converted → <b>${esc(pr.code||pr.name)}</b>`:"✓ Won"}</div>
+          <div class="meta">${pr?`✓ Converted → <b>${esc(pr.code||pr.name)}</b>`:"✓ Won"} · <span title="Days from lead to close">${leadAgeDays(l)}d</span></div>
           ${pr?`<div class="row2"><span class="linkbtn">Open project →</span></div>`:""}`;
         c.onclick=()=>{
           if(pr){ activeProject=pr.id; projectTab="overview"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(pr.id),60); }
@@ -1931,7 +1951,7 @@ async function drawBoard(){
       const dc=dueClass(l.next_follow_up);
       const c=document.createElement("div");c.className="card";
       c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
-        <div class="meta">${esc(l.locality||l.city||"")}${l.project_type?" · "+esc(l.project_type):""}</div>
+        <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`].filter(Boolean).join(" · ")}</div>
         <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
