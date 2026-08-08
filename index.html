@@ -160,6 +160,16 @@
   .lead-count{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px}
   .ltbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 2px 10px -6px rgba(13,13,39,.12)}
   .lead-table{width:100%;border-collapse:collapse;font-size:14px;min-width:680px}
+  /* presales call sheet */
+  .ps-tbl{min-width:1150px}
+  .ps-tbl th.ps-lead,.ps-tbl td.ps-lead{position:sticky;left:0;background:var(--paper,#fff);z-index:2;min-width:180px;box-shadow:2px 0 0 var(--line,#E5E1D8)}
+  .ps-tbl th.ps-day,.ps-tbl td.ps-day{min-width:130px;max-width:170px}
+  .ps-tbl .ps-today{background:#FBF5E6}
+  .ps-tbl tr.ps-pend td.ps-lead .ltd-name::after{content:" 📞";font-size:12px}
+  .ps-tbl tr.ps-pend{background:#FDF9EE}
+  .ps-in{width:100%;border:1px solid var(--line-2,#D8D3C8);border-radius:6px;padding:5px 7px;font-size:12.5px;background:#fff}
+  .ps-in:focus{outline:none;border-color:var(--brass,#C9A45C)}
+  .ps-note{font-size:12px;color:var(--ink-soft,#6B6560);line-height:1.4;white-space:normal;word-break:break-word}
   .lead-table thead th{text-align:left;padding:12px 14px;font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-soft);background:var(--sand,#F6F3EA);border-bottom:1px solid var(--line);white-space:nowrap}
   .lead-table tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
   .lead-table tbody tr{cursor:pointer;transition:background .12s}
@@ -1804,6 +1814,7 @@ async function renderLeads(){
         <div class="viewtoggle">
           <button data-lv="board" class="${window.leadView==='board'?'on':''}">▦ Board</button>
           <button data-lv="table" class="${window.leadView==='table'?'on':''}">☰ Table</button>
+          <button data-lv="presales" class="${window.leadView==='presales'?'on':''}">📞 Presales</button>
         </div>
         ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
       </div>
@@ -1836,7 +1847,94 @@ async function renderLeads(){
 
 function drawLeadsView(){
   if(window.leadView==="table") return drawLeadsTable();
+  if(window.leadView==="presales") return drawPresalesSheet();
   return drawBoard();
+}
+
+/* ============== PRESALES CALL SHEET ==============
+   Day-wise remark grid: rows = active leads, columns = the last 7 days.
+   One remark per lead per day (lead_daily_remarks, upserted on blur).
+   Leads with NO remark today float to the top and are highlighted — "who is
+   left to call" is answered by the sheet, not by anyone's memory. */
+const psDateIST=d=>d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+async function drawPresalesSheet(){
+  const host=$("#board"); if(!host) return;
+  host.className="lead-table-wrap";
+  window.psWeekOff=window.psWeekOff||0;
+  const end=new Date(Date.now()-window.psWeekOff*7*86400000);
+  const dates=[...Array(7)].map((_,i)=>psDateIST(new Date(end-(6-i)*86400000)));
+  const todayI=psDateIST(new Date());
+  const [{data:leads,error},{data:rem}]=await Promise.all([
+    sb.from("leads").select("*").not("stage","in","(won,lost)").order("created_at",{ascending:false}),
+    sb.from("lead_daily_remarks").select("*").gte("remark_date",dates[0]).lte("remark_date",dates[6])
+  ]);
+  if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
+  const R={}; (rem||[]).forEach(x=>{ (R[x.lead_id]=R[x.lead_id]||{})[x.remark_date]=x; });
+  const f=leadFilters, q=f.search.toLowerCase();
+  const rows=(leads||[]).filter(l=>{
+    if(q && !(`${l.name} ${l.phone||""} ${l.locality||""}`.toLowerCase().includes(q))) return false;
+    if(f.channel && channelOf(l).key!==f.channel) return false;
+    if(f.owner==="__none__"){ if(l.consultant_id||l.designer_id||l.pm_id) return false; }
+    else if(f.owner && ![l.consultant_id,l.designer_id,l.pm_id,l.presales_id].map(String).includes(String(f.owner))) return false;
+    if(f.tag && !(l.tags||[]).includes(f.tag)) return false;
+    if(f.createdMonth && leadMonthOf(l.created_at)!==f.createdMonth) return false;
+    return true;
+  });
+  const remOf=(l,d)=>{const x=R[l.id]&&R[l.id][d];return x&&(x.remark||"").trim()?x:null;};
+  const doneToday=l=>!!remOf(l,todayI);
+  rows.sort((a,b)=>(doneToday(a)?1:0)-(doneToday(b)?1:0)
+    || String(a.next_follow_up||"9999").localeCompare(String(b.next_follow_up||"9999"))
+    || String(b.created_at||"").localeCompare(String(a.created_at||"")));
+  const ro=!canWrite();
+  const dHead=d=>{const dt=new Date(d+"T00:00:00");return `<th class="ps-day${d===todayI?' ps-today':''}">${dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}${d===todayI?' · today':''}</th>`;};
+  const pend=rows.filter(l=>!doneToday(l)).length;
+  host.innerHTML=`
+    <div class="lead-count" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <span>${rows.length} active leads · <b style="color:${pend?'var(--clay)':'#2E7D5B'}">${pend?pend+' not yet updated today':'all updated today ✓'}</b></span>
+      <span style="display:inline-flex;gap:6px;align-items:center">
+        <button class="ghost" id="psPrev" style="padding:2px 10px">‹</button>
+        <span>${new Date(dates[0]+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})} – ${new Date(dates[6]+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</span>
+        <button class="ghost" id="psNext" style="padding:2px 10px" ${window.psWeekOff?'':'disabled'}>›</button>
+      </span>
+    </div>
+    <div class="ltbl-scroll"><table class="lead-table ps-tbl">
+      <thead><tr><th class="ps-lead">Lead</th><th>Stage</th><th>Age</th><th>Next f/up</th>${dates.map(dHead).join("")}</tr></thead>
+      <tbody>${rows.map(l=>{
+        const today=doneToday(l);
+        return `<tr class="${today?'':'ps-pend'}">
+          <td class="ps-lead"><div class="ltd-lead"><span class="ltd-av">${initials(l.name)}</span>
+            <div><div class="ltd-name" data-psopen="${l.id}" style="cursor:pointer">${esc(l.name)}</div>
+            <div class="ltd-sub">${esc(l.phone||"")}${l.phone?` <button class="linkbtn" data-pswa="${l.id}">WA</button>`:""}</div></div></div></td>
+          <td><span class="stpill" style="--c:${stageColor(l.stage)}">${esc(stageLabel(l.stage))}</span></td>
+          <td class="ltd-sub">${leadAgeDays(l)}d</td>
+          <td>${l.next_follow_up?`<span class="fu ${dueClass(l.next_follow_up)}">${l.next_follow_up.slice(5)}</span>`:"—"}</td>
+          ${dates.map(d=>{
+            const x=R[l.id]&&R[l.id][d];
+            if(d===todayI&&!ro) return `<td class="ps-day ps-today"><input class="ps-in" data-lead="${l.id}" data-date="${d}" value="${esc(x?x.remark:"")}" placeholder="remark…"></td>`;
+            const who=x&&x.by_user&&typeof staffNameByProfile==="function"?staffNameByProfile(x.by_user):"";
+            return `<td class="ps-day${d===todayI?' ps-today':''}"><div class="ps-note" ${who?`title="${esc(who)}"`:""}>${x?esc(x.remark):""}</div></td>`;
+          }).join("")}
+        </tr>`;}).join("")||`<tr><td colspan="${4+dates.length}"><div class="empty" style="padding:30px">No active leads match your filters.</div></td></tr>`}
+      </tbody></table></div>`;
+  $("#psPrev").onclick=()=>{window.psWeekOff++;drawPresalesSheet();};
+  $("#psNext").onclick=()=>{if(window.psWeekOff){window.psWeekOff--;drawPresalesSheet();}};
+  host.querySelectorAll("[data-psopen]").forEach(el=>el.onclick=()=>openLead(Number(el.dataset.psopen)));
+  host.querySelectorAll("[data-pswa]").forEach(b=>b.onclick=e=>{e.stopPropagation();const l=rows.find(x=>String(x.id)===b.dataset.pswa);if(l)waMenu(l,b);});
+  host.querySelectorAll(".ps-in").forEach(inp=>{
+    inp.onkeydown=e=>{ if(e.key==="Enter") inp.blur(); };
+    inp.onchange=async()=>{
+      const id=Number(inp.dataset.lead), d=inp.dataset.date, val=inp.value.trim();
+      const {error:err}=await sb.from("lead_daily_remarks").upsert(
+        {lead_id:id, remark_date:d, remark:val, by_user:me.id, updated_at:new Date().toISOString()},
+        {onConflict:"lead_id,remark_date"});
+      if(err){ toast("Could not save remark: "+err.message); return; }
+      (R[id]=R[id]||{})[d]={lead_id:id,remark_date:d,remark:val,by_user:me.id};
+      const tr=inp.closest("tr"); if(tr) tr.classList.toggle("ps-pend", !val);
+      inp.style.background=val?"#EDF5EE":"";
+      const p2=rows.filter(l=>!remOf(l,todayI)).length;
+      const cnt=host.querySelector(".lead-count b"); if(cnt){ cnt.textContent=p2?p2+" not yet updated today":"all updated today ✓"; cnt.style.color=p2?"var(--clay)":"#2E7D5B"; }
+    };
+  });
 }
 
 async function drawLeadsTable(){
