@@ -923,6 +923,32 @@ const STAGES = [
   ["qualified","Qualified","#b08847"],["proposal","Proposal Sent","#9a6fb0"],
   ["negotiation","Negotiation","#c08a2d"],["won","Won","#4f7d52"],["lost","Lost","#a4503e"]
 ];
+// INTEL-01: fixed taxonomies feeding the weekly sales analysis. Codes are stored
+// (leads.lost_reason, lead_activities.objections); labels are display-only.
+const LOST_REASONS = [
+  ["budget_too_high","Budget too high / quote expensive"],
+  ["competitor","Went with another firm"],
+  ["local_contractor","Chose local carpenter / contractor"],
+  ["possession_delay","Possession delayed / project deferred"],
+  ["unresponsive","Went unresponsive"],
+  ["timeline_mismatch","Timeline mismatch"],
+  ["scope_too_small","Scope too small / partial work only"],
+  ["location","Outside service area"],
+  ["other","Other"]
+];
+const OBJECTIONS = [
+  ["price","Price"],["timeline","Timeline"],["competitor","Comparing quotes"],
+  ["trust","Trust / portfolio"],["design","Design fit"],["scope","Scope / possession"],["other","Other"]
+];
+/* Estimate a lead's value from its budget_band ("₹_7_to_₹_15_lakhs", "₹7–15 L", "Above ₹45 L"):
+   two numbers → midpoint in lakhs; one number → that (+10% if "above"). Returns ₹ or 0. */
+function estValueFromBand(b){
+  if(!b) return 0;
+  const nums=(String(b).replace(/_/g," ").match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+  if(nums.length>=2) return Math.round((nums[0]+nums[1])/2*100000);
+  if(nums.length===1) return Math.round(nums[0]*100000*(/above/i.test(b)?1.1:1));
+  return 0;
+}
 const SOURCES = ["Instagram","Referral","Google / GBP","Website","Substack","Walk-in","Other"];
 // Acquisition channel. `leads.platform` ('ig'|'fb'|'google_ads'|'website') is written by the
 // meta-leadgen and landing-lead edge functions and is the ONLY reliable Meta-vs-Google signal:
@@ -1891,7 +1917,8 @@ function leadForm(lead){
         <div class="field"><label>Source</label><select id="f_src">${opts(SOURCES,l.source)}</select></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Budget (₹)</label><input id="f_val" type="number" value="${l.expected_value||""}"></div>
+        <div class="field"><label>Budget (₹)</label><input id="f_val" type="number" value="${l.expected_value||estValueFromBand(l.budget_band)||""}">
+          ${!l.expected_value&&estValueFromBand(l.budget_band)?`<div class="s2l-hint">Estimated from budget band ${esc(fmtBand(l.budget_band))} — adjust if you know better</div>`:""}</div>
         <div class="field"><label>Next follow-up</label><input id="f_fu" type="date" value="${l.next_follow_up||""}"></div>
       </div>
       ${lead?`<div class="field"><label>Stage</label>
@@ -1927,7 +1954,7 @@ function leadForm(lead){
     const row={ name:$("#f_name").value.trim(), phone:$("#f_phone").value.trim(), email:$("#f_email").value.trim(),
       current_address:$("#f_caddr").value.trim(), site_address:$("#f_saddr").value.trim(),
       project_type:$("#f_ptype").value, source:$("#f_src").value,
-      expected_value:Number($("#f_val").value||0), next_follow_up:$("#f_fu").value||null,
+      expected_value:Number($("#f_val").value||0)||estValueFromBand(l.budget_band), next_follow_up:$("#f_fu").value||null,
       stage:lead?$("#f_stage").value:"new", notes:$("#f_notes").value.trim(), tags:[...picked],
       consultant_id:$("#f_consultant_id").value?Number($("#f_consultant_id").value):null,
       designer_id:$("#f_designer_id").value?Number($("#f_designer_id").value):null,
@@ -1937,6 +1964,15 @@ function leadForm(lead){
     Object.keys(QUAL).forEach(k=>row[k]=$("#f_"+k).value||null);
     row.bant_score=bantFromQual(row);
     if(!row.name) return toast("Client name is required");
+    // Lost via the edit form also needs a reason (INTEL-01). The form's values are
+    // already captured in `row`, so replacing the modal here loses nothing; on
+    // cancel the stage stays as it was and the rest of the edits still save.
+    let lostVia=null;
+    if(row.stage==="lost" && (!lead || lead.stage!=="lost")){
+      lostVia=await lostReasonModal(lead||row);
+      if(lostVia) row.lost_reason=lostVia.reason;
+      else { row.stage=lead?lead.stage:"new"; toast("Stage unchanged — a reason is required to mark lost"); }
+    }
     // Duplicate check: same phone or email already exists elsewhere (leads + converted projects)
     const dupe=await findDuplicateContact(row.phone,row.email,lead?lead.id:null);
     if(dupe){
@@ -1947,6 +1983,7 @@ function leadForm(lead){
       ? ["consultant_id","designer_id","pm_id","presales_id"].some(k=>String(row[k]||"")!==String(lead[k]||""))
       : !!(row.consultant_id||row.designer_id||row.pm_id||row.presales_id);
     await saveLeadRow(row,lead);
+    if(lostVia && lead) await sb.from("lead_activities").insert({lead_id:lead.id,type:"Note",text:lostReasonText(lostVia),by_user:me.id});
     if(ownersChanged && (row.consultant_id||row.designer_id||row.pm_id||row.presales_id)){
       pingAssignment(lead?{lead_id:lead.id}:{phone:row.phone});
     }
@@ -2002,6 +2039,58 @@ function confirmDuplicateModal(dupe){
       if(dupe.type==="lead"){ openLead(dupe.record.id); }
       else { activeProject=dupe.record.id; projectTab="overview"; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(dupe.record.id),60); }
     };
+  });
+}
+
+/* ---- INTEL-01: mandatory lost-reason picker. Resolves {reason,detail,note} or null on cancel. ---- */
+function lostReasonModal(l){
+  return new Promise(resolve=>{
+    openModal(`
+      <div class="modal-h">Mark lost · ${esc(l.name||"")}</div>
+      <div class="modal-b">
+        <div class="field"><label>Why did we lose this lead?</label>
+          <select id="lr_reason" class="lf-sel" style="width:100%">
+            <option value="">— pick a reason —</option>
+            ${LOST_REASONS.map(r=>`<option value="${r[0]}">${r[1]}</option>`).join("")}
+          </select></div>
+        <div class="field" id="lr_detail_wrap" style="display:none"><label>Who did they go with?</label>
+          <input id="lr_detail" placeholder="e.g. Livspace, HomeLane, local contractor's name"></div>
+        <div class="field"><label>Note (optional)</label><input id="lr_note" placeholder="Anything worth remembering about why"></div>
+        <div class="s2l-hint">The weekly sales analysis runs on this — one honest reason per lost lead.</div>
+      </div>
+      <div class="modal-f"><button class="ghost" id="lr_cancel">Cancel</button><button class="primary" id="lr_save">Mark lost</button></div>`);
+    $("#lr_reason").onchange=()=>{
+      const v=$("#lr_reason").value;
+      $("#lr_detail_wrap").style.display=(v==="competitor"||v==="local_contractor")?"":"none";
+    };
+    $("#lr_cancel").onclick=()=>{ closeModal(); resolve(null); };
+    $("#lr_save").onclick=()=>{
+      const reason=$("#lr_reason").value;
+      if(!reason) return toast("Pick a reason first");
+      closeModal(); resolve({reason,detail:$("#lr_detail").value.trim(),note:$("#lr_note").value.trim()});
+    };
+  });
+}
+/* Activity text for a lost reason, e.g. "Marked lost · Went with another firm · Livspace" */
+function lostReasonText(lr){
+  const label=(LOST_REASONS.find(r=>r[0]===lr.reason)||["",lr.reason])[1];
+  return `Marked lost · ${label}${lr.detail?" · "+lr.detail:""}${lr.note?" · "+lr.note:""}`;
+}
+/* ---- INTEL-01: soft gate — warn before moving an unqualified lead to proposal/negotiation.
+   Resolves true = move anyway, false = user chose to fill qualification (opens the lead form). ---- */
+function bantGateModal(l){
+  return new Promise(resolve=>{
+    openModal(`
+      <div class="modal-h">Qualification is empty</div>
+      <div class="modal-b">
+        <div style="font-size:13px;color:var(--ink-soft)">This lead has no BANT qualification yet. Proposals to unqualified leads are where most pipeline value leaks — two minutes of qualification makes the weekly analysis (and the close rate) sharper.</div>
+      </div>
+      <div class="modal-f">
+        <button class="ghost" id="bg_anyway">Move anyway</button>
+        <button class="primary" id="bg_fill">Fill qualification</button>
+      </div>`);
+    $("#bg_anyway").onclick=()=>{ closeModal(); resolve(true); };
+    $("#bg_fill").onclick=()=>{ closeModal(); resolve(false); leadForm(l); };
   });
 }
 
@@ -2341,7 +2430,11 @@ async function lwActivity(l,body){
       <select id="act_type"><option value="Note">Client note</option><option value="Call">Call</option><option value="WhatsApp">WhatsApp</option><option value="Meeting">Meeting</option><option value="Email">Email</option><option value="Site Visit">Site visit</option><option value="Quote">Quote</option></select>
       <input id="act_text" placeholder="What did the client say? Record the note…">
       <input id="act_followup" type="date" title="Set next follow-up (optional)" style="flex:0 0 148px;max-width:148px">
-      <button class="primary" id="act_add">Log</button></div>`:""}
+      <button class="primary" id="act_add">Log</button></div>
+    <div class="tagrow" id="objRow" style="margin:-4px 0 14px">
+      <span style="font-size:11px;color:var(--ink-soft);align-self:center">Objections raised:</span>
+      ${OBJECTIONS.map(o=>`<span class="tgopt" data-obj="${o[0]}">${o[1]}</span>`).join("")}
+    </div>`:""}
     <div class="timeline" id="timeline">${(acts||[]).map(a=>{
         const k={Note:"note",Call:"phone",WhatsApp:"chat",Meeting:"users",Email:"mail","Site Visit":"pin",Quote:"file",created:"spark"}[a.type]; const icon=k?icn(k):"•";
         const who=a.by_user?staffNameByProfile(a.by_user):"";
@@ -2349,13 +2442,21 @@ async function lwActivity(l,body){
         const when=dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" · "+dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
         return `<div class="tl-item2"><div class="tl-ic">${icon}</div>
           <div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(a.type)}</span><span class="tl-when2 mono">${when}</span></div>
-          <div class="tl-text2">${esc(a.text||"")}</div>${who?`<div class="tl-who">— ${esc(who)}</div>`:""}</div></div>`;
+          <div class="tl-text2">${esc(a.text||"")}</div>
+          ${(a.objections&&a.objections.length)?`<div class="tagrow" style="margin-top:4px">${a.objections.map(o=>`<span class="qchip">⚑ ${esc((OBJECTIONS.find(x=>x[0]===o)||["",o])[1])}</span>`).join("")}</div>`:""}
+          ${who?`<div class="tl-who">— ${esc(who)}</div>`:""}</div></div>`;
       }).join("")||`<div class="tl-empty">No notes yet. Every call and client conversation logged here builds the lead's history.</div>`}</div>`;
   if(w){
+    const objPicked=new Set();
+    document.querySelectorAll("#objRow .tgopt").forEach(el=>el.onclick=()=>{
+      const o=el.dataset.obj;
+      if(objPicked.has(o)){ objPicked.delete(o); el.classList.remove("on"); }
+      else { objPicked.add(o); el.classList.add("on"); }
+    });
     const add=$("#act_add");
     if(add) add.onclick=async()=>{
       const text=$("#act_text").value.trim(); if(!text) return;
-      const {error}=await sb.from("lead_activities").insert({lead_id:l.id,type:$("#act_type").value,text,by_user:me.id});
+      const {error}=await sb.from("lead_activities").insert({lead_id:l.id,type:$("#act_type").value,text,by_user:me.id,objections:objPicked.size?[...objPicked]:null});
       if(error) return toast(error.message);
       const fu=$("#act_followup").value;
       if(fu){
@@ -2398,6 +2499,22 @@ function bindLeadCommon(l){
       sd.value=l.stage; // revert visual until conversion confirmed
       convertLead(l);
       return;
+    }
+    // Lost → reason is mandatory (INTEL-01). Cancel keeps the current stage.
+    if(newStage==="lost" && l.stage!=="lost"){
+      sd.value=l.stage;
+      const lr=await lostReasonModal(l);
+      if(!lr) return;
+      const {error}=await sb.from("leads").update({stage:"lost",lost_reason:lr.reason,updated_at:new Date().toISOString()}).eq("id",l.id);
+      if(error) return toast(error.message);
+      await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:lostReasonText(lr),by_user:me.id});
+      l.stage="lost"; l.lost_reason=lr.reason; toast("Marked lost"); renderLeadWorkspace(l.id);
+      return;
+    }
+    // Proposal/negotiation with no qualification → soft gate (INTEL-01)
+    if((newStage==="proposal"||newStage==="negotiation") && !(Number(l.bant_score)||bantFromQual(l))){
+      const go=await bantGateModal(l);
+      if(!go){ sd.value=l.stage; return; }
     }
     const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
     if(error){ sd.value=l.stage; return toast(error.message); }
@@ -8052,7 +8169,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b26 · 01 Aug 2026";
+const APP_BUILD = "b27 · 08 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
