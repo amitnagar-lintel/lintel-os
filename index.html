@@ -2451,7 +2451,10 @@ function lostReasonModal(l){
     $("#lr_save").onclick=()=>{
       const reason=$("#lr_reason").value;
       if(!reason) return toast("Pick a reason first");
-      closeModal(); resolve({reason,detail:$("#lr_detail").value.trim(),note:$("#lr_note").value.trim()});
+      // Read BEFORE closeModal() — it wipes #scrim, so reads after it throw and the
+      // resolve never ran: "Mark lost" closed the modal but silently did nothing.
+      const detail=$("#lr_detail").value.trim(), note=$("#lr_note").value.trim();
+      closeModal(); resolve({reason,detail,note});
     };
   });
 }
