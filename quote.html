@@ -8,30 +8,30 @@
 <meta name="theme-color" content="#0D0D27">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root{ --navy:#0D0D27; --navy2:#1A1A40; --gold:#D4A85C; --gold-l:#E9C06B; --ink:#23233F; --paper:#fff; --line:#E0DCD4; }
+  :root{ --navy:#0D0D27; --gold:#DFB05E; --gold-l:#E9C883; --ink:#23233F; --paper:#fff; --line:#E7E2D8; }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
   body{
     background:#F3F1EC; color:var(--ink);
-    font-family:'Jost',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     -webkit-text-size-adjust:100%;            /* stop iOS inflating the sheet's text */
   }
 
   /* ── top bar ─────────────────────────────────────────────────────────── */
   .top{
-    background:linear-gradient(135deg,var(--navy) 0%,var(--navy2) 100%);
+    background:var(--navy); border-bottom:3px solid var(--gold);
     color:#F7F2E9; padding:14px 18px calc(14px + env(safe-area-inset-bottom,0));
     display:flex; align-items:center; gap:12px; flex-wrap:wrap;
     position:sticky; top:0; z-index:20;
   }
-  .brand{font-family:'Cormorant Garamond',Georgia,serif; font-size:19px; font-weight:600; letter-spacing:.3px}
-  .brand small{display:block;font-family:'Jost';font-size:9px;letter-spacing:2.4px;text-transform:uppercase;opacity:.6;font-weight:400}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:16px; font-weight:500; letter-spacing:2.5px; text-transform:uppercase}
+  .brand small{display:block;font-family:'Inter';font-size:8.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--gold);opacity:.95;font-weight:400;margin-top:2px}
   .top .sp{flex:1}
   .btn{
     appearance:none; border:1px solid rgba(212,168,92,.55); background:transparent; color:var(--gold-l);
-    font:500 12px 'Jost'; letter-spacing:1px; text-transform:uppercase;
+    font:500 12px 'Inter'; letter-spacing:1px; text-transform:uppercase;
     padding:9px 15px; border-radius:8px; cursor:pointer; white-space:nowrap; min-height:40px;
   }
   .btn:active{background:rgba(212,168,92,.16)}
@@ -40,7 +40,7 @@
   .wrap{max-width:900px;margin:18px auto 40px;padding:0 14px}
   .card{background:var(--paper);border-radius:12px;overflow:hidden;box-shadow:0 18px 50px -24px rgba(13,13,39,.45)}
   .state{padding:56px 24px;text-align:center;color:#6b6b7a}
-  .state h2{font-family:'Cormorant Garamond',serif;font-size:24px;color:var(--navy);margin:0 0 8px}
+  .state h2{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:22px;color:var(--navy);margin:0 0 8px}
   .spin{width:26px;height:26px;border:2px solid var(--line);border-top-color:var(--gold);border-radius:50%;margin:0 auto 16px;animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:18px 14px 0;line-height:1.7}
@@ -64,8 +64,14 @@
     #sheet table{font-size:12px}
     /* the sheet's inline paddings are generous for A4 — tighten them on phones */
     #sheet > div{padding-left:14px!important;padding-right:14px!important}
+    #sheet div[style*="padding:38px 48px"],#sheet div[style*="padding:26px 48px"],#sheet div[style*="padding:14px 48px"],#sheet div[style*="padding:18px 48px"],#sheet div[style*="padding:36px 48px"]{padding-left:16px!important;padding-right:16px!important}
     #sheet td,#sheet th{padding:6px 8px!important}
-    .brand{font-size:17px}
+    /* redesigned sheet (Aug 2026): collapse its inline grids & fixed columns for phones */
+    #sheet div[style*="grid-template-columns"]{grid-template-columns:1fr!important}
+    #sheet div[style*="width:400px"]{width:100%!important}
+    #sheet div[style*="border-right:1px solid"]{border-right:none!important;border-bottom:1px solid var(--line)}
+    #sheet div[style*="display:flex"]{flex-wrap:wrap}
+    .brand{font-size:14px}
   }
 
   /* Client saves their own PDF from here. */
