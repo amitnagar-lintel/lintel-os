@@ -7972,26 +7972,23 @@ function gClient(p){
   const NAVY="#0D0D27",BRASS="#DFB05E",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7",MUTE="#B8B2AA";
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
   const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
-  const active=gActiveStreams();
   const qLabel=t=>`<div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:${GREY};text-transform:uppercase;margin:0 0 4px">${t}</div><div style="width:34px;height:2px;background:${BRASS};margin-bottom:16px"></div>`;
-  // Detailed BOQ grouped by SECTION -> room (calm styling: no colour banding)
+  // Detailed BOQ grouped ROOM-wise — clients think in rooms; work sections
+  // (Modular / Onsite Carpentry / ...) stay internal to estimator & work orders.
   let detailed='';
-  active.forEach(st=>{
-    const fin=gStreamFin(st), secRows=G.rows.filter(r=>rowStream(r)===st);
-    detailed+=`<tr><td colspan="8" style="padding:18px 10px 6px"><span style="font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:13px;font-weight:700;color:${NAVY};letter-spacing:.4px">${esc(STREAM_LABEL[st])}</span><div style="height:2px;background:linear-gradient(90deg,${BRASS} 60px,${LINE} 60px)"></div></td></tr>`;
-    const rooms=[]; secRows.forEach(r=>{ if(rooms.indexOf(r.room)===-1)rooms.push(r.room); });
-    rooms.forEach(room=>{
-      const rr=secRows.filter(r=>r.room===room);
-      detailed+=`<tr><td colspan="8" style="padding:8px 10px 2px;font-size:9.5px;font-weight:700;letter-spacing:1.6px;color:${GREY};text-transform:uppercase">${esc(room)}</td></tr>`;
-      rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
-        const tag=exc?` <span style="font-size:8.5px;font-weight:700;color:${MUTE};letter-spacing:1px;text-transform:uppercase;border:1px solid ${LINE};border-radius:8px;padding:0 6px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8.5px;font-weight:700;color:${BRASSD};letter-spacing:1px;text-transform:uppercase;border:1px solid ${BRASS};border-radius:8px;padding:0 6px;vertical-align:middle">Optional</span>`:'';
-        const disc=gLineDisc(r), discNote=disc>0?` <span style="font-size:9px;color:${BRASSD}">(${disc}% off)</span>`:'';
-        const itemCell=exc?`<span style="text-decoration:line-through;color:${MUTE}">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${discNote}${tag}`;
-        const remark=(r.remarks&&String(r.remarks).trim())?`<div style="font-size:10px;color:${exc?MUTE:GREY};margin-top:2px;line-height:1.5;font-style:italic">${esc(String(r.remarks).trim())}</div>`:'';
-        const amtCell=exc?`<span style="text-decoration:line-through;color:${MUTE};font-weight:400">${gFmt(gBoosted(r))}</span>`:opt?`<span style="color:${BRASSD};font-weight:500">${gFmt(gBoosted(r))}*</span>`:`${gFmt(gBoosted(r))}`;
-        detailed+=`<tr style="border-bottom:1px solid ${LINE}"><td style="padding:9px 10px;color:${INKS};font-size:11px">${esc(r.room)}</td><td style="padding:9px 10px;color:${NAVY}">${itemCell}${remark}</td><td style="padding:9px 10px;color:${GREY};font-size:10.5px">${esc(r.cat)}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${r.w||'—'}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${r.h||'—'}</td><td style="padding:9px 10px;text-align:right;${exc?'color:'+MUTE:''}">${r.qty}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${esc(r.unit)}</td><td style="padding:9px 10px;text-align:right;font-weight:500">${amtCell}</td></tr>`; });
-    });
-    detailed+=`<tr><td colspan="7" style="padding:8px 10px;text-align:right;font-size:11px;color:${INKS}">${esc(STREAM_LABEL[st])} — subtotal</td><td style="padding:8px 10px;text-align:right;font-weight:600;color:${NAVY};border-top:1px solid ${NAVY}">${gFmt(fin.subM)}</td></tr>`;
+  gRooms().forEach(room=>{
+    const rr=G.rows.filter(r=>r.room===room);
+    if(!rr.length) return;
+    const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
+    detailed+=`<tr><td colspan="7" style="padding:18px 10px 6px"><span style="font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:13px;font-weight:700;color:${NAVY};letter-spacing:.4px">${esc(room)}</span><div style="height:2px;background:linear-gradient(90deg,${BRASS} 60px,${LINE} 60px)"></div></td></tr>`;
+    rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
+      const tag=exc?` <span style="font-size:8.5px;font-weight:700;color:${MUTE};letter-spacing:1px;text-transform:uppercase;border:1px solid ${LINE};border-radius:8px;padding:0 6px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8.5px;font-weight:700;color:${BRASSD};letter-spacing:1px;text-transform:uppercase;border:1px solid ${BRASS};border-radius:8px;padding:0 6px;vertical-align:middle">Optional</span>`:'';
+      const disc=gLineDisc(r), discNote=disc>0?` <span style="font-size:9px;color:${BRASSD}">(${disc}% off)</span>`:'';
+      const itemCell=exc?`<span style="text-decoration:line-through;color:${MUTE}">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${discNote}${tag}`;
+      const remark=(r.remarks&&String(r.remarks).trim())?`<div style="font-size:10px;color:${exc?MUTE:GREY};margin-top:2px;line-height:1.5;font-style:italic">${esc(String(r.remarks).trim())}</div>`:'';
+      const amtCell=exc?`<span style="text-decoration:line-through;color:${MUTE};font-weight:400">${gFmt(gBoosted(r))}</span>`:opt?`<span style="color:${BRASSD};font-weight:500">${gFmt(gBoosted(r))}*</span>`:`${gFmt(gBoosted(r))}`;
+      detailed+=`<tr style="border-bottom:1px solid ${LINE}"><td style="padding:9px 10px;color:${NAVY}">${itemCell}${remark}</td><td style="padding:9px 10px;color:${GREY};font-size:10.5px">${esc(r.cat)}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${r.w||'—'}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${r.h||'—'}</td><td style="padding:9px 10px;text-align:right;${exc?'color:'+MUTE:''}">${r.qty}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${esc(r.unit)}</td><td style="padding:9px 10px;text-align:right;font-weight:500">${amtCell}</td></tr>`; });
+    detailed+=`<tr><td colspan="6" style="padding:8px 10px;text-align:right;font-size:11px;color:${INKS}">${esc(room)} — subtotal</td><td style="padding:8px 10px;text-align:right;font-weight:600;color:${NAVY};border-top:1px solid ${NAVY}">${gFmt(rsub)}</td></tr>`;
   });
   const hasOpt=G.rows.some(r=>gScope(r)==='optional'), hasExc=G.rows.some(r=>gScope(r)==='excluded');
   const scopeNote=(hasOpt||hasExc)?`<div style="font-size:10px;color:${GREY};margin:6px 0 0">${hasOpt?'* Optional items are quoted for reference and are not included in the totals. ':''}${hasExc?'Excluded items are outside the scope of this quotation.':''}</div>`:'';
@@ -8078,7 +8075,6 @@ function gClient(p){
       ${qLabel("Detailed Bill of Quantities")}
       <table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:0">
         <thead><tr style="border-bottom:2px solid ${NAVY}">
-          <th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Room</th>
           <th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Item</th>
           <th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Spec</th>
           <th style="text-align:right;padding:8px 10px;font-size:9.5px;color:${GREY}">W</th><th style="text-align:right;padding:8px 10px;font-size:9.5px;color:${GREY}">H</th>
