@@ -7970,8 +7970,6 @@ function gClient(p){
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
   const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
   const active=gActiveStreams();
-  // Section-wise summary (each section's all-in total) + grand total
-  const roomSummary=active.map(st=>{const fin=gStreamFin(st);return `<tr style="border-bottom:1px solid #E0DCD4"><td style="padding:6px 10px">${esc(STREAM_LABEL[st])}</td><td style="padding:6px 10px;text-align:right;font-weight:500">${gFmt(fin.total)}</td></tr>`;}).join("")+`<tr style="background:#0D0D27"><td style="padding:8px 10px;font-weight:600;color:#fff">Grand Total</td><td style="padding:8px 10px;text-align:right;font-weight:700;color:#DFB05E">${gFmt(f.total)}</td></tr>`;
   // Detailed BOQ grouped by SECTION -> room
   let detailed='';
   active.forEach(st=>{
@@ -8083,10 +8081,8 @@ function gClient(p){
         <div><div class="cpl">Warranty</div><div class="cpv" style="color:#0D0D27">10 Years ✓</div></div>
       </div>
       ${scopePanel}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px">
-        <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Section Summary</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:2px solid #E0DCD4"><th style="text-align:left;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Section</th><th style="text-align:right;padding:6px 10px;font-size:10px;color:#A09A93;text-transform:uppercase">Total</th></tr></thead><tbody>${roomSummary}</tbody></table></div>
-        <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Cost Summary</div>
+      <div style="display:grid;grid-template-columns:1fr;margin-bottom:28px">
+        <div style="max-width:440px;margin-left:auto;width:100%"><div style="font-size:10px;font-weight:700;letter-spacing:2px;color:#9A9490;text-transform:uppercase;margin-bottom:12px">Your Investment</div>
           <div style="font-size:12px">
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4"><span style="color:#6B6560">Work total</span><span>${gFmt(f.subM)}</span></div>
             <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E0DCD4"><span style="color:#6B6560">Design &amp; handling</span><span>${gFmt(f.fee)}</span></div>
