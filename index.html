@@ -3895,6 +3895,8 @@ async function pwPayments(p,body){
   const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
   const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx").order("id");
   const list=pays||[];
+  // received-so-far against each milestone (links from PAYCAP-01)
+  const recByMile={}; list.forEach(r=>{ if(r.milestone_id!=null) recByMile[r.milestone_id]=(recByMile[r.milestone_id]||0)+Number(r.amount||0); });
   const mlist=miles||[];
   const received=list.reduce((s,r)=>s+Number(r.amount||0),0);
   const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
@@ -3917,10 +3919,11 @@ async function pwPayments(p,body){
           <td>${esc(m.label)}</td>
           <td class="num">${m.percent}%</td>
           <td class="num mono">${fmt(m.amount)}</td>
-          <td>${m.status==='paid'?'<span class="ex-st done">Paid</span>':m.status==='link_sent'?'<span class="ex-st in_progress">Link sent</span>':'<span class="ex-st todo">Pending</span>'}</td>
+          <td>${m.status==='paid'?'<span class="ex-st done">Paid</span>':m.status==='part_paid'?`<span class="ex-st in_progress">Part-paid</span><div style="font-size:10px;color:var(--ink-soft)">${fmt(recByMile[m.id]||0)} of ${fmt(m.amount)}</div>`:m.status==='link_sent'?'<span class="ex-st in_progress">Link sent</span>':'<span class="ex-st todo">Pending</span>'}</td>
           <td class="mono" style="font-size:12px">${m.pi_number?esc(m.pi_number):'—'}</td>
           ${ro?'':`<td style="white-space:nowrap">
-            <button class="linkbtn" data-pi="${m.id}">${m.pi_number?'View PI':'Generate PI'}</button>
+            ${m.status!=='paid'?`<button class="linkbtn" data-mrec="${m.id}">✓ Mark received</button>`:''}
+            <button class="linkbtn" data-pi="${m.id}" style="margin-left:6px">${m.pi_number?'View PI':'Generate PI'}</button>
             ${m.status!=='paid'?`<button class="linkbtn" data-plink="${m.id}" style="margin-left:6px">${m.razorpay_link?'Copy link':'Create link'}</button>`:''}
           </td>`}
         </tr>`).join("")}
@@ -3960,6 +3963,10 @@ async function pwPayments(p,body){
     body.querySelectorAll("[data-plink]").forEach(b=>b.onclick=()=>{
       const m=mlist.find(x=>String(x.id)===String(b.dataset.plink));
       if(m) createRazorpayLink(p,m);
+    });
+    body.querySelectorAll("[data-mrec]").forEach(b=>b.onclick=()=>{
+      const m=mlist.find(x=>String(x.id)===String(b.dataset.mrec));
+      if(m) paymentForm(p,m,recByMile[m.id]||0);
     });
     body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
       if(!confirm("Delete this payment entry?")) return;
@@ -4244,32 +4251,42 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
   };
 }
 
-function paymentForm(p){
+function paymentForm(p, milestone, alreadyRec){
+  // milestone optional: when set, this receipt links to that schedule row and
+  // flips it to Paid / Part-paid. Any mode (Bank Transfer / UPI / Cheque / Cash).
+  const remaining=milestone?Math.max(0,Number(milestone.amount||0)-Number(alreadyRec||0)):0;
+  const mHint=milestone?`<div class="hint" style="margin:-4px 0 10px">Milestone <b>${esc(milestone.label)}</b> · ${fmt(milestone.amount)}${alreadyRec?` · already received ${fmt(alreadyRec)} · remaining ${fmt(remaining)}`:''}</div>`:'';
+  const modeOrder=["Bank Transfer","UPI","Cheque","Cash","Card"];
   openModal(`
-    <div class="modal-h">Record payment</div>
+    <div class="modal-h">${milestone?'Mark received · '+esc(milestone.label):'Record payment'}</div>
     <div class="modal-b">
+      ${mHint}
       <div class="grid2">
-        <div class="field"><label>Amount (₹)</label><input id="pay_amt" type="number" placeholder="0"></div>
+        <div class="field"><label>Amount (₹)</label><input id="pay_amt" type="number" placeholder="0" value="${milestone?remaining||milestone.amount:''}"></div>
         <div class="field"><label>Date</label><input id="pay_date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Stage</label><select id="pay_stage">${opts(["Booking","Production","Balance","Custom"])}</select></div>
-        <div class="field"><label>Mode</label><select id="pay_mode">${opts(["UPI","Bank Transfer","Cheque","Cash","Card"])}</select></div>
+        <div class="field"><label>Stage</label><select id="pay_stage">${opts(milestone?[milestone.label,"Booking","Production","Balance","Custom"]:["Booking","Production","Balance","Custom"])}</select></div>
+        <div class="field"><label>Mode</label><select id="pay_mode">${opts(modeOrder,"Bank Transfer")}</select></div>
       </div>
-      <div class="field"><label>Reference (txn / cheque no.)</label><input id="pay_ref"></div>
+      <div class="field"><label>Reference (txn / cheque / UTR no.)</label><input id="pay_ref"></div>
       <div class="field"><label>Note</label><input id="pay_note"></div>
     </div>
-    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="pay_save">Record</button></div>`);
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="pay_save">${milestone?'Record receipt':'Record'}</button></div>`);
   $("#pay_save").onclick=async()=>{
     const amt=Number($("#pay_amt").value||0);
     if(!amt) return toast("Enter an amount");
     const {error}=await sb.from("project_payments").insert({
       project_id:p.id, amount:amt, paid_on:$("#pay_date").value||new Date().toISOString().slice(0,10),
       stage:$("#pay_stage").value, mode:$("#pay_mode").value, reference:$("#pay_ref").value.trim()||null,
-      note:$("#pay_note").value.trim()||null, recorded_by:me.id
+      note:$("#pay_note").value.trim()||null, recorded_by:me.id, milestone_id:milestone?milestone.id:null
     });
     if(error) return toast(error.message);
-    closeModal(); toast("Payment recorded"); pwPayments(p,$("#pwBody"));
+    if(milestone){
+      const covered=(Number(alreadyRec||0)+amt) >= Number(milestone.amount||0)-1;   // ₹1 rounding tolerance
+      await sb.from("payment_milestones").update({ status:covered?'paid':'part_paid', paid_at:covered?new Date().toISOString():null }).eq("id",milestone.id);
+    }
+    closeModal(); toast(milestone?'Receipt recorded':'Payment recorded'); pwPayments(p,$("#pwBody"));
   };
 }
 
