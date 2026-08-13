@@ -4290,7 +4290,7 @@ async function paymentReceipt(p, pay, body){
     <button class="ghost" id="rcBack">← Back to payments</button>
     <button class="primary" id="rcPrint">Save / Print PDF</button>
     ${p.client_phone?`<button class="ghost" id="rcWA">Share on WhatsApp</button>`:''}
-    <button class="ghost" id="rcMail">Share via email</button>
+    <button class="primary" id="rcMail">✉ Email to client</button>
   </div>
   <div id="rcpt-sheet" style="background:#fff;max-width:760px;margin:0 auto;border:1px solid ${LINE};border-radius:12px;overflow:hidden">
     <div style="background:${NAVY};padding:22px 32px;display:flex;align-items:center;gap:18px">
@@ -4338,7 +4338,18 @@ async function paymentReceipt(p, pay, body){
   $("#rcPrint").onclick=()=>{ const s=document.getElementById("rcpt-sheet"); s.classList.add("printing"); window.print(); setTimeout(()=>s.classList.remove("printing"),500); };
   const ackMsg=`Dear ${p.client_name||'Client'},\n\nWe acknowledge receipt of ${fmt(pay.amount)} towards your project${p.code?` (${p.code})`:''} with Lintel Space Atelier${pay.stage?` — ${pay.stage}`:''}.\n\nReceipt No: ${rno}\nPaid on: ${dF(pay.paid_on)} · ${pay.mode||''}${pay.reference?`\nReference: ${pay.reference}`:''}\n\nReceived to date: ${fmt(received)}${invoiced?`\nBalance: ${fmt(balance)}`:''}\n\nThank you!\n— Team Lintel`;
   if(p.client_phone && $("#rcWA")) $("#rcWA").onclick=()=>waOpen(p.client_phone,ackMsg);
-  $("#rcMail").onclick=()=>{ location.href=`mailto:${p.client_email||''}?subject=${encodeURIComponent('Payment receipt — '+(p.code||p.name||'Lintel Space Atelier'))}&body=${encodeURIComponent(ackMsg)}`; };
+  // Email to client: sends directly from contact@lintelspace.com, CC the project team.
+  $("#rcMail").onclick=async()=>{
+    if(!confirm(`Email this receipt to ${esc(p.client_name||'the client')}${p.client_email?` (${p.client_email})`:''}?\n\nSent from contact@lintelspace.com and CC'd to the project team.`)) return;
+    const btn=$("#rcMail"); btn.disabled=true; const old=btn.textContent; btn.textContent="Sending…";
+    try{
+      const {data,error}=await sb.functions.invoke("send-receipt",{body:{payment_id:pay.id}});
+      const err=error||(data&&data.error);
+      if(err) throw new Error((data&&data.error)||error.message||"send failed");
+      toast(`Receipt emailed to client${data&&data.cc_count?` · CC ${data.cc_count} team`:''}`);
+    }catch(e){ toast("Could not email: "+(e.message||e)); }
+    finally{ btn.disabled=false; btn.textContent=old; }
+  };
 }
 
 function paymentForm(p, milestone, alreadyRec){
