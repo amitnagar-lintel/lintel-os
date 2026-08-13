@@ -517,6 +517,7 @@
   /* ---- Cutting Optimizer (Production) ---- */
   #cut-sheet{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
   @media print{ #cut-sheet.printing,#cut-sheet.printing *{visibility:visible} body:has(#cut-sheet.printing) *{visibility:hidden} #cut-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
+  @media print{ #rcpt-sheet.printing,#rcpt-sheet.printing *{visibility:visible} body:has(#rcpt-sheet.printing) *{visibility:hidden} #rcpt-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
   .cut-wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
   .cut-hd{background:linear-gradient(135deg,#0D0D27,#1A1A40);padding:16px 22px;display:flex;align-items:center;gap:14px}
   .cut-hd img{width:46px;height:46px;background:#fff;border-radius:50%;padding:3px}
@@ -3940,7 +3941,7 @@ async function pwPayments(p,body){
           ${ro?'':`<button class="ghost" id="payInv">Set invoiced amount</button><button class="primary" id="payAdd">+ Record payment</button>`}
         </div></div>
       ${list.length?`<table><thead><tr><th>Date</th><th>Stage</th><th>Mode</th><th>Reference</th><th class="num">Amount</th>${ro?'':'<th></th>'}</tr></thead><tbody>
-        ${list.map(r=>`<tr><td>${r.paid_on}</td><td>${esc(r.stage||'—')}</td><td>${esc(r.mode||'—')}</td><td class="mono">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td>${ro?'':`<td><button class="linkbtn del" data-pid="${r.id}">Delete</button></td>`}</tr>`).join("")}
+        ${list.map(r=>`<tr><td>${r.paid_on}</td><td>${esc(r.stage||'—')}</td><td>${esc(r.mode||'—')}</td><td class="mono">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td>${ro?'':`<td style="white-space:nowrap"><button class="linkbtn" data-rcpt="${r.id}">Receipt</button> <button class="linkbtn del" data-pid="${r.id}" style="margin-left:6px">Delete</button></td>`}</tr>`).join("")}
       </tbody></table>`:emptyState("No payments recorded yet",ro?"":"Record the first receipt with + Record payment.")}
     </div>`;
 
@@ -3967,6 +3968,10 @@ async function pwPayments(p,body){
     body.querySelectorAll("[data-mrec]").forEach(b=>b.onclick=()=>{
       const m=mlist.find(x=>String(x.id)===String(b.dataset.mrec));
       if(m) paymentForm(p,m,recByMile[m.id]||0);
+    });
+    body.querySelectorAll("[data-rcpt]").forEach(b=>b.onclick=()=>{
+      const r=list.find(x=>String(x.id)===String(b.dataset.rcpt));
+      if(r) paymentReceipt(p,r,body);
     });
     body.querySelectorAll("[data-pid]").forEach(b=>b.onclick=async()=>{
       if(!confirm("Delete this payment entry?")) return;
@@ -4249,6 +4254,91 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
     sb.from("lead_activities"); // no-op guard
     toast("Opening WhatsApp");
   };
+}
+
+/* Indian rupees → words (whole rupees) for the payment receipt. */
+function rupeesInWords(num){
+  num=Math.round(Number(num)||0);
+  if(num<=0) return "Zero Rupees Only";
+  const a=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+  const b=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+  const two=n=>n<20?a[n]:(b[Math.floor(n/10)]+(n%10?" "+a[n%10]:""));
+  const three=n=>{const h=Math.floor(n/100),r=n%100;return (h?a[h]+" Hundred"+(r?" ":""):"")+(r?two(r):"");};
+  let out="", crore=Math.floor(num/10000000); num%=10000000;
+  const lakh=Math.floor(num/100000); num%=100000;
+  const thou=Math.floor(num/1000); num%=1000;
+  if(crore) out+=three(crore)+" Crore ";
+  if(lakh) out+=two(lakh)+" Lakh ";
+  if(thou) out+=two(thou)+" Thousand ";
+  if(num) out+=three(num);
+  return out.trim().replace(/\s+/g,' ')+" Rupees Only";
+}
+
+/* Payment receipt — a plain "we have received your payment" acknowledgement.
+   Client details auto-captured from the project. Brand navy + brass, one page. */
+async function paymentReceipt(p, pay, body){
+  const NAVY="#0D0D27",BRASS="#DFB05E",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7";
+  const {data:allPays}=await sb.from("project_payments").select("amount").eq("project_id",p.id);
+  const received=(allPays||[]).reduce((s,r)=>s+Number(r.amount||0),0);
+  const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
+  const balance=Math.max(0,invoiced-received);
+  const dF=d=>d?new Date((String(d).length<=10?d+'T00:00:00':d)).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
+  const rno=`LSA/RCPT/${p.code?String(p.code).replace(/[^0-9A-Za-z]/g,''):'P'+p.id}/${pay.id}`;
+  body.innerHTML=`
+  <div class="print-hint noprint">🖨 Use “Save / Print” to keep a PDF, or share the acknowledgement with the client.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="noprint">
+    <button class="ghost" id="rcBack">← Back to payments</button>
+    <button class="primary" id="rcPrint">Save / Print PDF</button>
+    ${p.client_phone?`<button class="ghost" id="rcWA">Share on WhatsApp</button>`:''}
+    <button class="ghost" id="rcMail">Share via email</button>
+  </div>
+  <div id="rcpt-sheet" style="background:#fff;max-width:760px;margin:0 auto;border:1px solid ${LINE};border-radius:12px;overflow:hidden">
+    <div style="background:${NAVY};padding:22px 32px;display:flex;align-items:center;gap:18px">
+      <img src="${LSA_SEAL}" style="width:56px;height:56px;object-fit:contain;background:#fff;border-radius:50%;padding:3px;flex-shrink:0">
+      <div style="flex:1"><div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;letter-spacing:3.5px;color:#fff;font-weight:500">LINTEL SPACE ATELIER</div>
+        <div style="font-size:8.5px;letter-spacing:3px;color:${BRASS};margin-top:4px;text-transform:uppercase">Where luxury meets functionality</div></div>
+      <div style="text-align:right;font-size:9.5px;color:rgba(255,255,255,.55);line-height:1.7">Kalyan Nagar, Bengaluru 560043<br>+91 99165 58777 · lintelspace.com</div>
+    </div>
+    <div style="height:3px;background:${BRASS}"></div>
+    <div style="padding:30px 34px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:22px">
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:22px;font-weight:700;color:${NAVY}">Payment Receipt</div>
+        <div style="text-align:right;font-size:11px;color:${INKS}"><div>Receipt No: <b style="color:${NAVY}">${esc(rno)}</b></div><div>Issued: <b style="color:${NAVY}">${dF(new Date().toISOString())}</b></div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px 20px;background:${PAPER};border:1px solid ${LINE};border-radius:10px;padding:16px 20px;margin-bottom:22px;font-size:11.5px">
+        <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Received from</div><b>${esc(p.client_name||p.name||'—')}</b><div style="color:${GREY};font-size:10.5px">${esc(p.client_phone||'')}</div></div>
+        <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Project</div><b>${esc((p.code?p.code+' · ':'')+(p.name||''))}</b></div>
+        <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Property</div><b>${esc(p.site_address||p.property||'—')}</b></div>
+      </div>
+      <div style="border:1px solid ${LINE};border-radius:10px;overflow:hidden;margin-bottom:22px">
+        <div style="background:${NAVY};display:flex;justify-content:space-between;align-items:baseline;padding:16px 22px">
+          <span style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${BRASS};font-weight:600">Received with thanks</span>
+          <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;color:#fff;font-size:24px">${fmt(pay.amount)}</span>
+        </div>
+        <div style="padding:8px 22px 4px;font-size:11.5px;color:${INKS};font-style:italic">${esc(rupeesInWords(pay.amount))}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 20px;padding:12px 22px 18px;font-size:11.5px">
+          <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:2px">Towards</div><b>${esc(pay.stage||'Project payment')}</b></div>
+          <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:2px">Mode</div><b>${esc(pay.mode||'—')}</b></div>
+          <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:2px">Paid on</div><b>${dF(pay.paid_on)}</b></div>
+          ${pay.reference?`<div style="grid-column:1/-1"><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:2px">Reference</div><b>${esc(pay.reference)}</b></div>`:''}
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:28px;font-size:11.5px;color:${INKS};margin-bottom:24px">
+        <div>Received to date: <b style="color:${NAVY}">${fmt(received)}</b></div>
+        ${invoiced?`<div>Balance: <b style="color:${balance>0?BRASSD:'#2E7D5B'}">${fmt(balance)}</b></div>`:''}
+      </div>
+      <div style="font-size:10.5px;color:${GREY};line-height:1.7;border-top:1px solid ${LINE};padding-top:14px">Thank you for your payment. This is a computer-generated acknowledgement of the amount received and does not require a signature.</div>
+    </div>
+    <div style="border-top:3px solid ${BRASS};background:${NAVY};padding:12px 34px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:11px;color:#fff;letter-spacing:2px">LINTEL SPACE ATELIER</div>
+      <div style="font-size:9.5px;color:rgba(255,255,255,.6)">+91 99165 58777 · contact@lintelspace.com</div>
+    </div>
+  </div>`;
+  $("#rcBack").onclick=()=>pwPayments(p,body);
+  $("#rcPrint").onclick=()=>{ const s=document.getElementById("rcpt-sheet"); s.classList.add("printing"); window.print(); setTimeout(()=>s.classList.remove("printing"),500); };
+  const ackMsg=`Dear ${p.client_name||'Client'},\n\nWe acknowledge receipt of ${fmt(pay.amount)} towards your project${p.code?` (${p.code})`:''} with Lintel Space Atelier${pay.stage?` — ${pay.stage}`:''}.\n\nReceipt No: ${rno}\nPaid on: ${dF(pay.paid_on)} · ${pay.mode||''}${pay.reference?`\nReference: ${pay.reference}`:''}\n\nReceived to date: ${fmt(received)}${invoiced?`\nBalance: ${fmt(balance)}`:''}\n\nThank you!\n— Team Lintel`;
+  if(p.client_phone && $("#rcWA")) $("#rcWA").onclick=()=>waOpen(p.client_phone,ackMsg);
+  $("#rcMail").onclick=()=>{ location.href=`mailto:${p.client_email||''}?subject=${encodeURIComponent('Payment receipt — '+(p.code||p.name||'Lintel Space Atelier'))}&body=${encodeURIComponent(ackMsg)}`; };
 }
 
 function paymentForm(p, milestone, alreadyRec){
