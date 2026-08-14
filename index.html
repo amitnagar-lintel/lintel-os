@@ -826,6 +826,20 @@
     .lw-pills{margin-left:0;width:100%;justify-content:flex-start}
     .pw-val{margin-left:0}
   }
+  /* Post-sales support tickets */
+  .tk{margin-bottom:12px}
+  .tk-hot{border-left:3px solid #DFB05E}
+  .tk-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .tk-age{color:var(--ink-soft);font-size:12px}
+  .tk-subj{font-weight:600;margin-bottom:2px}
+  .tk-detail{font-size:14px;margin-bottom:4px;white-space:pre-wrap}
+  .tk-thread{border-top:1px solid var(--line);margin-top:10px;padding-top:8px;display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto}
+  .tk-ev{font-size:13px}
+  .tk-ev-who{font-weight:600}
+  .tk-ev-when{color:var(--ink-soft);font-size:12px}
+  .tk-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:10px;padding-top:10px}
+  .tk-actions select,.tk-actions input{padding:6px 8px;font-size:13px}
+  .tk-note{flex:1;min-width:140px}
 </style>
 </head>
 <body>
@@ -1536,11 +1550,80 @@ async function renderClientReplies(hostSel){
   crStartTicker(); if(typeof dashAttnSync==="function")dashAttnSync();
 }
 
+/* ============== POST-SALES QUEUE · dashboard strip ==============
+   Aftercare tickets filed by Priya (or staff) into support_tickets
+   (POSTSALE-01). Same action-inbox shape as the client-reply strip:
+   needs_action & un-acked rows, mine-or-unassigned by default. */
+let psShowAll=null, psTimer=null, psHost=null;
+function psStartTicker(){
+  if(psTimer) return;
+  psTimer=setInterval(()=>{
+    if(!psHost||!$(psHost)){ clearInterval(psTimer); psTimer=null; return; }
+    renderPostSales(psHost);
+  },60000);
+}
+async function renderPostSales(hostSel){
+  const host=$(hostSel); if(!host) return;
+  await ensureStaff();
+  psHost=hostSel;
+  if(psShowAll===null) psShowAll=isAdminLevel();
+  const mine=myStaffId();
+  const {data,error}=await sb.from("support_tickets")
+    .select("id,project_id,category,priority,subject,detail,client_name,assignee_id,created_at,projects(code,name)")
+    .eq("needs_action",true).is("acked_at",null)
+    .order("created_at",{ascending:false}).limit(30);
+  // Before POSTSALE-01 is applied the table doesn't exist — degrade to nothing.
+  if(error){ host.innerHTML=""; return; }
+  const rows=(data||[]).filter(r=>psShowAll||!mine||r.assignee_id===null||String(r.assignee_id)===String(mine));
+  if(!rows.length){ host.innerHTML=""; psStartTicker(); return; }
+  host.innerHTML=`<div class="cr-strip">
+    <div class="cr-head">
+      <span class="cr-title">Post-sales queue · action pending <span class="cr-n">${rows.length}</span></span>
+      ${mine?`<button class="ghost sm" id="psToggle">${psShowAll?"Only mine":"Show all"}</button>`:""}
+    </div>
+    ${rows.map(r=>{
+      const pr=r.projects||{};
+      const mins=Math.max(0,Math.round((Date.now()-new Date(r.created_at).getTime())/60000));
+      const age=mins<60?mins+"m":mins<1440?Math.round(mins/60)+"h":Math.round(mins/1440)+"d";
+      const owner=r.assignee_id?staffName(r.assignee_id):"";
+      const prio=r.priority&&r.priority!=="normal"?` <span class="ch" style="background:${TICKET_PRIO_COLOR[r.priority]||"#5b86b3"};color:#fff">${esc(r.priority)}</span>`:"";
+      return `<div class="cr-item">
+        <div class="cr-main">
+          <div class="cr-lead">${esc(r.client_name||pr.name||("Project #"+r.project_id))} <span class="ch ch-other">${esc(TICKET_CAT[r.category]||r.category)}</span>${prio}${
+            r.assignee_id===null?`<span class="ch ch-warn">Unassigned</span>`:
+            (psShowAll&&owner?`<span class="ch ch-other">${esc(owner)}</span>`:"")}</div>
+          <div class="cr-text">${esc(r.subject||r.detail||"")}</div>
+        </div>
+        <div class="cr-side">
+          <span class="cr-age ${mins>120?"hot":""}">${age} ago</span>
+          <button class="chip" data-ps-open="${r.project_id}">Open</button>
+          ${canWrite()?`<button class="chip" data-ps-ack="${r.id}">Mark handled</button>`:""}
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+  const tg=$("#psToggle"); if(tg) tg.onclick=()=>{ psShowAll=!psShowAll; renderPostSales(hostSel); };
+  host.querySelectorAll("[data-ps-open]").forEach(b=>b.onclick=()=>{
+    const pid=Number(b.dataset.psOpen);
+    activeProject=pid; projectTab="support"; activeLead=null;
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    render("projects"); setTimeout(()=>renderProjectWorkspace(pid),60);
+  });
+  host.querySelectorAll("[data-ps-ack]").forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    const {error:e}=await sb.from("support_tickets")
+      .update({needs_action:false,acked_at:new Date().toISOString(),acked_by:me.id,status:"ack"}).eq("id",Number(b.dataset.psAck));
+    if(e){ toast("Couldn't mark handled — "+e.message); b.disabled=false; return; }
+    renderPostSales(hostSel);
+  });
+  psStartTicker(); if(typeof dashAttnSync==="function")dashAttnSync();
+}
+
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim()))?"":"none";
 }
 function gotoTab(view){
   document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));
@@ -1612,6 +1695,7 @@ async function renderDashboard(){
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashClientReplies"></div>
+      <div id="dashPostSales"></div>
       <div id="dashS2lCalls"></div>
     </section>
     <section class="dash-kpis" id="dashKpis">
@@ -1658,6 +1742,7 @@ async function renderDashboard(){
   s2lRenderDashKpis(s2l||{});
   s2lRenderTodayCalls(calls||[]);
   renderClientReplies("#dashClientReplies");
+  renderPostSales("#dashPostSales");
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
@@ -3462,6 +3547,13 @@ function handoverPill(p){
     ? `<span class="pill approved">Snag-free</span>`
     : `<span class="pill sent">Snags open</span>`;
 }
+function warrantyPill(p){
+  // Only meaningful once a project reaches handover
+  if(p.current_stage!=="Handover" && p.status!=="completed") return "";
+  return p.warranty_registered
+    ? `<span class="pill approved" title="Warranty activated">Warranty active</span>`
+    : `<span class="pill sent" title="Warranty not yet activated">Warranty pending</span>`;
+}
 
 async function renderProjects(){
   if(activeProject) return renderProjectWorkspace(activeProject);
@@ -3591,8 +3683,12 @@ async function projMarkHandover(p,pct){
   if(!p||!canWrite()) return;
   if(!projGate(pct,100,"Handover")) return;
   if(!confirm(`Mark ${p.name} as handed over?\n\nIt starts with snags open — use “Snags cleared” once the snag list is resolved.`)) return;
-  const {error}=await sb.from("projects").update({current_stage:"Handover",handover_status:"snag"}).eq("id",p.id);
+  const hoPatch={current_stage:"Handover",handover_status:"snag"};
+  // Anchor the warranty clock on handover (the client must still activate within 7 days).
+  if(!p.warranty_start) hoPatch.warranty_start=new Date().toISOString().slice(0,10);
+  const {error}=await sb.from("projects").update(hoPatch).eq("id",p.id);
   if(error) return toast(error.message);
+  Object.assign(p,hoPatch);
   await projSyncStones(p.id,[...DESIGN_STAGES,"Production","Installation"],"Handover");
   await projLog(p,`Handed over · ${pct}% collected · snag list open`);
   toast("Handed over — snags open");
@@ -3618,7 +3714,21 @@ async function projCloseProject(p){
   projListTab="closed"; renderProjects();
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["finance","Finance"],["studio","Studio"],["site","Site"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["finance","Finance"],["studio","Studio"],["site","Site"],["support","Support"]];
+// Post-sales / aftercare — Warranty Charter terms (mirror of postSalesEngine.js WARRANTY_TERMS)
+const WARRANTY_TERMS=[
+  {key:"kitchen",     label:"Modular kitchen (cabinets, shutters, drawers, panels)", years:10, note:"100% free replacement"},
+  {key:"wardrobe",    label:"Modular wardrobes & storage",                            years:5,  note:""},
+  {key:"semi_modular",label:"Semi-modular products",                                  years:3,  note:""},
+  {key:"sofa",        label:"Sofas — structure 3y, foam & cushioning 2y",             years:3,  note:""},
+  {key:"furniture",   label:"Furniture & solid wood",                                 years:1,  note:"lifetime cover on borer/termite"},
+  {key:"services",    label:"On-site services (paint, false ceiling, electrical, plumbing)", years:1, note:"tapering cover"}
+];
+const TICKET_CAT={warranty_claim:"Warranty claim",service_request:"Service request",complaint:"Complaint",payment_query:"Payment query",status_query:"Status query",change_request:"Change request",general:"General"};
+const TICKET_STATUSES=["open","ack","in_progress","resolved","closed"];
+const TICKET_PRIOS=["low","normal","high","urgent"];
+const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
+function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
   finance:[["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
@@ -3626,7 +3736,7 @@ const PROJ_GROUPS={
 const PROJ_SUB2GROUP={payments:"finance",orders:"finance",procurement:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",execution:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"execution"};
 // Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
-const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","execution","documents","team"];
+const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","execution","documents","team","support"];
 const projGroupSubs=g=>isDesignPartner()?PROJ_GROUPS[g].filter(s=>PARTNER_PROJ_TABS.includes(s[0])):PROJ_GROUPS[g];
 const projTabsFor=()=>PROJ_TABS.filter(t=>PROJ_GROUPS[t[0]]?projGroupSubs(t[0]).length:(!isDesignPartner()||PARTNER_PROJ_TABS.includes(t[0])));
 
@@ -3643,7 +3753,7 @@ async function renderProjectWorkspace(pid){
       <button class="ghost" id="pwBack">← All projects</button>
       <div class="pw-title"><span class="mono pw-code">${esc(p.code||"")}</span>
         <h2 class="display">${esc(p.name)}</h2>
-        <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)}</div>
+        <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)} ${warrantyPill(p)}</div>
       <div class="pw-val mono">${fmt(p.contract_value)}</div>
     </div>
     <nav class="pw-tabs" id="pwTabs">
@@ -3667,6 +3777,7 @@ async function drawProjectTab(p){
   if(projectTab==="overview")   return pwOverview(p,body);
   if(projectTab==="client")     return pwClient(p,body);
   if(projectTab==="boq")        return pwBoq(p,body);
+  if(projectTab==="support")    return pwSupport(p,body);
   if(!PROJ_GROUPS[projectTab]) return;
   const subs=projGroupSubs(projectTab); if(!subs.length) return;
   let cur=projSubSel[projectTab]; if(!subs.some(s=>s[0]===cur)) cur=subs[0][0]; projSubSel[projectTab]=cur;
@@ -5286,6 +5397,163 @@ function pwClient(p,body){
     if(error) return toast(error.message);
     toast("Saved"); Object.assign(p,row);
   };
+}
+
+/* ---- Support (post-sales / aftercare) ---- */
+function ticketAge(iso){
+  const mins=Math.max(0,Math.round((Date.now()-new Date(iso).getTime())/60000));
+  return mins<60?mins+"m":mins<1440?Math.round(mins/60)+"h":Math.round(mins/1440)+"d";
+}
+function ticketEventLine(ev){
+  const who = ev.kind==="client_msg"?"Client" : ev.kind==="priya_msg"?"Priya"
+            : ev.kind==="status_change"?"System" : (ev.by_user?esc(staffNameByProfile(ev.by_user)||"Staff"):"Staff");
+  const when=new Date(ev.created_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});
+  return `<div class="tk-ev"><span class="tk-ev-who">${who}</span> · <span class="tk-ev-when">${when}</span><div>${esc(ev.text||"")}</div></div>`;
+}
+async function pwSupport(p,body){
+  await ensureStaff();
+  const ro=!canWrite();
+  body.innerHTML=`<div class="pw-card">Loading support…</div>`;
+  const {data:tickets,error}=await sb.from("support_tickets")
+    .select("*, support_ticket_events(id,kind,text,by_user,created_at)")
+    .eq("project_id",p.id).order("created_at",{ascending:false});
+  if(error){
+    body.innerHTML=`<div class="pw-card"><div class="sec-label">Support</div><div>${esc(error.message)}</div>
+      <div class="sub" style="margin-top:6px">If this mentions a missing relation, apply migration POSTSALE-01 first.</div></div>`;
+    return;
+  }
+  const ts=tickets||[];
+  const open=ts.filter(t=>t.status!=="closed"&&t.status!=="resolved");
+
+  // ── Warranty card ──
+  const wStart=p.warranty_start;
+  const wStatusTxt = p.warranty_registered
+    ? `Activated${p.warranty_activated_at?` on ${new Date(p.warranty_activated_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}`:""}`
+    : ((p.current_stage==="Handover"||p.status==="completed")
+        ? "Not yet activated — client should register within 7 days of handover (quoting the Project ID)."
+        : "Warranty activates at handover.");
+  const covRows=WARRANTY_TERMS.map(t=>{
+    const exp=warrantyExpiry(wStart,t.years);
+    return `<tr><td>${esc(t.label)}${t.note?` <span class="sub">· ${esc(t.note)}</span>`:""}</td><td class="num">${t.years} yr${t.years>1?"s":""}</td><td>${exp?esc(exp):"—"}</td></tr>`;
+  }).join("");
+  const warrantyCard=`<div class="pw-card">
+    <div class="sec-label">Warranty</div>
+    <div class="grid2">
+      <div class="field"><label>Status</label><div>${p.warranty_registered?`<span class="pill approved">Active</span>`:`<span class="pill sent">Pending</span>`} ${esc(wStatusTxt)}</div></div>
+      <div class="field"><label>Warranty start (handover)</label><div>${wStart||"—"}</div></div>
+    </div>
+    <table style="margin-top:8px"><thead><tr><th>Category</th><th class="num">Term</th><th>Covered until</th></tr></thead><tbody>${covRows}</tbody></table>
+    ${(!ro&&!p.warranty_registered)?`<div style="margin-top:12px"><button class="primary" id="wActivate">Register warranty</button>
+      <span class="sub" style="margin-left:8px">Marks the warranty active on the client's behalf (sets today as the start if unset).</span></div>`:""}
+  </div>`;
+
+  // ── Tickets ──
+  const ticketHtml = t=>{
+    const catLabel=TICKET_CAT[t.category]||t.category;
+    const prColor=TICKET_PRIO_COLOR[t.priority]||"#5b86b3";
+    const owner=t.assignee_id?staffName(t.assignee_id):"Unassigned";
+    const evs=(t.support_ticket_events||[]).slice().sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+    return `<div class="pw-card tk ${t.needs_action?"tk-hot":""}">
+      <div class="tk-top">
+        <span class="pill" style="background:#EFE9DA">${esc(catLabel)}</span>
+        <span class="pill" style="background:${prColor};color:#fff">${esc(t.priority)}</span>
+        <span class="pill ${t.status==="resolved"||t.status==="closed"?"approved":"sent"}">${esc(t.status)}</span>
+        ${t.needs_action?`<span class="ch ch-warn">Action pending</span>`:""}
+        <span class="tk-age" style="margin-left:auto">${ticketAge(t.created_at)} ago</span>
+      </div>
+      <div class="tk-body">
+        <div class="tk-subj">${esc(t.subject||catLabel)}</div>
+        <div class="tk-detail">${esc(t.detail||"")}</div>
+        <div class="sub">Client: ${esc(t.client_name||p.client_name||"—")}${t.client_phone?` · <a href="https://wa.me/${String(t.client_phone).replace(/\D/g,"")}" target="_blank">WhatsApp</a>`:""} · Owner: ${esc(owner)}</div>
+      </div>
+      ${evs.length?`<div class="tk-thread">${evs.map(ticketEventLine).join("")}</div>`:""}
+      ${ro?"":`<div class="tk-actions">
+        ${t.needs_action?`<button class="chip" data-tk-ack="${t.id}">Mark handled</button>`:""}
+        <select class="tk-status" data-tk-status="${t.id}">${TICKET_STATUSES.map(s=>`<option ${s===t.status?"selected":""}>${s}</option>`).join("")}</select>
+        <select class="tk-assign" data-tk-assign="${t.id}">${staffOpts(t.assignee_id)}</select>
+        <input class="tk-note" data-tk-note="${t.id}" placeholder="Add a note…">
+        <button class="chip" data-tk-note-save="${t.id}">Add note</button>
+      </div>`}
+    </div>`;
+  };
+  const list = ts.length
+    ? `<div class="sec-label" style="margin-top:6px">Tickets · ${open.length} open of ${ts.length}</div>${ts.map(ticketHtml).join("")}`
+    : `<div class="pw-card">${emptyState("No support tickets yet","Aftercare queries from clients (via Priya on WhatsApp) land here, or log a call-in below.")}</div>`;
+
+  const newBar = ro?"":`<div class="pw-card">
+    <button class="ghost" id="tkNewBtn">+ Log a ticket</button>
+    <div id="tkNewForm" style="display:none;margin-top:12px">
+      <div class="grid2">
+        <div class="field"><label>Category</label><select id="tk_cat">${Object.keys(TICKET_CAT).map(k=>`<option value="${k}">${TICKET_CAT[k]}</option>`).join("")}</select></div>
+        <div class="field"><label>Priority</label><select id="tk_prio">${TICKET_PRIOS.map(s=>`<option ${s==="normal"?"selected":""}>${s}</option>`).join("")}</select></div>
+      </div>
+      <div class="field"><label>Subject</label><input id="tk_subj" placeholder="Short summary"></div>
+      <div class="field"><label>Detail</label><textarea id="tk_detail" rows="2" placeholder="What did the client report?"></textarea></div>
+      <div style="margin-top:10px"><button class="primary" id="tkSave">Create ticket</button></div>
+    </div>
+  </div>`;
+
+  body.innerHTML = warrantyCard + newBar + list;
+
+  // ── wiring ──
+  const act=$("#wActivate");
+  if(act) act.onclick=async()=>{
+    act.disabled=true;
+    const patch={warranty_registered:true,warranty_activated_at:new Date().toISOString()};
+    if(!p.warranty_start) patch.warranty_start=new Date().toISOString().slice(0,10);
+    const {error:e}=await sb.from("projects").update(patch).eq("id",p.id);
+    if(e){ toast(e.message); act.disabled=false; return; }
+    Object.assign(p,patch); await projLog(p,"Warranty registered"); toast("Warranty activated"); pwSupport(p,body);
+  };
+
+  const nb=$("#tkNewBtn");
+  if(nb) nb.onclick=()=>{ const f=$("#tkNewForm"); f.style.display=f.style.display==="none"?"":"none"; };
+  const sv=$("#tkSave");
+  if(sv) sv.onclick=async()=>{
+    const row={ project_id:p.id, category:$("#tk_cat").value, priority:$("#tk_prio").value,
+      subject:$("#tk_subj").value.trim()||null, detail:$("#tk_detail").value.trim()||null,
+      channel:"in_app", source:"staff", created_by:me.id, needs_action:true };
+    if(!row.detail){ toast("Add a detail"); return; }
+    sv.disabled=true;
+    const {error:e}=await sb.from("support_tickets").insert(row);
+    if(e){ toast(e.message); sv.disabled=false; return; }
+    toast("Ticket created"); pwSupport(p,body);
+  };
+
+  body.querySelectorAll("[data-tk-ack]").forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    const t=ts.find(x=>x.id===Number(b.dataset.tkAck));
+    const patch={needs_action:false,acked_at:new Date().toISOString(),acked_by:me.id};
+    if(t&&t.status==="open") patch.status="ack";
+    const {error:e}=await sb.from("support_tickets").update(patch).eq("id",Number(b.dataset.tkAck));
+    if(e){ toast(e.message); b.disabled=false; return; }
+    pwSupport(p,body);
+  });
+  body.querySelectorAll("[data-tk-status]").forEach(sel=>sel.onchange=async()=>{
+    const id=Number(sel.dataset.tkStatus), st=sel.value;
+    const patch={status:st};
+    if(st==="resolved"||st==="closed"){ patch.resolved_at=new Date().toISOString(); patch.resolved_by=me.id; patch.needs_action=false; }
+    else { patch.resolved_at=null; patch.resolved_by=null; }
+    const {error:e}=await sb.from("support_tickets").update(patch).eq("id",id);
+    if(e){ toast(e.message); return; }
+    await sb.from("support_ticket_events").insert({ticket_id:id,kind:"status_change",text:"Status → "+st,by_user:me.id});
+    pwSupport(p,body);
+  });
+  body.querySelectorAll("[data-tk-assign]").forEach(sel=>sel.onchange=async()=>{
+    const id=Number(sel.dataset.tkAssign), aid=sel.value?Number(sel.value):null;
+    const {error:e}=await sb.from("support_tickets").update({assignee_id:aid}).eq("id",id);
+    if(e){ toast(e.message); return; }
+    toast("Reassigned"); pwSupport(p,body);
+  });
+  body.querySelectorAll("[data-tk-note-save]").forEach(b=>b.onclick=async()=>{
+    const id=Number(b.dataset.tkNoteSave);
+    const inp=body.querySelector(`[data-tk-note="${id}"]`); const txt=inp?inp.value.trim():"";
+    if(!txt){ toast("Type a note first"); return; }
+    b.disabled=true;
+    const {error:e}=await sb.from("support_ticket_events").insert({ticket_id:id,kind:"note",text:txt,by_user:me.id});
+    if(e){ toast(e.message); b.disabled=false; return; }
+    pwSupport(p,body);
+  });
 }
 
 /* ---- Project BOQ (reuse engine) ---- */
