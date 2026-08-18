@@ -4352,8 +4352,20 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
     <div class="modal-f">
       <button class="ghost" onclick="closeModal()">Close</button>
       ${p.client_phone?`<button class="wa-btn" id="pi-wa">Send on WhatsApp</button>`:''}
-      <button class="primary" id="pi-print">Print / PDF →</button>
+      <button class="ghost" id="pi-print">Print / PDF</button>
+      <button class="primary" id="pi-mail">✉ Email to client</button>
     </div>`);
+  $("#pi-mail").onclick=async()=>{
+    if(!confirm(`Email this proforma invoice to ${esc(p.client_name||'the client')}${p.client_email?` (${p.client_email})`:''}?\n\nSent from contact@lintelspace.com and CC'd to the project team.`)) return;
+    const btn=$("#pi-mail"); btn.disabled=true; const old=btn.textContent; btn.textContent="Sending…";
+    try{
+      const {data,error}=await sb.functions.invoke("send-proforma",{body:{milestone_id:milestone.id}});
+      const err=error||(data&&data.error);
+      if(err) throw new Error((data&&data.error)||error.message||"send failed");
+      toast(`Invoice ${piNumber} emailed to client${data&&data.cc_count?` · CC ${data.cc_count} team`:''}`);
+    }catch(e){ toast("Could not email: "+(e.message||e)); }
+    finally{ btn.disabled=false; btn.textContent=old; }
+  };
   $("#pi-print").onclick=()=>{
     const w=window.open("","_blank");
     w.document.write(`<html><head><title>${esc(piNumber)}</title></head><body style="margin:0">${doc}</body></html>`);
