@@ -1622,8 +1622,35 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim()))?"":"none";
+}
+/* CSAT on the dashboard: KPI tile (avg ★ this month) + low-score watchlist strip */
+async function renderCsatDash(){
+  const {data:S}=await sb.rpc("csat_stats"); const s=S||{};
+  const kp=$("#dashKpisCore");
+  if(kp && !$("#kpiCsat")){
+    const avg=s.avg_rating_month, n=Number(s.responses_month)||0, sent=Number(s.sent_month)||0;
+    const rate=sent?Math.round(n/sent*100):0;
+    kp.insertAdjacentHTML("beforeend",`<div class="kpi" id="kpiCsat" style="--kc:${avg==null?'#9A9490':avg>=4.5?'#4f7d52':avg>=4?'#B08433':'#a4503e'}" title="Average client rating this month · ${n} response${n===1?'':'s'} of ${sent} sent (${rate}%)${s.nps_month!=null?' · NPS '+s.nps_month:''}">
+      <div class="kpi-val">${avg==null?"—":Number(avg).toFixed(1)+"★"}</div><div class="kpi-lbl">CSAT · mo${n?` <span style="opacity:.6">(${n})</span>`:""}</div></div>`);
+  }
+  const host=$("#dashCsatLow"); if(!host) return;
+  const low=s.low_recent||[];
+  if(!low.length){ host.innerHTML=""; dashAttnSync(); return; }
+  const stars=r=>"★".repeat(r)+"☆".repeat(5-r);
+  host.innerHTML=`<div class="cr-strip">
+    <div class="cr-head"><span class="cr-title">Low client feedback · last 30 days <span class="cr-n">${low.length}</span></span></div>
+    ${low.map(r=>`<div class="cr-item" data-csat-open="${r.project_id?'p:'+r.project_id:'l:'+r.lead_id}" style="cursor:pointer">
+      <div class="cr-main"><div><b>${esc(r.client_name||'—')}</b> <span style="color:#A33C3C;letter-spacing:1px">${stars(r.rating)}</span> <span style="color:var(--ink-soft);font-size:11px">· ${esc(CSAT_STAGES[r.stage]||r.stage)}${r.code?' · '+esc(r.code):''} · ${esc(r.consultant)}</span></div>
+      ${r.comment?`<div style="font-size:12px;color:var(--ink-soft);font-style:italic;margin-top:2px">“${esc(String(r.comment).slice(0,140))}”</div>`:""}</div></div>`).join("")}
+  </div>`;
+  host.querySelectorAll("[data-csat-open]").forEach(el=>el.onclick=()=>{
+    const [k,id]=el.dataset.csatOpen.split(":");
+    if(k==="p"){ activeProject=Number(id); projectTab="overview"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(Number(id)),60); }
+    else openLead(Number(id));
+  });
+  dashAttnSync();
 }
 function gotoTab(view){
   document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));
@@ -1695,6 +1722,7 @@ async function renderDashboard(){
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashClientReplies"></div>
+      <div id="dashCsatLow"></div>
       <div id="dashPostSales"></div>
       <div id="dashDelivery"></div>
       <div id="dashS2lCalls"></div>
@@ -1745,6 +1773,7 @@ async function renderDashboard(){
   renderClientReplies("#dashClientReplies");
   renderPostSales("#dashPostSales");
   renderDeliveryRadar("#dashDelivery");
+  renderCsatDash();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
@@ -2860,10 +2889,12 @@ function lwOverview(l,body){
           ${canManageLeads()?`<button class="primary" id="dConv">Create a project →</button>`:""}
         </div>
       </div>`:""}
+      <div class="panel" id="lwCsat"><h3>Client feedback (CSAT)</h3><div style="font-size:12px;color:var(--ink-soft)">Loading…</div></div>
     </div>
   </div>`;
   bindLeadCommon(l);
   if(w) remListForLead(l.id);
+  csatPanel({lead_id:l.id}, "#lwCsat");
 }
 
 /* ---- Briefing: full client + qualification ---- */
@@ -2969,6 +3000,47 @@ function lwNotes(l,body){
     if(error) return toast(error.message);
     l.notes=$("#lw_notes").value; toast("Notes saved");
   };
+}
+
+/* ---- CSAT: stage-wise client feedback (email + WhatsApp via the `csat` edge fn) ----
+   Fire-and-forget from the five lifecycle triggers; never blocks the team's action.
+   Timing/dedup/recipients are decided server-side (meetings immediate; later stages
+   next-morning 9AM IST). Returns the survey URL for the toast. */
+const CSAT_STAGES={first_meeting:"First consultation",post_advance:"Onboarding",design:"Design phase",execution:"Execution",closure:"Closure"};
+async function csatTrigger(stage, scope){   // scope: {lead_id} | {project_id}
+  try{
+    const {data,error}=await sb.functions.invoke("csat",{body:Object.assign({action:"create",stage},scope)});
+    if(error||(data&&data.error)){ console.warn("csat:",error||data.error); return null; }
+    if(data&&!data.existed) toast(`CSAT (${CSAT_STAGES[stage]||stage}) ${data.immediate?"sent to client":"scheduled for tomorrow 9 AM"}${data.email?" · email":""}${data.wa?" · WhatsApp":""}`);
+    return data;
+  }catch(e){ console.warn("csat:",e); return null; }
+}
+
+/* CSAT panel — 5-stage strip for a project (or lead). Renders into #pwCsat. */
+async function csatPanel(scope, hostSel){
+  const host=$(hostSel); if(!host) return;
+  let q=sb.from("csat_surveys").select("*").order("created_at");
+  q=scope.project_id?q.or(`project_id.eq.${scope.project_id}${scope.lead_id?`,lead_id.eq.${scope.lead_id}`:""}`):q.eq("lead_id",scope.lead_id);
+  const {data:rows}=await q;
+  const R={}; (rows||[]).forEach(s=>{ if(!R[s.stage]||s.responded_at) R[s.stage]=s; });
+  const ORDER=["first_meeting","post_advance","design","execution","closure"];
+  const stars=n=>"★".repeat(n)+"☆".repeat(5-n);
+  const dS=ts=>ts?new Date(ts).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):"";
+  const w=canWrite();
+  host.innerHTML=`<div class="sec-label" style="border:none;padding:0">Client feedback (CSAT)</div>
+    <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+    ${ORDER.map(st=>{
+      const s=R[st];
+      let right;
+      if(!s) right=w?`<button class="linkbtn" data-csat-send="${st}" title="Send this stage's feedback link now">Send</button>`:`<span style="color:var(--ink-soft)">—</span>`;
+      else if(s.responded_at) right=`<span style="color:${s.rating<=3?'#A33C3C':'var(--brass-deep)'};font-weight:700;letter-spacing:1px" title="${esc(s.comment||'')}">${stars(s.rating)}</span>${s.nps!=null?` <span style="font-size:10.5px;color:var(--ink-soft)">NPS ${s.nps}</span>`:""}`;
+      else if(s.sent_email_at||s.sent_wa_at) right=`<span style="font-size:11px;color:var(--ink-soft)">sent ${dS(s.sent_email_at||s.sent_wa_at)} · awaiting</span>`;
+      else right=`<span style="font-size:11px;color:var(--ink-soft)">scheduled ${dS(s.send_after)}</span>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:${s&&s.responded_at&&s.rating<=3?'#FBEFEE':'#fff'}">
+        <span>${esc(CSAT_STAGES[st])}${s&&s.responded_at&&s.comment?` <span title="${esc(s.comment)}" style="cursor:help;color:var(--ink-soft)">💬</span>`:""}</span>${right}</div>`;
+    }).join("")}
+    </div>`;
+  host.querySelectorAll("[data-csat-send]").forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent="Sending…"; await csatTrigger(b.dataset.csatSend, scope); csatPanel(scope,hostSel); });
 }
 
 /* ---- lead availability: active / on hold / inactive, reason mandatory ---- */
@@ -3352,6 +3424,7 @@ async function convertLead(l){
     closeModal(); activeLead=null; render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
     celebrateConversion(code, l.name);
+    csatTrigger("post_advance",{project_id:proj.id});   // CSAT #2: onboarding feedback after the 10% advance (immediate)
   };
 }
 
@@ -3679,6 +3752,7 @@ async function projMoveToExecution(p,pct){
   await projSyncStones(p.id,DESIGN_STAGES,"Production");
   await projLog(p,`Moved to Execution · ${pct}% collected`);
   toast("Project moved to Execution");
+  csatTrigger("design",{project_id:p.id});   // CSAT #3: design-phase feedback (next morning 9 AM)
   projListTab="execution"; renderProjects();
 }
 async function projMarkHandover(p,pct){
@@ -3694,6 +3768,7 @@ async function projMarkHandover(p,pct){
   await projSyncStones(p.id,[...DESIGN_STAGES,"Production","Installation"],"Handover");
   await projLog(p,`Handed over · ${pct}% collected · snag list open`);
   toast("Handed over — snags open");
+  csatTrigger("execution",{project_id:p.id});   // CSAT #4: execution/installation feedback (next morning 9 AM)
   renderProjects();
 }
 async function projClearSnags(p){
@@ -3713,6 +3788,7 @@ async function projCloseProject(p){
   if(error) return toast(error.message);
   await projLog(p,"Project closed");
   toast("Project closed");
+  csatTrigger("closure",{project_id:p.id});   // CSAT #5: closure feedback + NPS (next morning 9 AM)
   projListTab="closed"; renderProjects();
 }
 
@@ -4373,6 +4449,7 @@ async function pwOverview(p,body){
         </div>
       </div>
       <div class="ov-side">
+        <div class="pw-card" id="pwCsat"><div class="sec-label" style="border:none;padding:0">Client feedback (CSAT)</div><div style="font-size:12px;color:var(--ink-soft);margin-top:8px">Loading…</div></div>
         <div class="pw-card">
           <div class="sec-label" style="border:none;padding:0">Action items due</div>
           ${openActions.length?`<div class="mini-list">${openActions.slice(0,5).map(a=>{
@@ -4418,6 +4495,7 @@ async function pwOverview(p,body){
   body.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ projectTab=b.dataset.go; renderProjectWorkspace(p.id); });
   if($("#ovTeam")) $("#ovTeam").onclick=()=>{ projectTab="team"; renderProjectWorkspace(p.id); };
   renderProjectActivity(p);
+  csatPanel({project_id:p.id, lead_id:p.lead_id||null}, "#pwCsat");
   if(!ro){
     body.querySelectorAll(".tl2-sel").forEach(sel=>sel.onchange=async()=>{
       const status=sel.value, id=sel.dataset.ms;
@@ -6259,6 +6337,8 @@ function meetEditModal(mt, rerender){
     const {error}=await sb.from("design_meetings").update(patch).eq("id",mt.id);
     if(error) return toast(error.message);
     closeModal();
+    // CSAT #1: a lead-stage design meeting just marked done → first-consultation feedback (immediate)
+    if(patch.status==="done" && mt.status!=="done" && mt.lead_id && !mt.project_id) csatTrigger("first_meeting",{lead_id:mt.lead_id});
     if(mt.gcal_event_id){
       try{ await gcalFetch("/update-event",{meeting_id:mt.id}); toast("Meeting updated — Google Calendar synced, guests notified"); }
       catch(e){ toast("Saved in Lintel OS, but Google Calendar update failed: "+e.message); }

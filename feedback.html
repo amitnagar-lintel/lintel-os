@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your feedback · Lintel Space Atelier</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--navy:#0D0D27;--brass:#DFB05E;--brassd:#946F33;--ink:#23233F;--soft:#6B6560;--grey:#9A9490;--line:#E7E2D8;--paper:#FBFAF7}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#F3F1EC;color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%}
+  .top{background:var(--navy);border-bottom:3px solid var(--brass);padding:16px 20px;color:#F7F2E9}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:15px;letter-spacing:2.5px;text-transform:uppercase;font-weight:500}
+  .brand small{display:block;font-size:8.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--brass);margin-top:2px;font-weight:400}
+  .wrap{max-width:560px;margin:18px auto 48px;padding:0 14px}
+  .card{background:#fff;border-radius:14px;box-shadow:0 18px 50px -24px rgba(13,13,39,.4);padding:26px 22px}
+  h1{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:22px;margin:0 0 6px;color:var(--navy);letter-spacing:-.01em}
+  .sub{font-size:13.5px;color:var(--soft);line-height:1.6;margin:0 0 22px}
+  .lbl{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--grey);text-transform:uppercase;margin:0 0 4px}
+  .rule{width:30px;height:2px;background:var(--brass);margin-bottom:14px}
+  .stars{display:flex;gap:8px;margin-bottom:6px}
+  .star{flex:1;aspect-ratio:1;max-width:64px;border:1px solid var(--line);border-radius:12px;background:var(--paper);font-size:26px;cursor:pointer;color:#D8D2C6;transition:all .15s;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
+  .star.on{color:var(--brass);border-color:var(--brass);background:#FFF9EA;transform:translateY(-1px)}
+  .star-cap{font-size:12px;color:var(--brassd);min-height:18px;margin-bottom:22px;font-weight:600}
+  .q{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff}
+  .q .t{font-size:13.5px;color:var(--ink);margin-bottom:9px;line-height:1.45}
+  .opts{display:flex;gap:8px}
+  .opt{flex:1;border:1px solid var(--line);border-radius:8px;padding:9px 6px;text-align:center;font-size:12.5px;font-weight:600;color:var(--soft);background:var(--paper);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .opt.yes.on{background:#EEF6EF;border-color:#5C9A66;color:#2E7D5B}
+  .opt.no.on{background:#FBEFEE;border-color:#C9807A;color:#A33C3C}
+  .opt.na.on{background:#F1EFEA;border-color:#B8B2AA;color:var(--soft)}
+  textarea{width:100%;min-height:96px;border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;font-size:14px;line-height:1.5;resize:vertical;background:var(--paper);outline:none}
+  textarea:focus{border-color:var(--brass);background:#fff}
+  .nps{display:grid;grid-template-columns:repeat(11,1fr);gap:4px;margin-bottom:6px}
+  .nps button{aspect-ratio:1;border:1px solid var(--line);border-radius:7px;background:var(--paper);font-size:12px;font-weight:600;color:var(--soft);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .nps button.on{background:var(--navy);color:var(--brass);border-color:var(--navy)}
+  .nps-cap{display:flex;justify-content:space-between;font-size:10.5px;color:var(--grey);margin-bottom:22px}
+  .btn{width:100%;border:none;border-radius:11px;padding:15px;font:600 15px Inter,sans-serif;background:var(--navy);color:#fff;cursor:pointer;letter-spacing:.3px;min-height:50px}
+  .btn:disabled{opacity:.55;cursor:default}
+  .err{color:#A33C3C;font-size:13px;margin:8px 0 0;min-height:18px}
+  .state{padding:48px 20px;text-align:center;color:var(--soft)}
+  .state h2{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:22px;color:var(--navy);margin:0 0 8px}
+  .spin{width:26px;height:26px;border:2px solid var(--line);border-top-color:var(--brass);border-radius:50%;margin:0 auto 16px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .done .big{font-size:56px;margin-bottom:6px}
+  .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:18px 14px 0;line-height:1.7}
+  .foot a{color:var(--brassd);text-decoration:none}
+  .meta{font-size:11.5px;color:var(--grey);margin:-14px 0 20px}
+</style>
+</head>
+<body>
+<div class="top"><div class="brand">Lintel Space Atelier<small>Where luxury meets functionality</small></div></div>
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="state" id="state"><div class="spin"></div>Loading…</div>
+  </div>
+  <div class="foot">Questions? Write to <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a> · +91 99165 58777<br>© Lintel Space Atelier · lintelspace.com</div>
+</div>
+<script>
+(function(){
+  var FN="https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/csat";
+  var card=document.getElementById("card"), stateEl=document.getElementById("state");
+  var token=new URLSearchParams(location.search).get("t");
+  var STAGE_TITLE={first_meeting:"your first design consultation",post_advance:"your onboarding meeting",design:"the design phase",execution:"the execution & installation",closure:"your completed project"};
+  var STAR_CAP=["","Poor","Fair","Good","Very good","Excellent"];
+  var esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");};
+  function fail(t,m){card.innerHTML='<div class="state"><h2>'+t+'</h2>'+m+'</div>';}
+  if(!token) return fail("Link incomplete","Please use the feedback link from your email or WhatsApp.");
+
+  fetch(FN+"?t="+encodeURIComponent(token)).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+  .then(function(res){
+    var j=res.j||{};
+    if(!res.ok||j.error) return fail("Feedback unavailable", esc(j.error||"This link is no longer valid."));
+    if(j.responded_at) return card.innerHTML='<div class="state done"><div class="big">🙏</div><h2>Thank you, '+esc(j.first_name||"")+'!</h2>We already have your feedback for '+esc(STAGE_TITLE[j.stage]||"this stage")+'. It means a lot to us.</div>';
+    render(j);
+  }).catch(function(){fail("Could not load","Please check your connection and try again.");});
+
+  function render(j){
+    var qs=j.questions||[], isClosure=j.stage==="closure";
+    var ans={}, rating=0, nps=null;
+    card.innerHTML=
+      '<h1>How was '+esc(STAGE_TITLE[j.stage]||"your experience")+'?</h1>'+
+      '<p class="sub">Hi '+esc(j.first_name||"there")+' — a minute of your honest feedback helps us keep every stage of your home journey rockstar-level.</p>'+
+      '<div class="meta">'+esc(j.context||"")+'</div>'+
+      '<div class="lbl">Overall rating</div><div class="rule"></div>'+
+      '<div class="stars">'+[1,2,3,4,5].map(function(n){return '<button type="button" class="star" data-n="'+n+'" aria-label="'+n+' star">★</button>';}).join("")+'</div>'+
+      '<div class="star-cap" id="cap">&nbsp;</div>'+
+      (qs.length?'<div class="lbl">A few quick checks</div><div class="rule"></div>'+qs.map(function(q){return '<div class="q" data-k="'+esc(q.key)+'"><div class="t">'+esc(q.text)+'</div><div class="opts"><button type="button" class="opt yes" data-v="true">Yes</button><button type="button" class="opt no" data-v="false">No</button><button type="button" class="opt na" data-v="null">N/A</button></div></div>';}).join("")+'<div style="height:14px"></div>':'')+
+      (isClosure?'<div class="lbl">Would you recommend Lintel to friends &amp; family?</div><div class="rule"></div><div class="nps">'+[0,1,2,3,4,5,6,7,8,9,10].map(function(n){return '<button type="button" data-nps="'+n+'">'+n+'</button>';}).join("")+'</div><div class="nps-cap"><span>Not likely</span><span>Extremely likely</span></div>':'')+
+      '<div class="lbl">Anything you\'d like to tell us?</div><div class="rule"></div>'+
+      '<textarea id="cmt" placeholder="What went well, what could be better — we read every word."></textarea>'+
+      '<div class="err" id="err"></div>'+
+      '<button class="btn" id="go" style="margin-top:12px">Send feedback</button>';
+    var stars=card.querySelectorAll(".star"), cap=document.getElementById("cap");
+    stars.forEach(function(s){s.onclick=function(){rating=+s.dataset.n;stars.forEach(function(x){x.classList.toggle("on",+x.dataset.n<=rating);});cap.textContent=STAR_CAP[rating];};});
+    card.querySelectorAll(".q").forEach(function(q){q.querySelectorAll(".opt").forEach(function(o){o.onclick=function(){q.querySelectorAll(".opt").forEach(function(x){x.classList.remove("on");});o.classList.add("on");var v=o.dataset.v;ans[q.dataset.k]=v==="true"?true:v==="false"?false:null;};});});
+    card.querySelectorAll("[data-nps]").forEach(function(b){b.onclick=function(){nps=+b.dataset.nps;card.querySelectorAll("[data-nps]").forEach(function(x){x.classList.toggle("on",x===b);});};});
+    var go=document.getElementById("go"), err=document.getElementById("err");
+    go.onclick=function(){
+      err.textContent="";
+      if(!rating) return err.textContent="Please tap a star rating first.";
+      if(isClosure&&nps===null) return err.textContent="Please pick a 0–10 recommendation score.";
+      go.disabled=true; go.textContent="Sending…";
+      fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:token,rating:rating,nps:nps,answers:ans,comment:document.getElementById("cmt").value.trim()})})
+      .then(function(r){return r.json().then(function(x){return {ok:r.ok,j:x};});})
+      .then(function(res){
+        if(!res.ok||(res.j&&res.j.error)){go.disabled=false;go.textContent="Send feedback";return err.textContent=esc((res.j&&res.j.error)||"Could not send — please try again.");}
+        card.innerHTML='<div class="state done"><div class="big">'+(rating>=4?"🌟":"🙏")+'</div><h2>Thank you, '+esc(j.first_name||"")+'!</h2>'+(rating>=4?"We're thrilled — and we'll keep earning it at every step.":"We hear you. Someone from our team will personally reach out very soon.")+'</div>';
+      }).catch(function(){go.disabled=false;go.textContent="Send feedback";err.textContent="Network error — please try again.";});
+    };
+  }
+})();
+</script>
+</body>
+</html>
