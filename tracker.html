@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your Project · Lintel Space Atelier</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0D0D27; --gold:#DFB05E; --gold-l:#E9C883; --ink:#23233F; --muted:#6b6b7a;
+    --paper:#fff; --line:#E7E2D8; --wash:#F3F1EC;
+    --good:#2F7D58; --good-bg:#E7F1EB; --warn:#B0821F; --warn-bg:#F6F0DA; --crit:#B44E34; --crit-bg:#FAEBE6;
+    --ring:#EDE7DA;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--wash); color:var(--ink); font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; -webkit-text-size-adjust:100%}
+  .top{background:var(--navy); border-bottom:3px solid var(--gold); color:#F7F2E9; padding:14px 18px; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:20}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:15px; font-weight:500; letter-spacing:2.4px; text-transform:uppercase}
+  .brand small{display:block; font-family:'Inter'; font-size:8.5px; letter-spacing:2.6px; text-transform:uppercase; color:var(--gold); opacity:.95; font-weight:400; margin-top:2px}
+  .top .sp{flex:1}
+  .top .live{font:600 10px 'Inter'; letter-spacing:1.4px; text-transform:uppercase; color:var(--navy); background:var(--gold-l); padding:5px 10px; border-radius:999px}
+
+  .wrap{max-width:760px; margin:16px auto 48px; padding:0 14px; display:flex; flex-direction:column; gap:14px}
+  .card{background:var(--paper); border:1px solid var(--line); border-radius:14px; box-shadow:0 14px 40px -26px rgba(13,13,39,.4); overflow:hidden}
+  .pad{padding:20px}
+  .state{padding:60px 24px; text-align:center; color:var(--muted)}
+  .state h2{font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:22px; color:var(--navy); margin:0 0 8px}
+  .spin{width:26px; height:26px; border:2px solid var(--line); border-top-color:var(--gold); border-radius:50%; margin:0 auto 16px; animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  .sec-h{font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:12px; letter-spacing:1.6px; text-transform:uppercase; color:var(--navy); margin:0 0 14px; display:flex; align-items:center; gap:10px}
+  .sec-h .ct{font:600 11px 'Inter'; color:var(--muted); letter-spacing:0; text-transform:none; margin-left:auto}
+
+  /* hero */
+  .hero{display:flex; gap:18px; align-items:center}
+  .ring{width:92px; height:92px; border-radius:50%; flex:none; display:grid; place-items:center; position:relative}
+  .ring::before{content:""; position:absolute; inset:9px; border-radius:50%; background:var(--paper)}
+  .ring b{position:relative; font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:23px; color:var(--navy)}
+  .ring span{position:relative; font-size:10px; color:var(--muted); display:block; text-align:center; margin-top:-2px}
+  .hero .pname{font-family:'Bricolage Grotesque',Inter,sans-serif; font-size:21px; color:var(--navy); line-height:1.12; margin:0 0 6px}
+  .stage{display:inline-flex; align-items:center; gap:6px; font:600 11px 'Inter'; letter-spacing:.6px; text-transform:uppercase; color:var(--navy); background:#F1ECDD; border:1px solid var(--line); padding:4px 10px; border-radius:999px}
+  .hero .sub{font-size:13px; color:var(--muted); margin-top:8px; line-height:1.5}
+  .spoc{display:flex; align-items:center; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--line)}
+  .spoc .av{width:34px; height:34px; border-radius:50%; background:var(--gold); color:var(--navy); display:grid; place-items:center; font-family:'Bricolage Grotesque'; font-weight:700; font-size:15px; flex:none}
+  .spoc .nm{font-weight:600; font-size:13px} .spoc .rl{font-size:11.5px; color:var(--muted)}
+
+  /* needs you */
+  .need{display:flex; gap:12px; padding:13px 0; border-top:1px solid var(--line)}
+  .need:first-child{border-top:0}
+  .need .ic{width:30px; height:30px; border-radius:8px; background:var(--wash); display:grid; place-items:center; font-size:15px; flex:none}
+  .need .t{font-weight:600; font-size:14px; color:var(--navy)}
+  .need .b{font-size:12px; color:var(--muted); margin-top:2px}
+  .need .r{margin-left:auto; text-align:right; flex:none}
+  .chip{display:inline-block; font:600 11px 'Inter'; padding:3px 9px; border-radius:999px; white-space:nowrap}
+  .chip.g{background:var(--good-bg); color:var(--good)} .chip.a{background:var(--warn-bg); color:var(--warn)} .chip.r{background:var(--crit-bg); color:var(--crit)} .chip.n{background:#EEE9DC; color:var(--muted)}
+
+  /* progress */
+  .room{padding:12px 0; border-top:1px solid var(--line)} .room:first-child{border-top:0}
+  .room .rh{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+  .room .rn{font-weight:600; font-size:14px; color:var(--navy)}
+  .room .rp{margin-left:auto; font-family:'Bricolage Grotesque'; font-size:14px; color:var(--navy)}
+  .bar{height:7px; border-radius:7px; background:var(--ring); overflow:hidden}
+  .bar i{display:block; height:100%; background:linear-gradient(90deg,var(--gold),var(--gold-l)); border-radius:7px; width:0; transition:width 1s cubic-bezier(.2,.7,.2,1)}
+  .streams{display:flex; flex-wrap:wrap; gap:6px; margin-top:9px}
+  .st{font:500 11px 'Inter'; color:var(--ink); background:var(--wash); border:1px solid var(--line); border-radius:6px; padding:3px 8px}
+  .st b{color:var(--navy); font-weight:700} .st.done b{color:var(--good)} .st.blocked b{color:var(--crit)}
+
+  /* photos */
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+  .grid a{display:block; aspect-ratio:1; border-radius:9px; overflow:hidden; background:var(--wash); border:1px solid var(--line)}
+  .grid img{width:100%; height:100%; object-fit:cover; display:block}
+  @media(max-width:520px){ .grid{grid-template-columns:repeat(2,1fr)} }
+
+  /* payments */
+  .ledbar{height:12px; border-radius:7px; background:var(--ring); overflow:hidden; display:flex; margin:4px 0 10px}
+  .ledbar .p{background:var(--good)}
+  .ledsum{display:flex; justify-content:space-between; font-size:12.5px; color:var(--muted); margin-bottom:14px}
+  .ledsum b{color:var(--navy); font-family:'Bricolage Grotesque'; font-size:15px}
+  .mile{display:flex; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line); font-size:13px}
+  .mile:first-of-type{border-top:0}
+  .mile .ml{color:var(--navy); font-weight:500} .mile .md{font-size:11.5px; color:var(--muted)}
+  .mile .amt{margin-left:auto; font-family:'Bricolage Grotesque'; color:var(--navy); white-space:nowrap}
+  .mile .amt small{display:block; text-align:right; font-family:'Inter'; font-weight:400}
+
+  .foot{text-align:center; font-size:11.5px; color:#8a8a99; padding:6px 14px 0; line-height:1.7}
+  .foot a{color:var(--muted)}
+
+  /* interactive buttons (approve/decline/mark-done) */
+  .tbtn{appearance:none; border:1px solid var(--line); background:var(--paper); color:var(--navy); font:600 12px 'Inter'; padding:7px 12px; border-radius:8px; cursor:pointer; min-height:36px}
+  .tbtn.ok{background:var(--navy); color:#fff; border-color:var(--navy)}
+  .tbtn:active{transform:translateY(1px)} .tbtn:disabled{opacity:.5; cursor:default}
+  .co{display:flex; align-items:center; gap:10px; padding:12px 0; border-top:1px solid var(--line); flex-wrap:wrap}
+  .co:first-of-type{border-top:0}
+  .co .cot{flex:1; min-width:150px; font-size:13.5px; color:var(--navy); font-weight:600}
+  .co .cod{font-size:11.5px; color:var(--muted); font-weight:400; margin-top:2px}
+  .co .coamt{font-family:'Bricolage Grotesque'; color:var(--navy); font-size:15px}
+  .co .cob{display:flex; gap:6px}
+
+  /* NPS pulse */
+  .npsrow{display:flex; flex-wrap:wrap; gap:6px}
+  .npsn{width:34px; height:34px; border-radius:8px; border:1px solid var(--line); background:var(--paper); color:var(--navy); font:600 13px 'Inter'; cursor:pointer}
+  .npsn.sel{background:var(--navy); color:#fff; border-color:var(--navy)}
+  /* document vault */
+  .doc{display:flex; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line); text-decoration:none; color:var(--navy)}
+  .doc:first-of-type{border-top:0}
+  .doc .di{font-size:18px}
+  .doc .dn{flex:1; font-size:13.5px; font-weight:600}
+  .doc .dk{font-family:'Bricolage Grotesque'; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">Lintel Space Atelier<small>Interiors of Distinction</small></div>
+  <div class="sp"></div>
+  <div class="live">● Live</div>
+</div>
+
+<div class="wrap" id="wrap">
+  <div class="card"><div class="state" id="state"><div class="spin"></div>Loading your project…</div></div>
+</div>
+
+<script>
+(function(){
+  var FN = "https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/project-tracker";
+  var ACTION_FN = "https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/tracker-action";
+  var wrap = document.getElementById("wrap");
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  function inr(n){ return "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0}); }
+  function fail(title,msg){ wrap.innerHTML = '<div class="card"><div class="state"><h2>'+esc(title)+'</h2>'+esc(msg)+'</div></div>'; }
+
+  var token = new URLSearchParams(location.search).get("t");
+  if(!token){ return fail("Link incomplete","Please open the tracker link your Lintel Space team shared with you."); }
+
+  function load(){
+    fetch(FN + "?t=" + encodeURIComponent(token), { headers:{ "Accept":"application/json" } })
+      .then(function(r){ return r.json().then(function(j){ return {ok:r.ok,j:j}; }); })
+      .then(function(res){
+        if(!res.ok || !res.j || res.j.error){
+          return fail("Tracker unavailable",(res.j&&res.j.error)||"This link is no longer valid. Please ask your Lintel Space team for a fresh one.");
+        }
+        render(res.j);
+      })
+      .catch(function(){ fail("Could not load","Please check your connection and try again."); });
+  }
+  function postAction(action,payload){
+    var reqBody=Object.assign({ t:token, action:action }, payload||{});
+    return fetch(ACTION_FN,{ method:"POST", headers:{ "Content-Type":"application/json","Accept":"application/json" }, body:JSON.stringify(reqBody) })
+      .then(function(r){ return r.json(); })
+      .then(function(j){ if(j&&j.ok){ load(); } else { alert((j&&j.error)||"Sorry, that didn't go through — please try again."); } })
+      .catch(function(){ alert("Network hiccup — please try again."); });
+  }
+  load();
+
+  function daysDiff(d){ if(!d) return null; var t=new Date(d); t.setHours(0,0,0,0); var n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); }
+  function dueChip(a){
+    if(!a.due_date){ return a.priority==='urgent'||a.priority==='high' ? '<span class="chip a">Soon</span>' : '<span class="chip n">Open</span>'; }
+    var dd=daysDiff(a.due_date);
+    var label = dd<0 ? Math.abs(dd)+"d overdue" : dd===0 ? "Today" : dd===1 ? "Tomorrow" : "in "+dd+"d";
+    var cls = dd<0 ? "r" : dd<=2 ? "a" : "n";
+    return '<span class="chip '+cls+'">'+esc(label)+'</span>';
+  }
+  var TYPE_ICON = { selection:"🎨", approval:"✅", payment:"💳", site_access:"🔑", document:"📄", other:"📌" };
+  function fmtDate(d){ if(!d) return ""; try{ return new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }catch(e){ return ""; } }
+
+  function render(d){
+    var p=d.project||{}, sp=d.spoc||{}, pay=d.payments||{};
+    var pct = p.overall_percent;
+    var html = "";
+
+    // hero
+    var ringPct = (pct==null?0:pct);
+    html += '<div class="card"><div class="pad"><div class="hero">'
+      + '<div class="ring" style="background:conic-gradient(var(--gold) '+ringPct+'%, var(--ring) 0)">'
+      +   '<b>'+(pct==null?"—":Math.round(pct)+"%")+'</b>'+(pct==null?'':'<span>done</span>')+'</div>'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div class="pname">'+esc(p.name||p.code||"Your project")+'</div>'
+      +   '<span class="stage">'+esc(p.stage||p.status||"In progress")+'</span>'
+      +   '<div class="sub">'+(p.target_end?('Estimated completion <b style="color:var(--ink)">'+esc(fmtDate(p.target_end))+'</b>'):'Your home is in progress — we\'ll keep this updated.')+'</div>'
+      + '</div></div>'
+      + '<div class="spoc"><div class="av">'+esc((sp.name||"P").slice(0,1))+'</div>'
+      +   '<div><div class="nm">'+esc(sp.name||"Priya")+' · your point of contact</div>'
+      +   '<div class="rl">Replies within '+esc(sp.sla_hours||4)+' business hours</div></div></div>'
+      + '</div></div>';
+
+    // needs you
+    var acts=d.actions||[];
+    if(acts.length){
+      var an="";
+      acts.forEach(function(a){
+        an += '<div class="need"><div class="ic">'+(TYPE_ICON[a.type]||"📌")+'</div>'
+          + '<div style="flex:1;min-width:0"><div class="t">'+esc(a.title)+'</div>'
+          + (a.blocks?'<div class="b">So we can move ahead with '+esc(a.blocks)+'</div>':'')
+          + (a.id?'<div style="margin-top:8px"><button class="tbtn" data-done="'+a.id+'">Mark done</button></div>':'')+'</div>'
+          + '<div class="r">'+dueChip(a)+'</div></div>';
+      });
+      html += '<div class="card"><div class="pad"><div class="sec-h">We need from you<span class="ct">'+acts.length+' pending</span></div>'+an+'</div></div>';
+    }
+
+    // progress
+    var rooms=d.rooms||[];
+    if(rooms.length){
+      var rn="";
+      rooms.forEach(function(r){
+        var chips=(r.streams||[]).map(function(s){
+          var cls = s.status==='done'?'done':s.status==='blocked'?'blocked':'';
+          return '<span class="st '+cls+'">'+esc(s.label)+' <b>'+Math.round(s.percent)+'%</b></span>';
+        }).join("");
+        rn += '<div class="room"><div class="rh"><div class="rn">'+esc(r.room)+'</div><div class="rp">'+Math.round(r.room_pct)+'%</div></div>'
+          + '<div class="bar"><i data-w="'+Math.round(r.room_pct)+'"></i></div>'
+          + (chips?'<div class="streams">'+chips+'</div>':'')+'</div>';
+      });
+      html += '<div class="card"><div class="pad"><div class="sec-h">Room-by-room progress</div>'+rn+'</div></div>';
+    }
+
+    // photos
+    var pics=d.photos||[];
+    if(pics.length){
+      var pg=pics.map(function(ph){ return '<a href="'+esc(ph.url)+'" target="_blank" rel="noopener"><img src="'+esc(ph.url)+'" alt="'+esc(ph.caption||ph.room||"Site photo")+'" loading="lazy"></a>'; }).join("");
+      html += '<div class="card"><div class="pad"><div class="sec-h">From your site<span class="ct">'+pics.length+' photos</span></div><div class="grid">'+pg+'</div></div></div>';
+    }
+
+    // payments
+    var miles=pay.milestones||[];
+    var paidPct = pay.total? Math.round((pay.paid/pay.total)*100):0;
+    var ml="";
+    miles.forEach(function(m){
+      var st=m.status, cls, lab;
+      if(st==='paid'){ cls='g'; lab='Paid'+(m.paid_at?' · '+fmtDate(m.paid_at):''); }
+      else if(st==='part_paid'){ cls='a'; lab='Part paid'; }
+      else if(st==='link_sent'){ cls='a'; lab='Awaiting payment'; }
+      else { var od=m.due_date&&daysDiff(m.due_date)<0; cls=od?'r':'n'; lab=od?'Overdue':(m.due_date?'Due '+fmtDate(m.due_date):'Upcoming'); }
+      ml += '<div class="mile"><div><div class="ml">'+esc(m.label)+'</div>'+(m.deliverable?'<div class="md">'+esc(m.deliverable)+'</div>':'')+'</div>'
+        + '<div class="amt">'+inr(m.amount)+'<small><span class="chip '+cls+'">'+esc(lab)+'</span></small></div></div>';
+    });
+    if(miles.length || pay.total){
+      html += '<div class="card"><div class="pad"><div class="sec-h">Payments</div>'
+        + '<div class="ledsum"><span>Paid <b>'+inr(pay.paid)+'</b></span><span>Total '+inr(pay.total)+'</span></div>'
+        + '<div class="ledbar"><div class="p" style="width:'+paidPct+'%"></div></div>'
+        + ml + '</div></div>';
+    }
+
+    // scope changes (change orders)
+    var ch=d.changes||{}, cl=ch.list||[], rv=ch.revised||{};
+    if(cl.length){
+      var pend=cl.filter(function(c){return c.status==="sent";});
+      var acc=cl.filter(function(c){return c.status!=="sent";});
+      var ch2="";
+      if(rv.approved_co_incl){ ch2+='<div class="ledsum"><span>Original <b>'+inr(rv.boq_total)+'</b></span><span>Revised <b>'+inr(rv.revised)+'</b></span></div>'; }
+      pend.forEach(function(c){
+        ch2+='<div class="co"><div class="cot">'+esc(c.title)+(c.room?' · '+esc(c.room):'')
+          +'<div class="cod">'+(c.description?esc(c.description):'A small addition to your scope')+'</div></div>'
+          +'<div class="coamt">'+inr(c.amount_incl)+'</div>'
+          +'<div class="cob"><button class="tbtn ok" data-approve="'+c.id+'">Approve</button><button class="tbtn" data-decline="'+c.id+'">Decline</button></div></div>';
+      });
+      acc.forEach(function(c){
+        ch2+='<div class="co"><div class="cot">'+esc(c.title)+(c.room?' · '+esc(c.room):'')+'</div>'
+          +'<div class="coamt">'+inr(c.amount_incl)+'</div><span class="chip g">✓ Approved</span></div>';
+      });
+      html+='<div class="card"><div class="pad"><div class="sec-h">Scope changes'+(pend.length?'<span class="ct">'+pend.length+' to review</span>':'')+'</div>'+ch2+'</div></div>';
+    }
+
+    // handover + snag list
+    var ho=d.handover||{};
+    if(ho.active){
+      var sn="";
+      if(ho.signed_at){
+        sn+='<div style="background:var(--good-bg);color:var(--good);padding:12px 14px;border-radius:10px;font-weight:600;font-size:13px">✓ You accepted handover on '+esc(fmtDate(ho.signed_at))+(ho.signed_name?' — '+esc(ho.signed_name):'')+'</div>';
+      } else {
+        sn+='<div class="ledsum"><span><b>'+(ho.open_count||0)+'</b> open</span><span><b>'+(ho.cleared_count||0)+'</b> resolved</span></div>';
+      }
+      (ho.snags||[]).slice(0,20).forEach(function(s){
+        var done=s.status==='cleared';
+        var cls=done?'g':(s.status==='fixed'||s.status==='verified'?'a':'n');
+        sn+='<div class="co"><div class="cot">'+esc(s.title)+(s.room?' · '+esc(s.room):'')+'<div class="cod">'+esc(s.category)+(s.mine?' · you reported this':'')+'</div></div><span class="chip '+cls+'">'+esc(done?'Resolved':s.status)+'</span></div>';
+      });
+      if(!ho.signed_at){ sn+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="tbtn" id="snReportBtn">Report an issue</button>'+(ho.can_sign?'<button class="tbtn ok" id="hoSignBtn">Accept handover</button>':'')+'</div>'; }
+      if(ho.can_sign){ sn+='<div class="cod" style="margin-top:8px">Everything looks resolved — accepting confirms your finished home.</div>'; }
+      html+='<div class="card"><div class="pad"><div class="sec-h">Handover'+(ho.open_count?'<span class="ct">'+ho.open_count+' open</span>':'')+'</div>'+sn+'</div></div>';
+    }
+
+    // satisfaction pulse
+    var pl=d.pulse||{};
+    if(pl.pending){
+      var nums="";
+      for(var i=0;i<=10;i++){ nums+='<button class="npsn" data-nps="'+i+'">'+i+'</button>'; }
+      html+='<div class="card"><div class="pad"><div class="sec-h">How are we doing?</div>'
+        +'<div style="font-size:13px;color:var(--muted);margin-bottom:10px">How likely are you to recommend Lintel Space to a friend or colleague? (0 = not at all, 10 = extremely likely)</div>'
+        +'<div class="npsrow">'+nums+'</div>'
+        +'<textarea id="npsComment" placeholder="Anything you’d like to share? (optional)" rows="2" style="width:100%;margin-top:10px;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:13px"></textarea>'
+        +'<div style="margin-top:10px"><button class="tbtn ok" id="npsSubmit" disabled>Submit feedback</button></div>'
+        +'</div></div>';
+    }
+
+    // document vault
+    var docs=d.documents||[];
+    if(docs.length){
+      var dl=docs.map(function(f){ return '<a class="doc" href="'+esc(f.url)+'" target="_blank" rel="noopener"><span class="di">📄</span><span class="dn">'+esc(f.title)+(f.version?' · '+esc(f.version):'')+'</span><span class="dk">'+esc(f.kind||'')+'</span></a>'; }).join("");
+      html+='<div class="card"><div class="pad"><div class="sec-h">Your documents</div>'+dl+'</div></div>';
+    }
+
+    html += '<div class="foot">Cared for by Priya at Lintel Space Atelier · <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a><br>© Lintel Space Atelier · www.lintelspace.com</div>';
+
+    wrap.innerHTML = html;
+    document.title = (p.name||"Your Project") + " · Lintel Space Atelier";
+    wrap.querySelectorAll("[data-approve]").forEach(function(b){ b.onclick=function(){ b.disabled=true; postAction("co_approve",{id:Number(b.dataset.approve)}); }; });
+    wrap.querySelectorAll("[data-decline]").forEach(function(b){ b.onclick=function(){ var note=prompt("Anything you'd like us to change? (optional)","")||""; b.disabled=true; postAction("co_reject",{id:Number(b.dataset.decline),note:note}); }; });
+    wrap.querySelectorAll("[data-done]").forEach(function(b){ b.onclick=function(){ b.disabled=true; postAction("action_done",{id:Number(b.dataset.done)}); }; });
+    var srb=document.getElementById("snReportBtn"); if(srb){ srb.onclick=function(){ var title=prompt("What's the issue? (e.g. wardrobe shutter misaligned)",""); if(!title||!title.trim())return; var room=prompt("Which room? (optional)","")||""; srb.disabled=true; postAction("snag_report",{title:title.trim(),room:room.trim()}); }; }
+    var hsb=document.getElementById("hoSignBtn"); if(hsb){ hsb.onclick=function(){ var name=prompt("Please type your name to accept handover:","")||""; if(!name.trim())return; hsb.disabled=true; postAction("handover_sign",{name:name.trim()}); }; }
+    var npsSel=null;
+    wrap.querySelectorAll("[data-nps]").forEach(function(b){ b.onclick=function(){ npsSel=Number(b.dataset.nps); wrap.querySelectorAll("[data-nps]").forEach(function(x){ x.classList.toggle("sel",x===b); }); var ns=document.getElementById("npsSubmit"); if(ns) ns.disabled=false; }; });
+    var nsub=document.getElementById("npsSubmit"); if(nsub){ nsub.onclick=function(){ if(npsSel==null)return; var c=(document.getElementById("npsComment")||{}).value||""; nsub.disabled=true; postAction("pulse_submit",{score:npsSel,comment:c}); }; }
+    requestAnimationFrame(function(){ Array.prototype.forEach.call(document.querySelectorAll(".bar i"),function(el){ el.style.width=(el.dataset.w||0)+"%"; }); });
+  }
+})();
+</script>
+</body>
+</html>

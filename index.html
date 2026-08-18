@@ -1622,8 +1622,8 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim()))?"":"none";
 }
 function gotoTab(view){
   document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));
@@ -1696,6 +1696,7 @@ async function renderDashboard(){
       <div class="sec-label">Needs attention</div>
       <div id="dashClientReplies"></div>
       <div id="dashPostSales"></div>
+      <div id="dashDelivery"></div>
       <div id="dashS2lCalls"></div>
     </section>
     <section class="dash-kpis" id="dashKpis">
@@ -1743,6 +1744,7 @@ async function renderDashboard(){
   s2lRenderTodayCalls(calls||[]);
   renderClientReplies("#dashClientReplies");
   renderPostSales("#dashPostSales");
+  renderDeliveryRadar("#dashDelivery");
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
@@ -3730,13 +3732,13 @@ const TICKET_PRIOS=["low","normal","high","urgent"];
 const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
 function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
-  finance:[["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"]],
+  finance:[["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
-  site:[["execution","Execution"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",orders:"finance",procurement:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",execution:"site",documents:"site",team:"site"};
-let projSubSel={finance:"payments",studio:"design",site:"execution"};
+  site:[["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
+const PROJ_SUB2GROUP={payments:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
-const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","execution","documents","team","support"];
+const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","progress","execution","snags","documents","team","support"];
 const projGroupSubs=g=>isDesignPartner()?PROJ_GROUPS[g].filter(s=>PARTNER_PROJ_TABS.includes(s[0])):PROJ_GROUPS[g];
 const projTabsFor=()=>PROJ_TABS.filter(t=>PROJ_GROUPS[t[0]]?projGroupSubs(t[0]).length:(!isDesignPartner()||PARTNER_PROJ_TABS.includes(t[0])));
 
@@ -3789,13 +3791,446 @@ function drawProjectSub(p,sub,body){
   if(sub==="payments")   return pwPayments(p,body);
   if(sub==="orders")     return pwOrders(p,body);
   if(sub==="procurement")return pwProcurement(p,body);
+  if(sub==="changes")    return pwChanges(p,body);
   if(sub==="design")     return pwDesign(p,body);
   if(sub==="moodboard")  return pwMoodboard(p,body);
   if(sub==="canvas")     return pwCanvas(p,body);
   if(sub==="vastu")      return vastuTab(p,body,"project");
+  if(sub==="progress")   return pwProgress(p,body);
   if(sub==="execution")  return pwExecution(p,body);
+  if(sub==="snags")      return pwSnags(p,body);
   if(sub==="documents")  return pwFiles(p,body,"document");
   if(sub==="team")       return pwTeam(p,body);
+}
+
+// ============== DELIVERY COORDINATION (Priya Coordination Hub) ==============
+// Progress view + "Needs You" board + live-tracker share (project workspace),
+// and the Delivery Radar dashboard strip. Capture is WhatsApp-first (Priya);
+// the OS is the oversight + correction surface. Data: PRIYA-COORD-01..06.
+const TRACKER_BASE="https://os.lintelspace.com/tracker.html";
+const PROGRESS_STREAM_LABEL={civil:"Civil & Masonry",electrical:"Electrical",plumbing:"Plumbing",false_ceiling:"False Ceiling",painting:"Painting",carpentry:"Carpentry",modular:"Modular",furnishing:"Furnishing & Decor",accessories:"Accessories"};
+const HEALTH_COLOR={green:"#3C7A4E",amber:"#A9791E",red:"#B4453A"};
+const ACTION_TYPE_LABEL={selection:"Selection",approval:"Approval",payment:"Payment",site_access:"Site access",document:"Document",other:"Other"};
+function pgBar(pct,color){ color=color||"var(--brass)"; const v=Math.max(0,Math.min(100,Math.round(pct||0))); return `<div style="height:7px;border-radius:7px;background:var(--line-2);overflow:hidden"><div style="height:100%;width:${v}%;background:${color};border-radius:7px"></div></div>`; }
+
+async function pwProgress(p, body){
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading progress…</div>`;
+  const w=canWrite();
+  let prog=[],acts=[],reps=[],pics=[],overall=null;
+  try{
+    const r=await Promise.all([
+      sb.from("project_progress").select("*").eq("project_id",p.id),
+      sb.from("client_actions").select("*").eq("project_id",p.id).order("due_date",{ascending:true,nullsFirst:false}),
+      sb.from("progress_reports").select("*").eq("project_id",p.id).order("report_date",{ascending:false}).order("id",{ascending:false}).limit(6),
+      sb.from("progress_photos").select("id,storage_path,caption,room,client_visible,taken_at").eq("project_id",p.id).order("taken_at",{ascending:false}).limit(12),
+      sb.rpc("project_progress_rollup",{pid:p.id})
+    ]);
+    prog=r[0].data||[]; acts=r[1].data||[]; reps=r[2].data||[]; pics=r[3].data||[]; overall=(r[4].data!=null)?Math.round(r[4].data):null;
+  }catch(e){ body.innerHTML=`<div class="empty" style="padding:24px">Couldn't load progress. ${esc(e.message||"")}</div>`; return; }
+
+  for(const ph of pics){ try{ const s=await sb.storage.from("site-photos").createSignedUrl(ph.storage_path,3600); ph.url=(s&&s.data&&s.data.signedUrl)||null; }catch(e){ ph.url=null; } }
+
+  const rooms={}; prog.forEach(x=>{ (rooms[x.room]=rooms[x.room]||[]).push(x); });
+  const roomNames=Object.keys(rooms).sort();
+  const openActs=acts.filter(a=>["open","reminded","overdue"].indexOf(a.status)!==-1);
+
+  let html=`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="display:flex;align-items:baseline;gap:10px">
+      <div class="display" style="font-size:30px;font-weight:700;color:var(--ink)">${overall==null?"—":overall+"%"}</div>
+      <div style="font-size:12px;color:var(--ink-soft);line-height:1.25">BOQ-weighted<br>completion</div>
+    </div>
+    <div style="flex:1"></div>
+    <button class="ghost sm" id="pgShare">Share live tracker</button>
+    ${w?`<button class="chip" id="pgNew">+ Client action</button>`:""}
+  </div>`;
+
+  html+=`<div class="sec-label" style="margin-top:2px">Needs from client${openActs.length?` · ${openActs.length}`:""}</div>`;
+  if(!openActs.length){ html+=`<div class="empty" style="padding:10px 0">No pending client actions.</div>`; }
+  else { html+=openActs.map(a=>{
+    const overdue=a.due_date&&a.due_date<todayISO();
+    const dchip=a.due_date?`<span class="ch ${overdue?"ch-warn":"ch-other"}">${overdue?"overdue · ":""}${esc(a.due_date)}</span>`:"";
+    const pchip=a.priority&&a.priority!=="normal"?`<span class="ch" style="background:${TICKET_PRIO_COLOR[a.priority]||"#5b86b3"};color:#fff">${esc(a.priority)}</span>`:"";
+    return `<div class="cr-item"><div class="cr-main">
+      <div class="cr-lead">${esc(a.title)} <span class="ch ch-other">${esc(ACTION_TYPE_LABEL[a.type]||a.type)}</span>${pchip}${dchip}</div>
+      ${a.blocks?`<div class="cr-text">Blocks: ${esc(a.blocks)}</div>`:""}</div>
+      <div class="cr-side">${w?`<button class="chip" data-resolve="${a.id}">Resolve</button>`:""}</div></div>`;
+  }).join(""); }
+
+  html+=`<div class="sec-label" style="margin-top:18px">Room-by-room progress</div>`;
+  if(!roomNames.length){ html+=`<div class="empty" style="padding:10px 0">No progress recorded yet — it lands here as PMs update Priya on WhatsApp.</div>`; }
+  else { html+=roomNames.map(rm=>{
+    const list=rooms[rm].slice().sort((a,b)=>String(a.stream).localeCompare(String(b.stream)));
+    const avg=Math.round(list.reduce((s,x)=>s+Number(x.percent||0),0)/list.length);
+    return `<div style="margin:10px 0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><b style="color:var(--ink)">${esc(rm)}</b><span style="margin-left:auto;font-weight:600;color:var(--ink)">${avg}%</span></div>
+      ${pgBar(avg)}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${list.map(x=>{
+        const col=x.status==="done"?"#3C7A4E":x.status==="blocked"?"#B4453A":"var(--ink)";
+        return `<span class="ch ch-other" ${w?`data-editpct="1" data-room="${esc(rm)}" data-stream="${esc(x.stream)}" data-cur="${x.percent}" style="cursor:pointer"`:""}>${esc(PROGRESS_STREAM_LABEL[x.stream]||x.stream)} <b style="color:${col}">${Math.round(x.percent)}%</b></span>`;
+      }).join("")}</div></div>`;
+  }).join(""); }
+
+  if(pics.length){
+    html+=`<div class="sec-label" style="margin-top:18px">Site photos</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px">${pics.map(ph=>`
+      <div style="position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line-2);aspect-ratio:1;background:var(--line-2)">
+        ${ph.url?`<img src="${esc(ph.url)}" style="width:100%;height:100%;object-fit:cover" loading="lazy">`:`<div style="display:grid;place-items:center;height:100%;color:var(--ink-soft);font-size:11px">no preview</div>`}
+        ${w?`<button class="chip" data-photo="${ph.id}" data-vis="${ph.client_visible?1:0}" style="position:absolute;top:4px;right:4px;font-size:10px;padding:2px 6px;${ph.client_visible?"background:#3C7A4E;color:#fff":"background:rgba(0,0,0,.6);color:#fff"}">${ph.client_visible?"client":"hidden"}</button>`:""}
+      </div>`).join("")}</div>`;
+  }
+
+  if(reps.length){
+    html+=`<div class="sec-label" style="margin-top:18px">Update log</div>`+reps.map(r=>{
+      const ln=(Array.isArray(r.lines)?r.lines:[]).map(l=>`${esc(l.room||"")} ${esc(PROGRESS_STREAM_LABEL[l.stream]||l.stream||"")} ${l.to!=null?l.to+"%":""}`.trim()).filter(x=>x).join(" · ");
+      return `<div style="padding:8px 0;border-top:1px solid var(--line-2)">
+        <div style="font-size:12px;color:var(--ink-soft)">${esc(r.report_date||"")} · ${esc(r.reported_by_name||"Priya")}${r.overall_percent!=null?` · ${Math.round(r.overall_percent)}%`:""}</div>
+        ${r.narrative?`<div style="font-size:13px;color:var(--ink)">${esc(r.narrative)}</div>`:""}
+        ${ln?`<div style="font-size:12px;color:var(--ink-soft)">${ln}</div>`:""}
+        ${r.blockers?`<div style="font-size:12px;color:#B4453A">Blocked: ${esc(r.blockers)}</div>`:""}
+      </div>`;
+    }).join("");
+  }
+
+  html+=`<div id="pgPulse"></div>`;
+  body.innerHTML=html;
+
+  const sh=$("#pgShare"); if(sh) sh.onclick=()=>pgShareTracker(p);
+  const nw=$("#pgNew"); if(nw) nw.onclick=()=>pgNewAction(p,body);
+  body.querySelectorAll("[data-resolve]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Mark this client action resolved?")) return;
+    const id=Number(b.dataset.resolve);
+    const {error}=await sb.from("client_actions").update({status:"resolved",resolved_via:"os"}).eq("id",id);
+    if(error) return toast(error.message);
+    sb.from("client_action_events").insert({action_id:id,kind:"resolved",text:"Resolved from OS",by_user:me.id}).then(()=>{},()=>{});
+    toast("Resolved"); pwProgress(p,body);
+  });
+  body.querySelectorAll("[data-editpct]").forEach(el=>el.onclick=async()=>{
+    const room=el.dataset.room, stream=el.dataset.stream;
+    const v=prompt(`Update ${room} · ${PROGRESS_STREAM_LABEL[stream]||stream} (%)`,el.dataset.cur); if(v==null) return;
+    const pct=Math.round(Number(v)); if(isNaN(pct)||pct<0||pct>100) return toast("Enter a number 0–100");
+    const status=pct>=100?"done":pct>0?"in_progress":"not_started";
+    const {error}=await sb.from("project_progress").upsert({project_id:p.id,room,stream,percent:pct,status,updated_via:"os",updated_by:me.id},{onConflict:"project_id,room,stream"});
+    if(error) return toast(error.message);
+    toast("Updated"); pwProgress(p,body);
+  });
+  body.querySelectorAll("[data-photo]").forEach(b=>b.onclick=async()=>{
+    const vis=b.dataset.vis==="1";
+    const {error}=await sb.from("progress_photos").update({client_visible:!vis}).eq("id",Number(b.dataset.photo));
+    if(error) return toast(error.message);
+    pwProgress(p,body);
+  });
+  renderPulse(p);
+}
+// Client satisfaction pulse (NPS) — appended to the Progress view; client responds on the tracker.
+async function renderPulse(p){
+  const host=$("#pgPulse"); if(!host) return;
+  let rows=[];
+  try{ const {data}=await sb.from("client_pulse").select("*").eq("project_id",p.id).order("requested_at",{ascending:false}); rows=data||[]; }catch(e){ return; }
+  const responded=rows.filter(r=>r.status==="responded"&&r.score!=null);
+  const pending=rows.find(r=>r.status==="requested");
+  const w=canWrite();
+  let html=`<div class="sec-label" style="margin-top:18px">Client satisfaction</div>`;
+  if(responded.length){
+    const latest=responded[0];
+    const avg=Math.round(responded.reduce((s,r)=>s+r.score,0)/responded.length*10)/10;
+    const band=latest.score>=9?"Promoter":latest.score>=7?"Passive":"Detractor";
+    const bcol=latest.score>=9?"#3C7A4E":latest.score>=7?"#A9791E":"#B4453A";
+    html+=`<div class="cr-item"><div class="cr-main"><div class="cr-lead">Latest <b>${latest.score}/10</b> <span class="ch" style="background:${bcol};color:#fff">${band}</span> <span class="ch ch-other">${esc(latest.stage)}</span></div>${latest.comment?`<div class="cr-text">"${esc(latest.comment)}"</div>`:""}<div class="cr-text" style="color:var(--ink-soft)">Avg ${avg}/10 · ${responded.length} response(s)</div></div></div>`;
+  } else { html+=`<div class="empty" style="padding:8px 0">No feedback captured yet.</div>`; }
+  if(w){ html+= pending?`<div style="margin-top:8px;font-size:12px;color:var(--ink-soft)">A feedback request is live on the client's tracker.</div>`:`<div style="margin-top:8px"><button class="chip" id="pgPulseReq">Request feedback</button></div>`; }
+  host.innerHTML=html;
+  const rq=$("#pgPulseReq"); if(rq) rq.onclick=async()=>{
+    const {error}=await sb.from("client_pulse").insert({project_id:p.id,stage:p.current_stage==="Handover"?"handover":"ad_hoc",kind:"nps",status:"requested",channel:"tracker",requested_by:me.id});
+    if(error) return toast(error.message);
+    toast("Feedback requested — it appears on the client's tracker"); renderPulse(p);
+  };
+}
+
+async function pgShareTracker(p){
+  try{
+    let token=null;
+    const {data:ex}=await sb.from("project_shares").select("token,expires_at").eq("project_id",p.id).eq("revoked",false).order("created_at",{ascending:false}).limit(1);
+    if(ex&&ex.length&&(!ex[0].expires_at||new Date(ex[0].expires_at)>new Date())) token=ex[0].token;
+    if(!token){
+      const {data,error}=await sb.from("project_shares").insert({project_id:p.id,created_by:me.id}).select("token").single();
+      if(error) return toast("Couldn't create link: "+error.message);
+      token=data.token;
+    }
+    const url=TRACKER_BASE+"?t="+token;
+    const digits=String(p.client_phone||"").replace(/\D/g,"");
+    const wnum=digits?(digits.length===10?"91"+digits:digits):"";
+    const first=(p.client_name||"").split(" ")[0];
+    const msg=`Hi${first?" "+first:""}, here's your live Lintel Space project tracker — progress, site photos, payments and anything we need from you, all in one place:\n${url}`;
+    const wa=wnum?`https://wa.me/${wnum}?text=${encodeURIComponent(msg)}`:"";
+    openModal(`<h3 style="margin:0 0 10px">Live client tracker</h3>
+      <div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px">A private, always-live link for ${esc(p.client_name||"the client")} — it updates itself, so there's never a stale copy to resend.</div>
+      <input id="pgUrl" value="${esc(url)}" readonly style="width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font-size:12px;margin-bottom:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="chip" id="pgCopy">Copy link</button>
+        ${wa?`<a class="chip" href="${wa}" target="_blank" rel="noopener" style="text-decoration:none">Send on WhatsApp</a>`:""}
+        <a class="chip" href="${esc(url)}" target="_blank" rel="noopener" style="text-decoration:none">Preview</a>
+        <div style="flex:1"></div>
+        <button class="ghost sm" onclick="closeModal()">Close</button>
+      </div>`);
+    const cp=$("#pgCopy"); if(cp) cp.onclick=()=>{ const i=$("#pgUrl"); if(i){ i.select(); try{document.execCommand("copy");}catch(e){} } if(navigator.clipboard) navigator.clipboard.writeText(url).then(()=>{},()=>{}); toast("Link copied"); };
+  }catch(e){ toast("Couldn't share tracker: "+(e.message||e)); }
+}
+
+function pgNewAction(p,body){
+  openModal(`<h3 style="margin:0 0 12px">New client action</h3>
+    <label style="font-size:12px;color:var(--ink-soft)">Type</label>
+    <select id="caType" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin:4px 0 10px">${Object.keys(ACTION_TYPE_LABEL).map(k=>`<option value="${k}">${ACTION_TYPE_LABEL[k]}</option>`).join("")}</select>
+    <label style="font-size:12px;color:var(--ink-soft)">What we need from the client</label>
+    <input id="caTitle" placeholder="e.g. Choose dado tiles for the kitchen" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin:4px 0 10px">
+    <label style="font-size:12px;color:var(--ink-soft)">What it blocks (optional)</label>
+    <input id="caBlocks" placeholder="e.g. kitchen install" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin:4px 0 10px">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Due date</label><input id="caDue" type="date" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Priority</label><select id="caPrio" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="chip" id="caSave">Create</button><button class="ghost sm" onclick="closeModal()">Cancel</button></div>`);
+  const sv=$("#caSave"); if(sv) sv.onclick=async()=>{
+    const title=($("#caTitle").value||"").trim(); if(!title) return toast("Enter what we need from the client");
+    const row={project_id:p.id,type:$("#caType").value,title:title,blocks:($("#caBlocks").value||"").trim()||null,due_date:$("#caDue").value||null,priority:$("#caPrio").value,source:"os",created_by:me.id};
+    const {data,error}=await sb.from("client_actions").insert(row).select("id").single();
+    if(error) return toast(error.message);
+    sb.from("client_action_events").insert({action_id:data.id,kind:"created",text:title,by_user:me.id}).then(()=>{},()=>{});
+    closeModal(); toast("Client action added"); pwProgress(p,body);
+  };
+}
+
+// Dashboard "Delivery Radar" — active projects needing attention (amber/red health,
+// open client actions, or a >7-day communication gap). Mirrors the post-sales strip.
+let drShowAll=null;
+async function renderDeliveryRadar(hostSel){
+  const host=$(hostSel); if(!host) return;
+  await ensureStaff();
+  if(drShowAll===null) drShowAll=isAdminLevel();
+  const mine=myStaffId();
+  let projs=[],openActs=[];
+  try{
+    const r=await Promise.all([
+      sb.from("projects").select("id,code,name,current_stage,status,health,last_client_update_at,pm_id,designer_id,consultant_id").neq("status","completed"),
+      sb.from("client_actions").select("project_id,status,due_date").in("status",["open","reminded","overdue"])
+    ]);
+    if(r[0].error){ host.innerHTML=""; return; }
+    projs=r[0].data||[]; openActs=r[1].data||[];
+  }catch(e){ host.innerHTML=""; return; }
+  if(!projs.length){ host.innerHTML=""; return; }
+  const today=todayISO(), now=Date.now();
+  const byProj={}; openActs.forEach(a=>{ const o=byProj[a.project_id]=byProj[a.project_id]||{n:0,od:0}; o.n++; if(a.due_date&&a.due_date<today)o.od++; });
+  let rows=projs.map(p=>{
+    const oc=byProj[p.id]||{n:0,od:0};
+    const staleDays=p.last_client_update_at?Math.floor((now-new Date(p.last_client_update_at).getTime())/86400000):null;
+    const stale=staleDays!=null&&staleDays>7;
+    const attn=(p.health&&p.health!=="green")||oc.n>0||stale;
+    return {p:p,oc:oc,staleDays:staleDays,stale:stale,attn:attn};
+  }).filter(x=>x.attn);
+  if(mine&&!drShowAll) rows=rows.filter(x=>[x.p.pm_id,x.p.designer_id,x.p.consultant_id].map(String).indexOf(String(mine))!==-1);
+  const sev=x=>(x.p.health==="red"?3:x.p.health==="amber"?2:0)+(x.oc.od?2:0)+(x.stale?1:0)+(x.oc.n?1:0);
+  rows.sort((a,b)=>sev(b)-sev(a));
+  if(!rows.length){ host.innerHTML=""; return; }
+  host.innerHTML=`<div class="cr-strip">
+    <div class="cr-head"><span class="cr-title">Delivery radar · attention <span class="cr-n">${rows.length}</span></span>
+      ${mine?`<button class="ghost sm" id="drToggle">${drShowAll?"Only mine":"Show all"}</button>`:""}</div>
+    ${rows.map(x=>{
+      const p=x.p, oc=x.oc;
+      const hcol=HEALTH_COLOR[p.health]||HEALTH_COLOR.green;
+      const upd=x.staleDays==null?"no client update yet":(x.staleDays===0?"updated today":`updated ${x.staleDays}d ago`);
+      return `<div class="cr-item"><div class="cr-main">
+        <div class="cr-lead"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${hcol};margin-right:6px;vertical-align:middle"></span>${esc(p.name||("Project #"+p.id))} <span class="ch ch-other">${esc(p.current_stage||p.status||"")}</span>${oc.n?`<span class="ch ${oc.od?"ch-warn":"ch-other"}">${oc.n} needs-you${oc.od?` · ${oc.od} overdue`:""}</span>`:""}${x.stale?`<span class="ch ch-warn">stale</span>`:""}</div>
+        <div class="cr-text">${esc(upd)}</div></div>
+        <div class="cr-side"><button class="chip" data-dr-open="${p.id}">Open</button></div></div>`;
+    }).join("")}
+  </div>`;
+  const tg=$("#drToggle"); if(tg) tg.onclick=()=>{ drShowAll=!drShowAll; renderDeliveryRadar(hostSel); };
+  host.querySelectorAll("[data-dr-open]").forEach(b=>b.onclick=()=>{
+    const pid=Number(b.dataset.drOpen);
+    activeProject=pid; projectTab="site"; projSubSel.site="progress"; activeLead=null;
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    render("projects"); setTimeout(()=>renderProjectWorkspace(pid),60);
+  });
+  if(typeof dashAttnSync==="function")dashAttnSync();
+}
+
+// ---- Change Orders (Phase 3) — client-approved scope additions + revised total ----
+const CO_STATUS_LABEL={draft:"Draft",sent:"Awaiting client",client_approved:"Approved",rejected:"Declined",billed:"Billed"};
+const CO_STATUS_COLOR={draft:"#6B6560",sent:"#A9791E",client_approved:"#3C7A4E",rejected:"#B4453A",billed:"#5b86b3"};
+async function pwChanges(p, body){
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading change orders…</div>`;
+  const w=canWrite();
+  let cos=[], rev=null;
+  try{
+    const r=await Promise.all([
+      sb.from("change_orders").select("*").eq("project_id",p.id).order("created_at",{ascending:true}),
+      sb.rpc("project_revised_total",{pid:p.id})
+    ]);
+    cos=r[0].data||[]; rev=r[1].data||null;
+  }catch(e){ body.innerHTML=`<div class="empty" style="padding:24px">Couldn't load. ${esc(e.message||"")}</div>`; return; }
+  const boqTotal=rev?Number(rev.boq_total||0):0, revised=rev?Number(rev.revised||0):0, coIncl=rev?Number(rev.approved_co_incl||0):0;
+
+  let html=`<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:16px">
+    <div style="flex:1;min-width:220px">
+      <div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">Revised contract value</div>
+      <div class="display" style="font-size:26px;color:var(--ink)">${fmt(revised)}</div>
+      <div style="font-size:12px;color:var(--ink-soft)">Original ${fmt(boqTotal)}${coIncl?` + approved changes ${fmt(coIncl)}`:""}</div>
+    </div>
+    ${w?`<button class="chip" id="coNew">+ Change order</button>`:""}
+  </div>`;
+
+  if(!cos.length){ html+=`<div class="empty" style="padding:10px 0">No change orders yet. Extras you add here are client-approved (on their tracker) before they're billable — no silent cost drift.</div>`; }
+  else { html+=cos.map(c=>{
+    const incl=Math.round(Number(c.amount||0)*(1+Number(c.gst_pct||0)/100));
+    const scol=CO_STATUS_COLOR[c.status]||"#6B6560";
+    const acts=[];
+    if(w){
+      if(c.status==="draft"){ acts.push(`<button class="chip" data-co-send="${c.id}">Send to client</button>`,`<button class="chip" data-co-del="${c.id}">Delete</button>`); }
+      else if(c.status==="sent"){ acts.push(`<button class="chip" data-co-appr="${c.id}">Mark approved</button>`,`<button class="chip" data-co-rej="${c.id}">Decline</button>`); }
+      else if(c.status==="client_approved"){ acts.push(`<button class="chip" data-co-bill="${c.id}">Mark billed</button>`); }
+    }
+    const meta=[c.qty&&c.rate?`${c.qty} × ${fmt(c.rate)}`:"",c.line_disc_pct?`−${c.line_disc_pct}%`:"",`+${c.gst_pct||0}% GST`].filter(Boolean).join(" · ");
+    return `<div class="cr-item"><div class="cr-main">
+      <div class="cr-lead"><span class="mono" style="color:var(--ink-soft)">${esc(c.co_number||"")}</span> ${esc(c.title)} ${c.room?`<span class="ch ch-other">${esc(c.room)}</span>`:""} <span class="ch" style="background:${scol};color:#fff">${CO_STATUS_LABEL[c.status]||c.status}</span></div>
+      <div class="cr-text">${esc(meta)}${c.description?` — ${esc(c.description)}`:""}${c.rejected_reason?` · declined: ${esc(c.rejected_reason)}`:""}</div></div>
+      <div class="cr-side" style="text-align:right"><div class="mono" style="font-weight:600;color:var(--ink)">${fmt(incl)}</div>${acts.join(" ")}</div></div>`;
+  }).join(""); }
+  body.innerHTML=html;
+
+  const nb=$("#coNew"); if(nb) nb.onclick=()=>coForm(p,body);
+  body.querySelectorAll("[data-co-send]").forEach(b=>b.onclick=()=>coSet(p,body,Number(b.dataset.coSend),{status:"sent"},"Sent to client for approval"));
+  body.querySelectorAll("[data-co-appr]").forEach(b=>b.onclick=()=>coSet(p,body,Number(b.dataset.coAppr),{status:"client_approved",approved_via:"os"},"Marked approved"));
+  body.querySelectorAll("[data-co-bill]").forEach(b=>b.onclick=()=>coSet(p,body,Number(b.dataset.coBill),{status:"billed"},"Marked billed"));
+  body.querySelectorAll("[data-co-rej]").forEach(b=>b.onclick=()=>{ const reason=prompt("Reason for declining (optional)","")||null; coSet(p,body,Number(b.dataset.coRej),{status:"rejected",rejected_reason:reason},"Declined"); });
+  body.querySelectorAll("[data-co-del]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this draft change order?"))return; const {error}=await sb.from("change_orders").delete().eq("id",Number(b.dataset.coDel)); if(error)return toast(error.message); toast("Deleted"); pwChanges(p,body); });
+}
+async function coSet(p,body,id,patch,msg){ const {error}=await sb.from("change_orders").update(patch).eq("id",id); if(error)return toast(error.message); toast(msg); pwChanges(p,body); }
+function coForm(p,body){
+  const streams=["modular","carpentry","services","furnishing","accessories","other"];
+  openModal(`<h3 style="margin:0 0 12px">New change order</h3>
+    <label style="font-size:12px;color:var(--ink-soft)">Title</label>
+    <input id="coTitle" placeholder="e.g. Extra loft above the wardrobe" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin:4px 0 10px">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Room</label><input id="coRoom" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Stream</label><select id="coStream" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px">${streams.map(s=>`<option value="${s}">${s}</option>`).join("")}</select></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:10px">
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Qty</label><input id="coQty" type="number" value="1" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Rate ₹</label><input id="coRate" type="number" value="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Disc %</label><input id="coDisc" type="number" value="0" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">GST %</label><input id="coGst" type="number" value="18" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+    </div>
+    <label style="font-size:12px;color:var(--ink-soft);display:block;margin-top:10px">Description (optional)</label>
+    <textarea id="coDesc" rows="2" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="chip" id="coSave">Create draft</button><button class="ghost sm" onclick="closeModal()">Cancel</button></div>`);
+  const sv=$("#coSave"); if(sv) sv.onclick=async()=>{
+    const title=($("#coTitle").value||"").trim(); if(!title) return toast("Enter a title");
+    const row={project_id:p.id,title:title,room:($("#coRoom").value||"").trim()||null,boq_stream:$("#coStream").value,qty:Number($("#coQty").value)||1,rate:Number($("#coRate").value)||0,line_disc_pct:Number($("#coDisc").value)||0,gst_pct:Number($("#coGst").value)||0,description:($("#coDesc").value||"").trim()||null,status:"draft",created_by:me.id};
+    const {error}=await sb.from("change_orders").insert(row);
+    if(error) return toast(error.message);
+    closeModal(); toast("Change order created"); pwChanges(p,body);
+  };
+}
+
+// ---- Snagging + handover sign-off (Phase 3 · increment 2) ----
+const SNAG_SEV_COLOR={minor:"#6B6560",major:"#A9791E",critical:"#B4453A"};
+const SNAG_STATUSES=["open","assigned","fixed","verified","cleared","wont_fix"];
+const SNAG_CATS=["finish","carpentry","electrical","plumbing","paint","cleaning","hardware","other"];
+function snagRow(s,w){
+  const sevCol=SNAG_SEV_COLOR[s.severity]||"#6B6560";
+  const stSel=w?`<select data-snstatus="${s.id}" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px">${SNAG_STATUSES.map(x=>`<option value="${x}" ${x===s.status?"selected":""}>${x}</option>`).join("")}</select>`:`<span class="ch ch-other">${esc(s.status)}</span>`;
+  const asSel=w?`<select data-snassignee="${s.id}" style="font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"><option value="">Unassigned</option>${(STAFF||[]).map(m=>`<option value="${m.id}" ${String(m.id)===String(s.assignee_id)?"selected":""}>${esc(m.full_name||m.email)}</option>`).join("")}</select>`:"";
+  const photos=["before","after"].map(k=>{ const url=s["photo_"+k+"_url"]; return url?`<a href="${esc(url)}" target="_blank" rel="noopener" title="${k}"><img src="${esc(url)}" style="width:38px;height:38px;object-fit:cover;border-radius:5px;border:1px solid var(--line-2)"></a>`:(w?`<button class="chip" data-snphoto="${s.id}" data-which="${k}" style="font-size:10px;padding:3px 7px">+ ${k}</button>`:""); }).join(" ");
+  return `<div class="cr-item"><div class="cr-main">
+    <div class="cr-lead">${esc(s.title)} <span class="ch" style="background:${sevCol};color:#fff">${esc(s.severity)}</span> <span class="ch ch-other">${esc(s.category)}</span>${s.reported_via==="client"?` <span class="ch ch-warn">client-reported</span>`:""}</div>
+    ${s.detail?`<div class="cr-text">${esc(s.detail)}</div>`:""}
+    <div style="display:flex;gap:8px;align-items:center;margin-top:7px;flex-wrap:wrap">${stSel} ${asSel} ${photos}${w?` <button class="chip" data-sndel="${s.id}" style="font-size:10px;padding:3px 7px">delete</button>`:""}</div>
+  </div></div>`;
+}
+async function pwSnags(p, body){
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading snags…</div>`;
+  await ensureStaff();
+  const w=canWrite();
+  let snags=[];
+  try{ const {data}=await sb.from("snags").select("*").eq("project_id",p.id).order("created_at",{ascending:false}); snags=data||[]; }
+  catch(e){ body.innerHTML=`<div class="empty" style="padding:24px">Couldn't load. ${esc(e.message||"")}</div>`; return; }
+  for(const s of snags){ for(const k of ["photo_before","photo_after"]){ if(s[k]){ try{ const r=await sb.storage.from("site-photos").createSignedUrl(s[k],3600); s[k+"_url"]=(r&&r.data&&r.data.signedUrl)||null; }catch(e){} } } }
+  const open=snags.filter(s=>["open","assigned","fixed","verified"].indexOf(s.status)!==-1).length;
+  const cleared=snags.filter(s=>s.status==="cleared").length;
+  const atHandover=p.current_stage==="Handover";
+  const rooms={}; snags.forEach(s=>{ const rk=s.room||"General"; (rooms[rk]=rooms[rk]||[]).push(s); });
+  const roomNames=Object.keys(rooms).sort();
+
+  let html=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+    <div style="font-size:14px;color:var(--ink)"><b>${open}</b> open · <b>${cleared}</b> cleared · ${snags.length} total &nbsp;${handoverPill(p)}</div>
+    <div style="flex:1"></div>
+    <button class="ghost sm" id="snShare">Share for sign-off</button>
+    ${w?`<button class="chip" id="snNew">+ Snag</button>`:""}
+  </div>`;
+
+  if(atHandover){
+    if(p.handover_signed_at){
+      html+=`<div class="cr-item" style="background:rgba(60,122,78,.08)"><div class="cr-main"><div class="cr-lead">✓ Handover accepted by ${esc(p.handover_signed_name||"the client")}</div><div class="cr-text">${new Date(p.handover_signed_at).toLocaleString("en-IN")}${p.handover_signed_via?` · ${esc(p.handover_signed_via)}`:""}</div></div></div>`;
+    } else if(p.handover_status==="clear"){
+      html+=`<div class="cr-item"><div class="cr-main"><div class="cr-lead">Snag-free ✓ — awaiting client sign-off</div><div class="cr-text">Share the tracker; the client accepts handover with one tap.</div></div><div class="cr-side"><button class="chip" id="snShare2">Share</button></div></div>`;
+    } else if(w){
+      html+=`<div class="cr-item"><div class="cr-main"><div class="cr-lead">Handover snag list open</div><div class="cr-text">${open?`${open} item(s) still open — clear them to mark snag-free.`:"All items cleared — you can mark this snag-free."}</div></div><div class="cr-side"><button class="chip" id="snClear" ${open?"disabled":""}>Mark snag-free</button></div></div>`;
+    }
+  }
+
+  if(!snags.length){ html+=`<div class="empty" style="padding:10px 0">No snags logged. Add room-by-room defects here at handover — the client can also report issues from their tracker.</div>`; }
+  else { html+=roomNames.map(rm=>`<div class="sec-label" style="margin-top:16px">${esc(rm)}</div>`+rooms[rm].map(s=>snagRow(s,w)).join("")).join(""); }
+  body.innerHTML=html;
+
+  const sh=$("#snShare"); if(sh) sh.onclick=()=>pgShareTracker(p);
+  const sh2=$("#snShare2"); if(sh2) sh2.onclick=()=>pgShareTracker(p);
+  const nn=$("#snNew"); if(nn) nn.onclick=()=>snagForm(p,body);
+  const cl=$("#snClear"); if(cl) cl.onclick=async()=>{
+    if(!confirm("Mark this handover snag-free? The client can then accept it on their tracker."))return;
+    const {error}=await sb.from("projects").update({handover_status:"clear"}).eq("id",p.id);
+    if(error)return toast(error.message);
+    p.handover_status="clear"; if(typeof projLog==="function") projLog(p,"Snag list cleared · snag-free handover");
+    toast("Snag-free recorded"); pwSnags(p,body);
+  };
+  body.querySelectorAll("[data-snstatus]").forEach(el=>el.onchange=async()=>{ const {error}=await sb.from("snags").update({status:el.value}).eq("id",Number(el.dataset.snstatus)); if(error)return toast(error.message); pwSnags(p,body); });
+  body.querySelectorAll("[data-snassignee]").forEach(el=>el.onchange=async()=>{ const aid=el.value?Number(el.value):null; const {error}=await sb.from("snags").update({assignee_id:aid}).eq("id",Number(el.dataset.snassignee)); if(error)return toast(error.message); pwSnags(p,body); });
+  body.querySelectorAll("[data-snphoto]").forEach(b=>b.onclick=()=>snagPhoto(p,body,Number(b.dataset.snphoto),b.dataset.which));
+  body.querySelectorAll("[data-sndel]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this snag?"))return; const {error}=await sb.from("snags").delete().eq("id",Number(b.dataset.sndel)); if(error)return toast(error.message); toast("Deleted"); pwSnags(p,body); });
+}
+function snagPhoto(p,body,id,which){
+  const inp=document.createElement("input"); inp.type="file"; inp.accept="image/*";
+  inp.onchange=async()=>{
+    const f=inp.files&&inp.files[0]; if(!f) return;
+    toast("Uploading…");
+    const ext=((f.name||"").split(".").pop()||"jpg").toLowerCase();
+    const path=`${p.id}/snag/${id}_${which}_${Date.now()}.${ext}`;
+    const {error:uErr}=await sb.storage.from("site-photos").upload(path,f,{upsert:true});
+    if(uErr) return toast(uErr.message);
+    const patch={}; patch["photo_"+which]=path;
+    const {error}=await sb.from("snags").update(patch).eq("id",id);
+    if(error) return toast(error.message);
+    toast("Photo added"); pwSnags(p,body);
+  };
+  inp.click();
+}
+function snagForm(p,body){
+  openModal(`<h3 style="margin:0 0 12px">New snag</h3>
+    <label style="font-size:12px;color:var(--ink-soft)">What's wrong</label>
+    <input id="snTitle" placeholder="e.g. Wardrobe shutter misaligned" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin:4px 0 10px">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Room</label><input id="snRoom" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Category</label><select id="snCat" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px">${SNAG_CATS.map(c=>`<option value="${c}">${c}</option>`).join("")}</select></div>
+      <div style="flex:1"><label style="font-size:12px;color:var(--ink-soft)">Severity</label><select id="snSev" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"><option value="minor">minor</option><option value="major">major</option><option value="critical">critical</option></select></div>
+    </div>
+    <label style="font-size:12px;color:var(--ink-soft);display:block;margin-top:10px">Detail (optional)</label>
+    <textarea id="snDetail" rows="2" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:4px"></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="chip" id="snSave">Add snag</button><button class="ghost sm" onclick="closeModal()">Cancel</button></div>`);
+  const sv=$("#snSave"); if(sv) sv.onclick=async()=>{
+    const title=($("#snTitle").value||"").trim(); if(!title) return toast("Describe the issue");
+    const row={project_id:p.id,title:title,room:($("#snRoom").value||"").trim()||null,category:$("#snCat").value,severity:$("#snSev").value,detail:($("#snDetail").value||"").trim()||null,status:"open",reported_via:"os",reported_by:me.id};
+    const {error}=await sb.from("snags").insert(row);
+    if(error) return toast(error.message);
+    closeModal(); toast("Snag added"); pwSnags(p,body);
+  };
 }
 
 /* ---- Overview (timeline) ---- */
@@ -6608,7 +7043,7 @@ function renderFileList(files,kind){
     ${files.map(f=>`<tr><td><b>${esc(f.title||f.storage_path.split("/").pop())}</b></td>
       <td class="mono">${esc(f.version||"—")}</td><td>${esc(f.file_type||"—")}</td>
       <td>${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
-      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${(canWrite()||(isDesignPartner()&&f.uploaded_by===me.id))?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
+      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${canWrite()?` · <button class="linkbtn" data-cv="${f.id}" data-vis="${f.client_visible?1:0}" title="Show in the client's tracker document vault">${f.client_visible?"✓ client":"share"}</button>`:""}${(canWrite()||(isDesignPartner()&&f.uploaded_by===me.id))?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
   </tbody></table>`;
 }
 function bindFileDownloads(){
@@ -6616,6 +7051,14 @@ function bindFileDownloads(){
     const {data,error}=await sb.storage.from("project-files").createSignedUrl(b.dataset.dl,3600);
     if(error) return toast(error.message);
     window.open(data.signedUrl,"_blank");
+  });
+  document.querySelectorAll("[data-cv]").forEach(b=>b.onclick=async()=>{
+    const vis=b.dataset.vis==="1";
+    const {error}=await sb.from("project_files").update({client_visible:!vis}).eq("id",b.dataset.cv);
+    if(error) return toast(error.message);
+    toast(vis?"Hidden from client":"Shared to the client's vault");
+    const {data:p}=await sb.from("projects").select("*").eq("id",activeProject).single();
+    if(p) drawProjectTab(p);
   });
   document.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{
     if(!confirm("Delete this file?")) return;

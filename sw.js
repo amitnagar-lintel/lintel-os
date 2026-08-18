@@ -6,7 +6,7 @@
    - Only successful (res.ok) responses are cached; cache is an offline fallback only.
    - Old caches are purged on activate. skipWaiting + clients.claim so a new version
      takes over immediately (the page reloads once via controllerchange). */
-const CACHE = "lintel-os-shell-v29";
+const CACHE = "lintel-os-shell-v30";
 
 self.addEventListener("install", () => { self.skipWaiting(); });
 
