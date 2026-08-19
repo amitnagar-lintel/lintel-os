@@ -6285,6 +6285,7 @@ function pwClient(p,body){
       <div class="field"><label>Contract value (₹)</label>${ro?`<div class="mono">${fmt(p.contract_value)}</div>`:`<input id="pc_val" type="number" value="${p.contract_value||0}">`}</div>
       <div class="field"><label>Status</label>${ro?`<div>${p.status}</div>`:`<select id="pc_status">${opts(["active","on_hold","completed","cancelled"],p.status)}</select>`}</div>
     </div>
+    ${isAdminLevel()?`<div class="field"><label>Sale month <span style="font-weight:400;color:var(--ink-soft);font-size:11px">— overrides which month this counts in the monthly-sales report (use for migrated/legacy projects)</span></label><input id="pc_saledate" type="date" value="${p.sale_date||""}"></div>`:""}
     <div class="field"><label>Notes</label>${ro?`<div>${esc(p.notes||"—")}</div>`:`<textarea id="pc_notes" rows="2">${esc(p.notes||"")}</textarea>`}</div>
     ${ro?"":`<div style="margin-top:14px"><button class="primary" id="pcSave">Save changes</button></div>`}
   </div>`;
@@ -6299,6 +6300,7 @@ function pwClient(p,body){
       start_date:$("#pc_start").value||null,
       target_end:$("#pc_end").value||null, contract_value:Number($("#pc_val").value||0),
       status:$("#pc_status").value, notes:$("#pc_notes").value.trim() };
+    if($("#pc_saledate")) row.sale_date=$("#pc_saledate").value||null;   // admin-only sales-month override
     const {error}=await sb.from("projects").update(row).eq("id",p.id);
     if(error) return toast(error.message);
     toast("Saved"); Object.assign(p,row);
