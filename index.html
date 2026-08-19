@@ -3808,10 +3808,10 @@ const TICKET_PRIOS=["low","normal","high","urgent"];
 const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
 function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
-  finance:[["payments","Payments"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
+  finance:[["payments","Payments"],["packages","Packages"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
   site:[["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+const PROJ_SUB2GROUP={payments:"finance",packages:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
 const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","progress","execution","snags","documents","team","support"];
@@ -3865,6 +3865,7 @@ async function drawProjectTab(p){
 }
 function drawProjectSub(p,sub,body){
   if(sub==="payments")   return pwPayments(p,body);
+  if(sub==="packages")   return pwPackages(p,body);
   if(sub==="orders")     return pwOrders(p,body);
   if(sub==="procurement")return pwProcurement(p,body);
   if(sub==="changes")    return pwChanges(p,body);
@@ -5106,7 +5107,8 @@ async function pwOrders(p,body){
   }
 }
 
-async function generatePOs(p,body){
+async function generatePOs(p,body,prefilter){
+  prefilter=prefilter||null;
   // load the project's latest BOQ + its items
   const {data:vers}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   if(!vers||!vers.length) return toast("No BOQ on this project yet — build one first");
@@ -5117,8 +5119,11 @@ async function generatePOs(p,body){
   const ssAll=ver.stream_settings||{};
   const boostFor=st=>Number((ssAll[normStream(st)]||{}).boost)||0;
   // group by category (A2: excluded/optional lines are outside contracted scope — never in work orders)
-  const inScope=items.filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
+  let inScope=items.filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
   if(!inScope.length) return toast("The BOQ has no included line items");
+  if(prefilter&&prefilter.pkg){ await schedLoadMaster(); inScope=inScope.filter(r=>packageOf(r)===prefilter.pkg); }
+  else if(prefilter&&prefilter.room){ await schedLoadMaster(); inScope=inScope.filter(r=>String(r.room||r.room_tag||'')===String(prefilter.room)); }
+  if(!inScope.length) return toast("No included lines in that scope");
   const cats={};
   inScope.forEach(r=>{ const c=r.category||"Uncategorised"; (cats[c]=cats[c]||[]).push(r); });
   const catNames=Object.keys(cats);
@@ -5159,8 +5164,10 @@ async function generatePOs(p,body){
         rows.push({ project_id:p.id, boq_version_id:ver.id, po_number:nums[k],
           category:cat, rate_basis:basis, status:"draft", items:its, subtotal, created_by:me.id });
       });
-      const {error}=await sb.from("purchase_orders").insert(rows);
+      const {data:created,error}=await sb.from("purchase_orders").insert(rows).select("id");
       if(error){ toast(error.message); return; }
+      // Best-effort package tag (works once PKG-01 adds the column; ignored otherwise).
+      if(prefilter&&prefilter.pkg&&created&&created.length){ await sb.from("purchase_orders").update({package_code:prefilter.pkg}).in("id",created.map(x=>x.id)); }
       closeModal(); toast(`${rows.length} work order(s) created`); pwOrders(p,body);
     }finally{ btn.disabled=false; }
   };
@@ -5519,16 +5526,22 @@ async function pwProcurement(p,body){
   body.querySelectorAll("[data-newpo]").forEach(b=>b.onclick=()=>newVendorPO(p,body,b.dataset.newpo,R.ver));
 }
 
-async function newVendorPO(p,body,divKey,ver){
+async function newVendorPO(p,body,divKey,ver,prefilter){
+  prefilter=prefilter||null;
   const dv=DIVISIONS.find(d=>d.key===divKey);
+  if(!dv) return toast("Unknown division");
   if(!ver) return toast("No BOQ on this project yet — build one first");
   const {data:vends}=await sb.from("vendors").select("*").eq("is_active",true).contains("divisions",[divKey]).order("name");
   if(!vends||!vends.length) return toast(`No active ${dv.label} vendors yet — add one under Vendors first`);
   const {data:its}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
-  const pool=(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional'&&dv.streams.includes(normStream(r.stream)));
-  if(!pool.length) return toast(`The BOQ has no included ${dv.label} lines`);
+  let pool=(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
+  let scopeLabel=dv.label;
+  if(prefilter&&prefilter.pkg){ await schedLoadMaster(); pool=pool.filter(r=>packageOf(r)===prefilter.pkg); scopeLabel=PKG_LABEL(prefilter.pkg); }
+  else if(prefilter&&prefilter.room){ await schedLoadMaster(); pool=pool.filter(r=>String(r.room||r.room_tag||'')===String(prefilter.room)); scopeLabel=prefilter.room; }
+  else pool=pool.filter(r=>dv.streams.includes(normStream(r.stream)));
+  if(!pool.length) return toast("No included "+scopeLabel+" lines in the BOQ");
   openModal(`
-    <div class="modal-h">New PO · ${esc(dv.label)}</div>
+    <div class="modal-h">New PO · ${esc(scopeLabel)}</div>
     <div class="modal-b">
       <div class="grid2">
         <div class="field"><label>Vendor</label><select id="vpo_vendor">${vends.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></div>
@@ -5591,6 +5604,8 @@ async function newVendorPO(p,body,divKey,ver){
       });
       const {error:iErr}=await sb.from("vendor_po_items").insert(rows);
       if(iErr){ toast(iErr.message); return; }
+      // Best-effort package tag (works once PKG-01 adds the column; ignored otherwise).
+      if(prefilter&&prefilter.pkg){ await sb.from("vendor_pos").update({package_code:prefilter.pkg}).eq("id",po.id); }
       closeModal(); toast(`${num} created as draft`);
       activeVPO=po.id; vpoDetail(p,body,po.id);
     }finally{ btn.disabled=false; }
@@ -5622,6 +5637,8 @@ async function vpoDetail(p,body,id){
   if(o.status==='sent'||o.status==='in_progress') actions+=`<button class="primary" id="vpoDeliver">Mark delivered</button>`;
   if(o.status==='delivered'&&isAdminLevel()) actions+=`<button class="ghost" id="vpoClose">Close PO</button>`;
   if(editable&&isAdminLevel()) actions+=`<button class="ghost del" id="vpoCancel">Cancel</button>`;
+  const _pm=(STAFF||[]).find(s=>String(s.id)===String(p.pm_id));
+  if(VPO_COMMITTED.includes(o.status)&&_pm&&_pm.phone) actions+=`<button class="ghost" id="vpoPingPM">Notify PM</button>`;
   body.innerHTML=`
     <div class="gbar"><button class="ghost" id="vpoBack">← Procurement</button>
       <div class="gact">${actions}<button class="ghost" id="vpoPrint">Print / PDF</button></div></div>
@@ -5740,6 +5757,7 @@ async function vpoDetail(p,body,id){
   if($("#vpoDeliver")) $("#vpoDeliver").onclick=()=>{ if(confirm("Mark this PO as delivered / work completed?")) setStatus({status:'delivered'},"Marked delivered"); };
   if($("#vpoClose")) $("#vpoClose").onclick=()=>{ if(confirm("Close this PO? Payments stay recorded.")) setStatus({status:'closed'},"PO closed"); };
   if($("#vpoCancel")) $("#vpoCancel").onclick=()=>{ if(confirm("Cancel this PO?")) setStatus({status:'cancelled'},"PO cancelled"); };
+  if($("#vpoPingPM")) $("#vpoPingPM").onclick=()=>{ const pm=(STAFF||[]).find(s=>String(s.id)===String(p.pm_id)); if(!pm||!pm.phone) return toast("No PM phone on file"); const pkg=o.package_code?(' · '+PKG_LABEL(o.package_code)):''; waOpen(pm.phone,`Hi ${pm.full_name||'PM'}, PO ${o.po_number} has been released to ${v.name} for ${p.name}${pkg} — value ${fmt(total)}. Please track delivery and site readiness against the schedule.`); };
   if($("#vpo_edel")) $("#vpo_edel").onchange=async()=>{ await sb.from("vendor_pos").update({expected_delivery:$("#vpo_edel").value||null}).eq("id",o.id); toast("Delivery date saved"); };
   if($("#vpoSaveItems")) $("#vpoSaveItems").onclick=async()=>{
     for(const r of items){
@@ -5781,6 +5799,218 @@ async function sendVendorPO(p,body,o,v,total){
     }
     vpoDetail(p,body,o.id);
   }finally{ if(btn) btn.disabled=false; }
+}
+
+/* ===================== PACKAGE SCHEDULER (trade-wise budget vs spend vs progress) =====================
+   One project screen: each TRADE package rolls up Budget (BOQ cost_rate×qty) → Committed
+   (approved+ vendor POs, attributed per line via vendor_po_items.boq_item_id) → Paid
+   (vendor_payments, pro-rata) → Variance → % complete (project_progress). Trade-primary,
+   with a By-Room bundle view so a whole bathroom can go to one vendor while spend still
+   attributes to the right packages. No schema needed for the view — it composes existing
+   tables (BOQ · vendor_pos/items/payments · project_progress). "Raise WO/PO" pre-scopes the
+   existing builders to a package or a room (newVendorPO / generatePOs prefilter). */
+const PACKAGES=[
+  {code:'civil',        label:'Civil & Masonry',       div:'onsite', ps:'civil',        color:'#8a7b63',
+   trades:['demolition','debris_removal','brick_wall','plaster','core_cutting','waterproofing_pcc','brick_bat_coba','dry_wall_partition','windows'],
+   kw:/civil|demolition|demolish|masonry|brick|plaster|water ?proof|core ?cut|partition|window/},
+  {code:'electrical',   label:'Electrical',            div:'onsite', ps:'electrical',   color:'#c99a2e',
+   trades:['electrical_base','electrical_fixtures','ac_work'],
+   kw:/electric|wiring|light|switch|conduit|\bac\b|air ?con/},
+  {code:'plumbing',     label:'Plumbing & Sanitary',   div:'onsite', ps:'plumbing',     color:'#3f7fa6',
+   trades:['plumbing_base','plumbing_fixtures'],
+   kw:/plumb|sanitary|faucet|\bwc\b|basin|water ?line|drain|cpvc|geyser|gas ?pipe/},
+  {code:'tiling',       label:'Tiling & Flooring',     div:'onsite', ps:'civil',        color:'#a15c4e',
+   trades:['flooring_tile','flooring_marble','washroom_wall_tiles','dado_tile','wooden_flooring'],
+   kw:/tile|tiling|dado|flooring|marble|vitrified/},
+  {code:'countertop',   label:'Countertops & Stone',   div:'onsite', ps:'civil',        color:'#6d6e71',
+   trades:['counter_stone'],
+   kw:/counter ?top|counter|quartz|granite|natural stone|ledge|\bstone\b/},
+  {code:'false_ceiling',label:'False Ceiling',         div:'onsite', ps:'false_ceiling',color:'#7a8a99',
+   trades:['grid_ceiling','false_ceiling_gypsum','false_ceiling_pop','wall_pop','pelmet'],
+   kw:/false ?ceiling|gypsum|\bpop\b|pelmet|grid ceiling|ceiling/},
+  {code:'painting',     label:'Painting',              div:'onsite', ps:'painting',     color:'#4f8a5b',
+   trades:['paint_fresh','paint_repaint','texture_paint'],
+   kw:/paint|texture|primer|putty|lime ?wash|emulsion/},
+  {code:'carpentry',    label:'Onsite Carpentry',      div:'onsite', ps:'carpentry',    color:'#9a6a3a',
+   trades:['onsite_carpentry','carpentry_raw','wall_solutions','doors_new','doors_refurb','wooden_polish'],
+   kw:/panel|panelling|paneling|\btrim|carpentry|\bdoor|veneer|pu finish|wooden polish/},
+  {code:'modular',      label:'Modular / KWS',         div:'modular',ps:'modular',      color:'#b4453a',
+   trades:['kws','factory_wood_work'],
+   kw:/wardrobe|kitchen|carcass|shutter|\bloft|storage|dress|study unit|tv unit|crockery|shoe rack|vanity|pooja|modular/},
+  {code:'decor',        label:'Décor & Glass',         div:'decor',  ps:'furnishing',   color:'#7d6ea3',
+   trades:['wallpaper','glass_work','curtain_work','miscl_decor','shower_partition'],
+   kw:/wallpaper|mural|mirror|glass|curtain|shower (cubicle|partition)|blind/},
+  {code:'furnishing',   label:'Furniture & Appliances',div:'decor',  ps:'furnishing',   color:'#5b86b3',
+   trades:['furniture_loose','appliances'],
+   kw:/sofa|console|dining|furniture|appliance|chimney|\bhob\b|fridge|washing|oven|loose/}
+];
+const PKG_BY_CODE=Object.fromEntries(PACKAGES.map(x=>[x.code,x]));
+const PKG_LABEL=c=>{const x=PKG_BY_CODE[c];return x?x.label:c;};
+const divOfPackage=c=>{const x=PKG_BY_CODE[c];return x?x.div:'onsite';};
+const STREAM2PKG={modular:'modular',carpentry:'carpentry',furnishing:'furnishing',accessories:'modular',services:'civil'};
+const DIV_DEFAULT_PKG={modular:'modular',onsite:'civil',decor:'furnishing'};
+let _t2p=null;
+function tradeToPkg(){ if(_t2p) return _t2p; _t2p={}; PACKAGES.forEach(p=>(p.trades||[]).forEach(tc=>{_t2p[tc]=p.code;})); return _t2p; }
+const normCat=c=>String(c||'').trim().toLowerCase();
+// Resolve a BOQ line to exactly one package: category→trade map (precise) → keyword → stream fallback.
+function packageOf(line){
+  const t2p=tradeToPkg();
+  const cat=normCat(line&&line.category);
+  const trades=(typeof SCHED!=='undefined'&&SCHED.map&&SCHED.map[cat])||[];
+  for(const tc of trades){ if(t2p[tc]) return t2p[tc]; }
+  const hay=cat+' '+normCat(line&&(line.item_name||line.description));
+  for(const pk of PACKAGES){ if(pk.kw&&pk.kw.test(hay)) return pk.code; }
+  const st=normStream(line&&line.stream?line.stream:classifyStream(line&&(line.category||line.cat)));
+  return STREAM2PKG[st]||'civil';
+}
+
+let pkgAxis='trade', pkgOpenKey=null;
+
+/* Compose the per-package + per-room roll-up from BOQ, vendor POs/items/payments, progress. */
+async function packageRollup(p){
+  await schedLoadMaster();
+  const {data:vers}=await sb.from("boq_versions").select("id,version,version_label,locked_at").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  const ver=(vers||[])[0]||null;
+  const [{data:its},{data:pos},{data:prog}]=await Promise.all([
+    ver?sb.from("boq_items").select("id,room,room_tag,category,item_name,description,uom,stream,cost_rate,qty,scope").eq("boq_version_id",ver.id).order("sort_idx"):Promise.resolve({data:[]}),
+    sb.from("vendor_pos").select("id,po_number,division,status,subtotal,gst_pct, vendors(name)").eq("project_id",p.id),
+    sb.from("project_progress").select("room,stream,percent").eq("project_id",p.id)
+  ]);
+  const items=(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
+  const blank=()=>({budget:0,committed:0,paid:0,lines:0,noCost:0,pos:[]});
+  const P={}; PACKAGES.forEach(x=>P[x.code]=blank());
+  const R={}; const roomKey=r=>(r.room||r.room_tag||'—');
+  // budget from the live BOQ (cost basis)
+  items.forEach(r=>{
+    const code=packageOf(r), amt=Math.round((Number(r.cost_rate)||0)*(Number(r.qty)||0));
+    P[code].budget+=amt; P[code].lines++; if(!(Number(r.cost_rate)||0)&&(Number(r.qty)||0)) P[code].noCost++;
+    const rm=roomKey(r); (R[rm]=R[rm]||blank()); R[rm].budget+=amt; R[rm].lines++;
+  });
+  // committed + paid, attributed per PO line (pro-rata by line amount)
+  const list=pos||[]; const poIds=list.map(o=>o.id);
+  let poItems=[], pays=[];
+  if(poIds.length){
+    const [a,b]=await Promise.all([
+      sb.from("vendor_po_items").select("po_id,boq_item_id,amount").in("po_id",poIds),
+      sb.from("vendor_payments").select("po_id,amount").in("po_id",poIds)
+    ]);
+    poItems=a.data||[]; pays=b.data||[];
+  }
+  const refIds=[...new Set(poItems.map(x=>x.boq_item_id).filter(Boolean))];
+  const lineById={};
+  if(refIds.length){ const {data:rl}=await sb.from("boq_items").select("id,category,item_name,description,stream,room,room_tag").in("id",refIds); (rl||[]).forEach(l=>lineById[l.id]=l); }
+  const itemsByPo={}; poItems.forEach(x=>{ (itemsByPo[x.po_id]=itemsByPo[x.po_id]||[]).push(x); });
+  const paidByPo={}; pays.forEach(x=>{ paidByPo[x.po_id]=(paidByPo[x.po_id]||0)+Number(x.amount||0); });
+  list.forEach(o=>{
+    const total=vpoTotal(o), sub=Number(o.subtotal||0), paid=paidByPo[o.id]||0;
+    const committed=VPO_COMMITTED.includes(o.status)?total:0;
+    const rows=itemsByPo[o.id]||[]; const pkgShare={}, roomShare={};
+    if(rows.length&&sub){
+      rows.forEach(it=>{
+        const line=lineById[it.boq_item_id];
+        const code=line?packageOf(line):(DIV_DEFAULT_PKG[o.division]||'civil');
+        const rm=line?(line.room||line.room_tag||'—'):'—';
+        const frac=(Number(it.amount||0))/sub;
+        pkgShare[code]=(pkgShare[code]||0)+frac; roomShare[rm]=(roomShare[rm]||0)+frac;
+      });
+    } else { const code=DIV_DEFAULT_PKG[o.division]||'civil'; pkgShare[code]=1; roomShare['—']=1; }
+    Object.keys(pkgShare).forEach(code=>{ (P[code]=P[code]||blank()); P[code].committed+=committed*pkgShare[code]; P[code].paid+=paid*pkgShare[code]; });
+    Object.keys(roomShare).forEach(rm=>{ (R[rm]=R[rm]||blank()); R[rm].committed+=committed*roomShare[rm]; R[rm].paid+=paid*roomShare[rm]; });
+    const info={po_number:o.po_number,vendor:(o.vendors&&o.vendors.name)||'—',status:o.status,total,paid};
+    const domPkg=Object.keys(pkgShare).sort((a,b)=>pkgShare[b]-pkgShare[a])[0];
+    const domRoom=Object.keys(roomShare).sort((a,b)=>roomShare[b]-roomShare[a])[0];
+    if(domPkg&&P[domPkg]) P[domPkg].pos.push(info);
+    if(domRoom&&R[domRoom]) R[domRoom].pos.push(info);
+  });
+  // % complete (project_progress → stream / room averages)
+  const sSum={},sCnt={},rSum={},rCnt={};
+  (prog||[]).forEach(x=>{ sSum[x.stream]=(sSum[x.stream]||0)+Number(x.percent||0); sCnt[x.stream]=(sCnt[x.stream]||0)+1;
+    const rm=x.room||'—'; rSum[rm]=(rSum[rm]||0)+Number(x.percent||0); rCnt[rm]=(rCnt[rm]||0)+1; });
+  const pctPkg={}; PACKAGES.forEach(x=>{ pctPkg[x.code]= sCnt[x.ps]? Math.round(sSum[x.ps]/sCnt[x.ps]) : null; });
+  const pctRoom={}; Object.keys(rCnt).forEach(rm=>{ pctRoom[rm]=Math.round(rSum[rm]/rCnt[rm]); });
+  const sum=k=>PACKAGES.reduce((s,x)=>s+P[x.code][k],0);
+  const budget=Math.round(sum('budget')), committed=Math.round(sum('committed')), paid=Math.round(sum('paid'));
+  const projCost=PACKAGES.reduce((s,x)=>s+Math.max(P[x.code].budget,P[x.code].committed),0);
+  return {ver,items,P,R,pctPkg,pctRoom,budget,committed,paid,projCost,noCost:sum('noCost'),
+    pkgOrder:PACKAGES.map(x=>x.code).filter(c=>P[c].budget>0||P[c].committed>0.5||P[c].paid>0.5),
+    roomOrder:Object.keys(R).filter(rm=>R[rm].budget>0||R[rm].committed>0.5||R[rm].paid>0.5).sort()};
+}
+
+async function pwPackages(p,body){
+  await ensureStaff();
+  if(!canSeeOps(p)){ body.innerHTML=`<div class="pw-card">${emptyState("Packages are restricted","Trade budgets and vendor spend are visible to admins and this project's PM only.")}</div>`; return; }
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading packages…</div>`;
+  const R=await packageRollup(p);
+  if(!R.ver){ body.innerHTML=`<div class="pw-card">${emptyState("No BOQ yet","Build and price the BOQ first — each package budget is the sum of cost rates × qty for that trade.")}</div>`; return; }
+  const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
+  const marginPct=cv?Math.round((cv-R.projCost)/cv*100):null;
+  const w=canWrite(); const axis=pkgAxis;
+  const rows = axis==='room'
+    ? R.roomOrder.map(rm=>({key:rm,label:rm,d:R.R[rm],pct:(R.pctRoom[rm]==null?null:R.pctRoom[rm]),color:null,isRoom:true}))
+    : R.pkgOrder.map(c=>({key:c,label:PKG_LABEL(c),d:R.P[c],pct:R.pctPkg[c],color:PKG_BY_CODE[c].color}));
+  const rowHtml=r=>{
+    const d=r.d; const varr=Math.round(d.budget-d.committed); const over=d.budget>0&&d.committed>d.budget+0.5;
+    const pct=r.pct, paidPct=d.budget>0?Math.round(d.paid/d.budget*100):null;
+    const open=pkgOpenKey===(axis+':'+r.key);
+    let ev='';
+    if(pct!=null&&paidPct!=null){
+      if(paidPct-pct>=25) ev=`<span class="ex-st todo" title="Paid ahead of work done">pay&gt;done</span>`;
+      else if(pct-paidPct>=25&&d.committed>0) ev=`<span class="ex-st in_progress" title="Work done ahead of payment — bill/pay due">due</span>`;
+    }
+    let html=`<tr class="pkg-row" data-k="${esc(r.key)}" style="cursor:pointer">
+      <td>${r.isRoom?'':`<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${r.color};margin-right:7px;vertical-align:middle"></span>`}<b>${esc(r.label)}</b> <span style="color:var(--ink-soft);font-size:11px">${d.lines||0} line${d.lines===1?'':'s'}</span> ${ev}</td>
+      <td class="num mono">${fmt(d.budget)}</td>
+      <td class="num mono">${fmt(Math.round(d.committed))}</td>
+      <td class="num mono">${fmt(Math.round(d.paid))}</td>
+      <td class="num mono" style="color:${over?'var(--danger,#B4453A)':'var(--ink-soft)'}">${over?'−':''}${fmt(Math.abs(varr))}</td>
+      <td style="min-width:120px">${pct==null?'<span style="color:var(--ink-soft);font-size:11px">—</span>':pgBar(pct,r.color||'var(--brass)')+`<span style="font-size:10px;color:var(--ink-soft)">${pct}%</span>`}</td>
+      <td class="num" style="white-space:nowrap">${w?`<button class="linkbtn" data-po="${esc(r.key)}" data-axis="${axis}">+PO</button> <button class="linkbtn" data-wo="${esc(r.key)}" data-axis="${axis}">+WO</button>`:''}</td>
+    </tr>`;
+    if(open){
+      const lines=R.items.filter(it=> axis==='room' ? ((it.room||it.room_tag||'—')===r.key) : (packageOf(it)===r.key));
+      html+=`<tr class="pkg-detail"><td colspan="7" style="background:var(--surface-2,#faf8f4);padding:10px 14px">
+        <div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">BOQ lines</div>
+        <table style="width:100%"><thead><tr><th>Room</th><th>Item</th><th class="num">Qty</th><th>Unit</th><th class="num">Cost rate</th><th class="num">Amount</th></tr></thead><tbody>
+        ${lines.map(it=>`<tr><td style="font-size:11px;color:var(--ink-soft)">${esc(it.room||it.room_tag||'')}</td><td>${esc(it.item_name||it.description||'')}</td><td class="num mono">${Number(it.qty)||0}</td><td>${esc(it.uom||'')}</td><td class="num mono">${fmt(it.cost_rate)}</td><td class="num mono">${fmt(Math.round((Number(it.cost_rate)||0)*(Number(it.qty)||0)))}</td></tr>`).join('')||`<tr><td colspan="6" style="color:var(--ink-soft);font-size:12px">No BOQ lines.</td></tr>`}
+        </tbody></table>
+        ${(d.pos&&d.pos.length)?`<div style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px">Purchase orders</div>
+        <table style="width:100%"><thead><tr><th>PO #</th><th>Vendor</th><th>Status</th><th class="num">Total</th><th class="num">Paid</th></tr></thead><tbody>
+        ${d.pos.map(o=>`<tr><td class="mono">${esc(o.po_number)}</td><td>${esc(o.vendor)}</td><td>${vpoStatusPill(o.status)}</td><td class="num mono">${fmt(o.total)}</td><td class="num mono">${fmt(Math.round(o.paid))}</td></tr>`).join('')}
+        </tbody></table>`:''}
+      </td></tr>`;
+    }
+    return html;
+  };
+  body.innerHTML=`
+    <div class="wallet">
+      <div class="wcell"><div class="wl">Contract value</div><div class="wv mono">${fmt(cv)}</div></div>
+      <div class="wcell"><div class="wl">Cost budget</div><div class="wv mono">${fmt(R.budget)}</div></div>
+      <div class="wcell ${R.budget&&R.committed>R.budget?'wdue':''}"><div class="wl">Committed</div><div class="wv mono">${fmt(R.committed)}</div></div>
+      <div class="wcell"><div class="wl">Paid out</div><div class="wv mono">${fmt(R.paid)}</div></div>
+      <div class="wcell ${marginPct!==null&&marginPct<0?'wdue':'wgood'}"><div class="wl">Projected margin</div><div class="wv">${marginPct===null?'—':marginPct+'%'}</div><div style="font-size:10px;color:var(--ink-soft)">${fmt(Math.max(cv-R.projCost,0))}</div></div>
+    </div>
+    ${R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — those trade budgets are understated. Fill cost rates in the BOQ / rate library.</div>`:''}
+    <div class="gbar">
+      <div class="gsub" style="display:inline-flex">
+        <button data-setaxis="trade" class="${axis==='trade'?'on':''}">By trade</button>
+        <button data-setaxis="room" class="${axis==='room'?'on':''}">By room</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft)">Budget = BOQ cost × qty · Committed = approved POs · click a row for lines &amp; POs</div>
+    </div>
+    <div class="pw-card">
+      <table><thead><tr><th>${axis==='room'?'Room / area':'Trade package'}</th><th class="num">Budget</th><th class="num">Committed</th><th class="num">Paid</th><th class="num">Variance</th><th>Progress</th><th></th></tr></thead>
+      <tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="7" style="color:var(--ink-soft);padding:14px">No priced lines yet.</td></tr>`}</tbody></table>
+    </div>`;
+  body.querySelectorAll("[data-setaxis]").forEach(b=>b.onclick=()=>{ pkgAxis=b.dataset.setaxis; pkgOpenKey=null; pwPackages(p,body); });
+  body.querySelectorAll(".pkg-row").forEach(tr=>tr.onclick=e=>{ if(e.target.closest("button")) return; const k=axis+':'+tr.dataset.k; pkgOpenKey=(pkgOpenKey===k)?null:k; pwPackages(p,body); });
+  body.querySelectorAll("[data-po]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const key=b.dataset.po;
+    const pref=b.dataset.axis==='room'?{room:key}:{pkg:key};
+    let div;
+    if(b.dataset.axis==='room'){ const cnt={}; R.items.filter(it=>(it.room||it.room_tag||'—')===key).forEach(it=>{ const dv=divOfPackage(packageOf(it)); cnt[dv]=(cnt[dv]||0)+1; }); div=Object.keys(cnt).sort((x,y)=>cnt[y]-cnt[x])[0]||'onsite'; }
+    else div=divOfPackage(key);
+    newVendorPO(p,body,div,R.ver,pref); });
+  body.querySelectorAll("[data-wo]").forEach(b=>b.onclick=e=>{ e.stopPropagation();
+    generatePOs(p,body, b.dataset.axis==='room'?{room:b.dataset.wo}:{pkg:b.dataset.wo}); });
 }
 
 /* ---- Vendor registry (shared across projects; writes are admin-level) ---- */
