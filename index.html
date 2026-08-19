@@ -2398,6 +2398,19 @@ async function drawBoard(){
 
 /* ===== Client identity + structured site address (ADDR-01) ===== */
 function panValid(v){ return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(String(v||"").trim().toUpperCase()); }
+/* PAN masking — full value only for admin-level roles (admin/sales_head); everyone
+   else sees ••••••NNNN. Edit inputs render empty with a masked placeholder for
+   non-admins, so a stored PAN never reaches their DOM; leaving the field blank on
+   save keeps the existing value (see panResolve). */
+function maskPan(v){ v=String(v||"").trim().toUpperCase(); if(!v) return "—"; if(v.length<4) return "••••"; return "••••••"+v.slice(-4); }
+function panInputHtml(id, val, ph){
+  const admin=(typeof isAdminLevel==="function")&&isAdminLevel();
+  const has=!!String(val||"").trim();
+  const placeholder = admin ? (ph||"ABCDE1234F") : (has ? maskPan(val) : (ph||"ABCDE1234F"));
+  return `<input id="${id}" value="${admin?esc(val||""):""}" maxlength="10" style="text-transform:uppercase" autocomplete="off" placeholder="${esc(placeholder)}">`;
+}
+function panResolve(id, existing){ const el=$("#"+id); const typed=el?el.value.trim().toUpperCase():""; return typed || (existing?String(existing).trim().toUpperCase():"") || ""; }
+function panDisplay(v){ return (typeof isAdminLevel==="function"&&isAdminLevel()) ? (String(v||"").trim().toUpperCase()||"—") : maskPan(v); }
 function composeSiteAddr(o){ o=o||{}; return [o.site_door_no,o.site_society,o.site_area,o.site_city,o.site_pincode].map(x=>String(x||"").trim()).filter(Boolean).join(", "); }
 function mapsSearchUrl(q){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(String(q||"").trim()+", India"); }
 /* Pull lat,lng out of a pasted Google Maps URL (long links only; short goo.gl links carry no coords). */
@@ -2456,7 +2469,7 @@ function leadForm(lead){
         <div class="field"><label>Email</label><input id="f_email" value="${esc(l.email||"")}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label><input id="f_pan" value="${esc(l.pan||"")}" maxlength="10" style="text-transform:uppercase" placeholder="Required to convert to a project"></div>
+        <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label>${panInputHtml("f_pan", l.pan, "Required to convert to a project")}</div>
         <div class="field"><label>Current / residential address</label><input id="f_caddr" value="${esc(l.current_address||"")}"></div>
       </div>
       <div class="sec-label">Site address <span style="font-weight:400;font-size:11px;color:var(--ink-soft);text-transform:none;letter-spacing:0">— where the work happens</span></div>
@@ -2502,7 +2515,7 @@ function leadForm(lead){
   });
   $("#saveLead").onclick=async()=>{
     const _sa=readSiteAddr("f_s", l.site_address);
-    const _pan=($("#f_pan")?$("#f_pan").value.trim().toUpperCase():"")||null;
+    const _pan=panResolve("f_pan", l.pan)||null;
     if(_pan && !panValid(_pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const row={ name:$("#f_name").value.trim(), phone:$("#f_phone").value.trim(), email:$("#f_email").value.trim(),
       pan:_pan, current_address:$("#f_caddr").value.trim(),
@@ -3429,7 +3442,7 @@ async function convertLead(l){
         <div class="field"><label>Contact number</label><input id="cv_phone" value="${esc(l.phone||"")}" placeholder="required"></div>
         <div class="field"><label>Email</label><input id="cv_email" value="${esc(l.email||"")}" placeholder="required"></div>
       </div>
-      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label><input id="cv_pan" value="${esc(l.pan||"")}" maxlength="10" style="text-transform:uppercase" placeholder="required"></div>
+      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label>${panInputHtml("cv_pan", l.pan, "required")}</div>
       <div class="sec-label" style="margin-top:6px">Site address</div>
       ${siteAddrFields(l,"cv_s")}
       ${(!composeSiteAddr(l) && (l.site_address||"").trim())?`<div class="s2l-hint">On file: ${esc(l.site_address)} — please structure it in the fields above.</div>`:""}
@@ -3453,7 +3466,7 @@ async function convertLead(l){
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
   $("#cv_go").onclick=async()=>{
     // ── client-data gate: no project without contact, email, site address, PAN ──
-    const phone=$("#cv_phone").value.trim(), email=$("#cv_email").value.trim(), pan=$("#cv_pan").value.trim().toUpperCase();
+    const phone=$("#cv_phone").value.trim(), email=$("#cv_email").value.trim(), pan=panResolve("cv_pan", l.pan);
     const sa=readSiteAddr("cv_s", l.site_address);
     const missing=[];
     if(!phone) missing.push("contact number");
@@ -3652,7 +3665,7 @@ function newProjectForm(){
         <div class="field"><label>Project type</label><select id="np_ptype">${opts(PROJECT_TYPES)}</select></div>
         <div class="field"><label>Status</label><select id="np_status">${opts(["active","on_hold","completed","cancelled"])}</select></div>
       </div>
-      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label><input id="np_pan" maxlength="10" style="text-transform:uppercase"></div>
+      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label>${panInputHtml("np_pan", null, "ABCDE1234F")}</div>
       <div class="sec-label">Site address</div>
       ${siteAddrFields({},"nps")}
       <div class="grid2">
@@ -3671,7 +3684,7 @@ function newProjectForm(){
     const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
     const pmDir=$("#np_pm").value?Number($("#np_pm").value):null;
     const _npsa=readSiteAddr("nps", null);
-    const _nppan=($("#np_pan")?$("#np_pan").value.trim().toUpperCase():"")||null;
+    const _nppan=panResolve("np_pan", null)||null;
     if(_nppan && !panValid(_nppan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const {data:proj,error}=await sb.from("projects").insert({
       code, name, client_name:name, client_phone:$("#np_phone").value.trim()||null,
@@ -6216,7 +6229,7 @@ function pwClient(p,body){
     </div>
     <div class="grid2">
       <div class="field"><label>Email</label>${ro?`<div>${esc(p.client_email||"—")}</div>`:`<input id="pc_email" value="${esc(p.client_email||"")}">`}</div>
-      <div class="field"><label>PAN</label>${ro?`<div>${esc(p.pan||"—")}</div>`:`<input id="pc_pan" value="${esc(p.pan||"")}" maxlength="10" style="text-transform:uppercase">`}</div>
+      <div class="field"><label>PAN</label>${ro?`<div>${esc(panDisplay(p.pan))}</div>`:`${panInputHtml("pc_pan", p.pan, "ABCDE1234F")}`}</div>
     </div>
     <div class="field"><label>Project type</label>${ro?`<div>${esc(p.property_type||"—")}</div>`:`<select id="pc_ptype">${opts(PROJECT_TYPES,p.property_type)}</select>`}</div>
     <div class="sec-label">Site address${pinLink}</div>
@@ -6234,7 +6247,7 @@ function pwClient(p,body){
   </div>`;
   if(!ro) $("#pcSave").onclick=async()=>{
     const sa=readSiteAddr("pcs", p.site_address);
-    const pan=($("#pc_pan")?$("#pc_pan").value.trim().toUpperCase():"")||null;
+    const pan=panResolve("pc_pan", p.pan)||null;
     if(pan && !panValid(pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const row={ client_name:$("#pc_name").value.trim(), client_phone:$("#pc_phone").value.trim(),
       client_email:$("#pc_email").value.trim(), pan, property_type:$("#pc_ptype").value,
