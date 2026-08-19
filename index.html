@@ -3390,7 +3390,7 @@ async function leadBoqGenerator(l, host){
 }
 
 /* ── Conversion celebration: confetti + congratulations for the converter ── */
-function celebrateConversion(code, clientName){
+function celebrateConversion(code, clientName, onShare){
   const old=document.getElementById("convParty"); if(old) old.remove();
   const wrap=document.createElement("div"); wrap.id="convParty";
   wrap.innerHTML=`<canvas></canvas>
@@ -3400,6 +3400,7 @@ function celebrateConversion(code, clientName){
       <div class="party-name">Congratulations, ${esc(myName||"champion")}!</div>
       <div class="party-sub"><b>${esc(clientName||"")}</b> is now project <b>${esc(code)}</b>.<br>Another one for the books — keep them coming.</div>
       <button class="party-btn">On to the project →</button>
+      ${onShare?`<button class="party-btn ghost" id="partyJourney">📄 Share journey plan</button>`:""}
     </div>`;
   document.body.appendChild(wrap);
   void wrap.offsetWidth; wrap.classList.add("show");
@@ -3425,6 +3426,7 @@ function celebrateConversion(code, clientName){
   })(t0);
   const close=()=>{run=false; wrap.classList.remove("show"); setTimeout(()=>wrap.remove(),250);};
   wrap.querySelector(".party-btn").onclick=close;
+  if(onShare){ const jb=wrap.querySelector("#partyJourney"); if(jb) jb.onclick=()=>{ close(); onShare(); }; }
   wrap.addEventListener("click",e=>{if(e.target===wrap) close();});
   setTimeout(close,12000);
 }
@@ -3515,7 +3517,7 @@ async function convertLead(l){
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code} · advance ${fmt(adv)} received${designer?" · designer "+staffName(designer):""} · BOQ locked`,by_user:me.id});
     closeModal(); activeLead=null; render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
-    celebrateConversion(code, l.name);
+    celebrateConversion(code, l.name, ()=>pwJourneyPlan(proj));
     csatTrigger("post_advance",{project_id:proj.id});   // CSAT #2: onboarding feedback after the 10% advance (immediate)
   };
 }
@@ -3932,12 +3934,14 @@ async function renderProjectWorkspace(pid){
         <h2 class="display">${esc(p.name)}</h2>
         <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)} ${warrantyPill(p)}</div>
       <div class="pw-val mono">${fmt(p.contract_value)}</div>
+      ${canWrite()?`<button class="ghost" id="pwJourney" title="Generate the client's journey plan">📄 Journey plan</button>`:""}
     </div>
     <nav class="pw-tabs" id="pwTabs">
       ${projTabsFor().map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
     <div id="pwBody">Loading…</div>`;
   $("#pwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); } activeProject=null; renderProjects(); };
+  if($("#pwJourney")) $("#pwJourney").onclick=()=>pwJourneyPlan(p);
   $("#pwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
     // leaving BOQ tab → flush + stop autosave
     if(projectTab==="boq" && b.dataset.t!=="boq" && typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); }
@@ -4583,6 +4587,7 @@ async function pwOverview(p,body){
         <div class="pw-card">
           <div class="sec-label" style="border:none;padding:0">Quick links</div>
           <div class="ov-links">
+            ${canWrite()?`<button class="linkbtn" id="ovJourney">📄 Client journey plan →</button>`:""}
             <button class="linkbtn" data-go="boq">Open Project BOQ →</button>
             <button class="linkbtn" data-go="payments">Payments →</button>
             <button class="linkbtn" data-go="execution">Execution schedule →</button>
@@ -4593,6 +4598,7 @@ async function pwOverview(p,body){
     </div>`;
   // wire quick links + team
   body.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ projectTab=b.dataset.go; renderProjectWorkspace(p.id); });
+  if($("#ovJourney")) $("#ovJourney").onclick=()=>pwJourneyPlan(p);
   if($("#ovTeam")) $("#ovTeam").onclick=()=>{ projectTab="team"; renderProjectWorkspace(p.id); };
   renderProjectActivity(p);
   csatPanel({project_id:p.id, lead_id:p.lead_id||null}, "#pwCsat");
@@ -8433,6 +8439,441 @@ async function gMakeQuoteLink(p){
   if(error) throw new Error("Could not create the quotation link: "+error.message);
   return { token:data.token, url:QUOTE_VIEW_BASE+"?t="+data.token };
 }
+
+/* ===================== CLIENT JOURNEY PLAN =====================
+   Premium "Lintel Space Atelier" journey plan, generated from live project
+   data (milestones, payments, BOQ scope, assigned team). Reuses LSA_SEAL /
+   LSA_MONO + the app's Fraunces/Inter/Plex-Mono fonts. Three consumers of the
+   same doc string: in-app preview (modal), Download/Print PDF (new window),
+   and the hosted client link (journey_shares → journey.html?t=token via the
+   journey-view edge function). All CSS is scoped under .jrndoc so nothing
+   leaks into the app shell. */
+const JOURNEY_VIEW_BASE="https://os.lintelspace.com/journey.html";
+const JRN_FONTS='<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">';
+
+function jrnStrip(s){ return String(s||"").replace(/\s*\(\d+(\.\d+)?%\)\s*$/,"").trim(); }
+function jrnPhone(id){ const s=STAFF.find(x=>String(x.id)===String(id)); return s?(s.phone||""):""; }
+function jrnMoney(n){ return "₹"+Math.round(Number(n)||0).toLocaleString("en-IN"); }
+
+const JRN_STREAM_META={
+  modular:{lbl:"Modular & joinery",ic:"◱"}, carpentry:{lbl:"Carpentry & panelling",ic:"◰"},
+  services:{lbl:"Civil, services & finishes",ic:"☉"}, furnishing:{lbl:"Furnishing & décor",ic:"◇"},
+  accessories:{lbl:"Fittings & accessories",ic:"◈"}, electrical:{lbl:"Electrical",ic:"☉"}
+};
+function jrnGroupScope(items){
+  const by={};
+  (items||[]).forEach(it=>{
+    const s=(it.stream||"other").toLowerCase();
+    (by[s]=by[s]||{amount:0,rooms:new Set(),cats:new Set()});
+    by[s].amount+=Number(it.amount||0);
+    if(it.room) by[s].rooms.add(String(it.room).trim());
+    if(it.category) by[s].cats.add(String(it.category).replace(/\s+/g," ").trim().slice(0,42));
+  });
+  return Object.keys(by).sort((a,b)=>by[b].amount-by[a].amount).map(s=>{
+    const meta=JRN_STREAM_META[s]||{lbl:s.charAt(0).toUpperCase()+s.slice(1),ic:"◦"};
+    const picks=Array.from(by[s].cats).slice(0,4);
+    const rooms=Array.from(by[s].rooms).filter(Boolean).slice(0,6);
+    return { key:s, label:meta.lbl, ic:meta.ic, amount:Math.round(by[s].amount), items:(picks.length?picks:rooms), rooms };
+  });
+}
+
+/* 7-stage narrative, keyed to the project's STAGE_FLOW milestones (+ Aftercare). */
+const JRN_NODES=[
+  {no:1,key:"briefing",lbl:"Briefing",db:"Briefing",stage:"Stage 01 · Briefing",title:"Welcome & discovery",
+    what:"Your journey began with a kick-off between you and your Lintel Space Atelier team. We captured how your family lives, your must-haves and priorities, took a detailed measured survey, and aligned on scope and budget together.",
+    need:["References & inspiration","Family requirements & priorities","Site access for measurement"],
+    get:["Agreed design brief","Measured site survey","Confirmed scope & budget"],
+    durStd:"~1 week",durFast:"~1 week",gate:["advance","booking","token"]},
+  {no:2,key:"design",lbl:"Design",db:"Design",stage:"Stage 02 · Design",title:"Designing your home",
+    what:"Our design team develops your home — moving through concept, mood board, 2D layouts, 3D views and the material & finish selection — refined together across design reviews until it feels right.",
+    whatFast:"Our design team develops your home — concept, mood board, 2D layouts, 3D views and material & finish selection. In parallel, our site team has begun demolition & site preparation, so the moment your design is signed off we move straight into build.",
+    need:["Feedback in design reviews","Finish & colour preferences","Sign-off on the layouts"],
+    get:["Concept & mood board","2D layouts & 3D visuals","Material & finish schedule"],
+    durStd:"~3–4 weeks",durFast:"~2–3 weeks (fast-tracked)",gate:null},
+  {no:3,key:"signoff",lbl:"Sign-off & GFC",db:"Proposal/BOQ",stage:"Stage 03 · Proposal / BOQ",title:"Design sign-off & GFC",
+    what:"Once you love the design, we freeze it, lock the final BOQ, and issue Good-For-Construction (GFC) drawings — the detailed set the site team builds from. This is the green light for production and the point at which your firm project schedule is confirmed.",
+    need:["Approval of final design","Sign-off on the frozen BOQ","Design-stage payment"],
+    get:["Approved GFC drawing set","Locked BOQ & specifications","Confirmed project schedule"],
+    durStd:"~1 week",durFast:"~3–5 days",gate:["design","sign","gfc","drawing"]},
+  {no:4,key:"production",lbl:"Procurement",db:"Production",stage:"Stage 04 · Production",title:"Procurement & production",
+    what:"We raise purchase orders, procure materials, and begin factory production of your modular units — carcass, shutters, lofts, storage and units.",
+    whatFast:"We raise purchase orders, procure materials, and begin factory production of your modular units. Because demolition and site prep are already complete from the parallel track, the site is build-ready the moment units are dispatched.",
+    need:["Sign-off on client-supplied items","(tiles, sanitaryware, appliances)","Selections confirmed on time"],
+    get:["Purchase orders raised","Production schedule","Live procurement tracker"],
+    durStd:"~2–3 weeks",durFast:"~2–3 weeks · site already prepped",gate:["material","procure","production"]},
+  {no:5,key:"install",lbl:"Execution",db:"Installation",stage:"Stage 05 · Installation",title:"Site execution & installation",
+    what:"The heart of the renovation — civil, waterproofing, tiling, false ceilings, electrical, plumbing and painting, followed by installation of all modular and carpentry. Your Project Manager keeps you updated throughout.",
+    need:["Timely calls on site queries","Staged walkthrough reviews","Dispatch & installation payment"],
+    get:["Weekly progress updates","Live execution schedule","Stage photos from site"],
+    durStd:"~6–8 weeks",durFast:"~4–6 weeks",gate:["dispatch","install"]},
+  {no:6,key:"handover",lbl:"Handover",db:"Handover",stage:"Stage 06 · Handover",title:"Quality, snagging & handover",
+    what:"We run final quality checks and walk the home with you to build a joint snag list. Every point is rectified, the home is deep-cleaned and floor protection removed, and we formally hand over your finished home — along with your warranty documents.",
+    need:["Joint snag walkthrough","Final milestone payment","Signed handover note"],
+    get:["Snag list & clearance","Deep-cleaned, ready home","Warranty documents"],
+    durStd:"~1 week",durFast:"~1 week",gate:["handover","final","completion","balance","90"]},
+  {no:7,key:"aftercare",lbl:"Aftercare",db:null,stage:"Stage 07 · Aftercare",title:"Warranty & aftercare",
+    what:"Your home is covered by the Lintel Space Atelier warranty from the day of handover. Priya, our aftercare concierge, becomes your single point of contact on WhatsApp for any service request — so the relationship continues long after the keys change hands.",
+    need:["Confirm warranty registration","Reach out any time on WhatsApp"],
+    get:["Warranty certificate","Concierge aftercare support","Defined service response"],
+    durStd:"Post-handover · ongoing",durFast:"Post-handover · ongoing",gate:null}
+];
+
+async function journeyContext(p,opts){
+  opts=opts||{};
+  await ensureStaff();
+  const [{data:mss},{data:stg},{data:pays},{data:bv}]=await Promise.all([
+    sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx").order("id"),
+    sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx"),
+    sb.from("project_payments").select("amount,milestone_id").eq("project_id",p.id),
+    sb.from("boq_versions").select("id").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1)
+  ]);
+  const cv=Number(p.contract_value)||0;
+  const paidBy={}; let unalloc=0;
+  (pays||[]).forEach(x=>{ const a=Number(x.amount||0); if(x.milestone_id)paidBy[x.milestone_id]=(paidBy[x.milestone_id]||0)+a; else unalloc+=a; });
+  let milestones=(mss||[]).map(m=>{
+    const amt=Math.round(Number(m.amount)|| (cv*Number(m.percent||0)/100));
+    let rec=Math.round(paidBy[m.id]||0);
+    if((m.status==="paid")&&rec<amt-1) rec=amt;   // marked paid without a tagged payment
+    return {id:m.id,label:jrnStrip(m.label),pct:Number(m.percent||0),amount:amt,received:rec,status:m.status};
+  });
+  // best-effort: spread untagged receipts onto the earliest unsettled milestones
+  if(unalloc>0){ for(const m of milestones){ const bal=m.amount-m.received; if(bal>0){ const t=Math.min(unalloc,bal); m.received+=t; unalloc-=t; if(!unalloc)break; } } }
+  milestones.forEach(m=>{ m.received=Math.min(m.received,m.amount); m.balance=Math.max(m.amount-m.received,0);
+    m.state=(m.amount>0&&m.balance<=1)?"paid":(m.received>0?"part":"upcoming"); });
+  const stgByName={}; (stg||[]).forEach(s=>stgByName[s.stage]=s);
+  const team=[["Design Consultant",p.consultant_id],["Interior Designer",p.designer_id],["Project Manager",p.pm_id]]
+    .filter(x=>x[1]&&staffName(x[1])).map(x=>({role:x[0],name:staffName(x[1]),phone:jrnPhone(x[1])}));
+  let scope=[];
+  if(bv&&bv[0]){ const {data:items}=await sb.from("boq_items").select("stream,room,category,amount").eq("boq_version_id",bv[0].id); scope=jrnGroupScope(items); }
+  return {p,clients:(opts.clients||p.client_name||"").trim(),address:(p.site_address||"").trim(),cv,code:p.code||"",
+          milestones,stgByName,team,scope,fastTrack:!!opts.fastTrack};
+}
+
+/* assign each stage its payment gate (first matching, unused milestone) */
+function jrnAssignGates(ctx){
+  const used={};
+  JRN_NODES.forEach(n=>{ n._gate=null;
+    if(!n.gate) return;
+    const m=ctx.milestones.find(x=>!used[x.id]&&n.gate.some(k=>x.label.toLowerCase().includes(k)));
+    if(m){ used[m.id]=1; n._gate=m; }
+  });
+  // fallback: if briefing found no advance gate, use the first milestone
+  const brief=JRN_NODES[0];
+  if(!brief._gate&&ctx.milestones[0]&&!used[ctx.milestones[0].id]){ brief._gate=ctx.milestones[0]; }
+}
+
+function jrnGateHtml(m){
+  if(!m) return "";
+  const cls=m.state==="paid"?"paid":m.state==="part"?"part":"";
+  const delta=m.state==="part"?`<span class="jg-delta">balance ${jrnMoney(m.balance)}</span>`:"";
+  return `<div class="jgate ${cls}"><span class="jg-lbl">${esc(m.label)}</span><span class="jg-pct">${m.pct?m.pct+"%":""}</span><span class="jg-amt">${jrnMoney(m.amount)}</span>${delta}</div>`;
+}
+
+function jrnDocHtml(ctx){
+  jrnAssignGates(ctx);
+  const clients=esc(ctx.clients||"our client");
+  const addr=esc(ctx.address||"—");
+  const scopeShort=ctx.scope.slice(0,3).map(s=>s.label.replace(/ &.*/,"")).join(", ")||"Full-home renovation";
+  // ribbon + stage status
+  const nodeState=n=>{ if(!n.db) return (ctx.stgByName["Handover"]&&ctx.stgByName["Handover"].status==="done")?"now":"todo";
+    const s=ctx.stgByName[n.db]; return s?(s.status==="done"?"done":s.status==="in_progress"?"now":"todo"):"todo"; };
+  const doneCount=JRN_NODES.filter(n=>nodeState(n)==="done").length;
+  const ribbon=JRN_NODES.map(n=>{ const st=nodeState(n);
+    return `<div class="jrn-rnode ${st}"><div class="jrn-rdot">${st==="done"?"✓":n.no}</div><div class="jrn-rlbl">${esc(n.lbl)}</div></div>`; }).join("");
+  const fastLine=ctx.fastTrack?`<div class="jrn-ribfoot"><span class="jrn-spark">⚡</span> Fast-track: demolition & site preparation run <b>&nbsp;in parallel&nbsp;</b> with the design stage.</div>`:"";
+  const spotlight=ctx.fastTrack?`
+    <section class="jrn-sec pgbreak"><div class="jrn-spot">
+      <div class="jrn-spk"><span class="jrn-tag">⚡ Fast-track exception</span><span class="jrn-exc">by special arrangement</span></div>
+      <h3 class="jrn-serif">Demolition begins now — in parallel with design</h3>
+      <p class="jrn-lede2">Ordinarily, work on site starts only after the design is signed off. For your project, as an exception, we run two tracks at once: while our design team finalises your home, our site team mobilises to begin demolition and site preparation straight away — compressing the overall timeline.</p>
+      <div class="jrn-lanes">
+        <div class="jrn-pgroup"><span class="jrn-ptag">⚡ Running in parallel · now</span>
+          <div class="jrn-lane"><div class="jrn-lname">Design track</div><div class="jrn-lbar"><div class="jrn-seg gold" style="flex:2">Concept → 3D → Materials</div><div class="jrn-seg" style="flex:1">Sign-off & GFC</div></div></div>
+          <div class="jrn-lane"><div class="jrn-lname">Site track</div><div class="jrn-lbar"><div class="jrn-seg demo" style="flex:1">Demolition</div><div class="jrn-seg demo" style="flex:2">Site prep & civil readiness</div></div></div>
+        </div>
+        <div class="jrn-merge"><span>Tracks converge</span><span class="jrn-ln"></span></div>
+        <div class="jrn-lane"><div class="jrn-lname">Build track</div><div class="jrn-lbar"><div class="jrn-seg">Production</div><div class="jrn-seg">Installation</div><div class="jrn-seg">Handover</div></div></div>
+      </div>
+    </div></section>`:"";
+  // timeline cards
+  const cards=JRN_NODES.map(n=>{ const st=nodeState(n);
+    const status=st==="done"?`<span class="jrn-st done">Completed</span>`:st==="now"?`<span class="jrn-st now">${n.key==="aftercare"?"Ongoing":"In progress"}</span>`:`<span class="jrn-st">${n.key==="aftercare"?"Ongoing":"Upcoming"}</span>`;
+    const what=(ctx.fastTrack&&n.whatFast)?n.whatFast:n.what;
+    const dur=ctx.fastTrack?n.durFast:n.durStd;
+    const inset=(ctx.fastTrack&&n.key==="design")?`<div class="jrn-inset"><span>⚡</span><p><b>Fast-track:</b> in parallel with this stage, our site team has begun demolition and site preparation — so the moment your design is signed off, we move straight into build.</p></div>`:"";
+    return `<div class="jrn-phase ${st==="done"?"done":st==="now"?"now":""}">
+      <div class="jrn-rail"><div class="jrn-dot">${st==="done"?"✓":n.no}</div><div class="jrn-line"></div></div>
+      <div class="jrn-card">
+        <div class="jrn-chead"><div><div class="jrn-kick">${esc(n.stage)}</div><h3 class="jrn-serif">${esc(n.title)}</h3></div>${status}</div>
+        <p class="jrn-what">${esc(what)}</p>${inset}
+        <div class="jrn-two">
+          <div><div class="jrn-h">What we'll need from you</div><ul class="you">${n.need.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+          <div><div class="jrn-h">What you'll receive</div><ul>${n.get.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+        </div>
+        <div class="jrn-cfoot"><div class="jrn-dur">⏱ <b>${esc(dur)}</b></div>${jrnGateHtml(n._gate)}</div>
+      </div></div>`;
+  }).join("");
+  // payment table
+  const payRows=ctx.milestones.map(m=>{
+    const sub=m.state==="part"?`<span class="jrn-sub">${jrnMoney(m.received)} received</span>`:"";
+    const pill=m.state==="paid"?`<span class="jrn-pill paid">Received</span>`:m.state==="part"?`<span class="jrn-pill part">Balance ${jrnMoney(m.balance)}</span>`:`<span class="jrn-pill">Upcoming</span>`;
+    return `<tr><td><div class="jrn-ms">${esc(m.label)}</div></td><td class="r">${m.pct?m.pct+"%":"—"}</td><td class="r amt">${jrnMoney(m.amount)}${sub}</td><td class="r">${pill}</td></tr>`;
+  }).join("");
+  const scopeCards=ctx.scope.length?ctx.scope.slice(0,3).map(s=>`
+    <div class="jrn-scard"><div class="jrn-sh"><div class="jrn-ic">${esc(s.ic)}</div><h4 class="jrn-serif">${esc(s.label)}</h4></div>
+      <ul>${(s.items.length?s.items:["Included in scope"]).map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`).join(""):"";
+  const scopeSec=ctx.scope.length?`<section class="jrn-sec pgbreak"><div class="jrn-sechead"><h2 class="jrn-serif">Scope at a glance</h2><div class="jrn-note">what your project covers</div></div><div class="jrn-scope">${scopeCards}</div></section>`:"";
+  const teamCards=ctx.team.length?ctx.team.map(t=>`
+    <div class="jrn-member"><div class="jrn-mbadge"><img src="${LSA_MONO}" alt=""></div><div><div class="jrn-role">${esc(t.role)}</div><div class="jrn-nm jrn-serif">${esc(t.name)}</div>${t.phone?`<div class="jrn-ph">+${esc(waNumber(t.phone))}</div>`:""}</div></div>`).join(""):`<div class="jrn-member"><div>Your dedicated team is being assigned and will be introduced shortly.</div></div>`;
+
+  return `<style>${jrnDocStyles()}</style>
+  <div class="jrndoc">
+    <header class="jrn-mast">
+      <div class="jrn-brand"><img class="jrn-mono" src="${LSA_MONO}" alt="Lintel Space Atelier"><div class="jrn-wm"><b>LINTEL SPACE ATELIER</b><span>Where luxury meets functionality</span></div></div>
+      <div class="jrn-doctag">Project Journey Plan<br>${esc(ctx.code||"")}</div>
+    </header>
+    <hr class="jrn-rule">
+    <section class="jrn-hero">
+      <div class="jrn-htext">
+        ${ctx.fastTrack?`<div class="jrn-fbadge">⚡ <b>Fast-Track</b> · Priority Delivery</div>`:""}
+        <div class="jrn-eyebrow">Prepared for ${clients}</div>
+        <h1 class="jrn-serif">Your Atelier <em class="jrn-gold">Journey</em>,<br>from first sketch to keys.</h1>
+        <p class="jrn-lede">A high-level roadmap for the transformation of your home${addr!=="—"?" at "+addr.split(",")[0]:""} — every stage ahead, what unfolds in each, what we'll need from you, and how the investment is staged.</p>
+      </div>
+      <div class="jrn-medallion"><img src="${LSA_SEAL}" alt="Lintel Space Atelier seal"></div>
+    </section>
+    <section class="jrn-snap">
+      <div class="jrn-scell"><div class="jrn-k">Client</div><div class="jrn-v">${clients}</div></div>
+      <div class="jrn-scell"><div class="jrn-k">Residence</div><div class="jrn-v">${addr}</div></div>
+      <div class="jrn-scell"><div class="jrn-k">Commission</div><div class="jrn-v">${esc(scopeShort)}</div></div>
+      <div class="jrn-scell value"><div class="jrn-k">Contract value</div><div class="jrn-v">${jrnMoney(ctx.cv)}</div></div>
+      <div class="jrn-scell"><div class="jrn-k">Delivery mode</div><div class="jrn-v">${ctx.fastTrack?"Fast-track":"Standard"}</div></div>
+      <div class="jrn-scell"><div class="jrn-k">Progress</div><div class="jrn-v">${doneCount} of ${JRN_NODES.length} stages</div></div>
+    </section>
+    <section class="jrn-sec"><div class="jrn-sechead"><h2 class="jrn-serif">Where you are today</h2><div class="jrn-note">${doneCount} of ${JRN_NODES.length} stages</div></div>
+      <div class="jrn-ribbon">${ribbon}</div>${fastLine}</section>
+    ${spotlight}
+    <section class="jrn-sec"><div class="jrn-sechead"><h2 class="jrn-serif">The journey, stage by stage</h2><div class="jrn-note">durations indicative · confirmed at sign-off</div></div>
+      <div class="jrn-timeline">${cards}</div></section>
+    <section class="jrn-sec pgbreak"><div class="jrn-sechead"><h2 class="jrn-serif">Payment schedule</h2><div class="jrn-note">as per your BOQ · ${esc(ctx.code||"")}</div></div>
+      <div class="jrn-twrap"><table><thead><tr><th>Milestone</th><th class="r">Share</th><th class="r">Amount</th><th class="r">Status</th></tr></thead>
+      <tbody>${payRows||`<tr><td colspan="4" style="color:#8a8474;padding:16px">Payment milestones will appear here once set in the project's Payments tab.</td></tr>`}</tbody>
+      <tfoot><tr><td>Total contract value</td><td class="r">100%</td><td class="r amt">${jrnMoney(ctx.cv)}</td><td></td></tr></tfoot></table></div>
+      <p class="jrn-paynote">All figures follow the terms set out in your Bill of Quantities. Each milestone is raised as a proforma invoice with a secure payment link before the corresponding stage begins.</p></section>
+    ${scopeSec}
+    <section class="jrn-sec pgbreak"><div class="jrn-sechead"><h2 class="jrn-serif">Your atelier team</h2><div class="jrn-note">direct lines, always reachable</div></div>
+      <div class="jrn-team">${teamCards}</div></section>
+    <footer class="jrn-foot"><div class="jrn-fbrand"><img src="${LSA_SEAL}" alt=""><div><b>Lintel Space Atelier</b><small>Where luxury meets functionality</small></div></div>
+      <div class="jrn-fr">Project ${esc(ctx.code||"")} · ${clients}<br>High-level journey plan · private & confidential<br>Timeline indicative, confirmed at sign-off</div></footer>
+  </div>`;
+}
+
+function jrnDocStyles(){ return `
+.jrndoc{--pp:#F6F1E7;--sf:#FCF9F2;--sf2:#EFE7D6;--ink:#14142A;--ink2:#4E4E63;--ink3:#8A8474;--brass:#9C6F1C;--g1:#E8C77E;--g2:#C99A3E;--line:rgba(20,20,42,.13);--line2:rgba(20,20,42,.07);--good:#3E7C5A;--goodbg:rgba(62,124,90,.12);--nowbg:rgba(201,154,62,.14);--gatebg:rgba(201,154,62,.10);
+  background:var(--pp);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.6;max-width:940px;margin:0 auto;padding:26px 26px 60px}
+.jrndoc *{box-sizing:border-box}
+.jrndoc .jrn-serif{font-family:'Fraunces',Georgia,serif}
+.jrndoc h1,.jrndoc h2,.jrndoc h3,.jrndoc h4{margin:0;text-wrap:balance}
+.jrndoc .jrn-gold{color:var(--brass);font-style:italic}
+.jrndoc .jrn-eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--brass);font-weight:500;margin-bottom:12px}
+.jrndoc .jrn-mast{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-bottom:16px}
+.jrndoc .jrn-brand{display:flex;align-items:center;gap:12px}
+.jrndoc .jrn-mono{height:38px;width:auto;display:block}
+.jrndoc .jrn-wm b{font-family:'Fraunces',serif;font-weight:600;font-size:16px;letter-spacing:.06em;display:block;color:var(--ink);line-height:1.1}
+.jrndoc .jrn-wm span{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.26em;text-transform:uppercase;color:var(--ink3)}
+.jrndoc .jrn-doctag{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);text-align:right;line-height:1.55}
+.jrndoc .jrn-rule{height:1px;border:0;margin:0 0 8px;background:linear-gradient(90deg,transparent,var(--g2),transparent);opacity:.6}
+.jrndoc .jrn-hero{display:grid;grid-template-columns:1fr auto;gap:30px;align-items:center;padding:34px 0 22px}
+.jrndoc .jrn-fbadge{display:inline-flex;align-items:center;gap:8px;margin-bottom:16px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;color:var(--brass);background:var(--nowbg);border:1px solid rgba(201,154,62,.4);padding:6px 13px;border-radius:30px}
+.jrndoc .jrn-hero h1{font-family:'Fraunces',serif;font-weight:500;font-size:clamp(30px,5.4vw,50px);line-height:1.02;letter-spacing:-.018em}
+.jrndoc .jrn-lede{margin:18px 0 0;max-width:56ch;font-size:16px;color:var(--ink2)}
+.jrndoc .jrn-medallion{width:132px;height:132px;flex:0 0 auto;border-radius:50%;background:radial-gradient(circle at 50% 40%,#FBF6EC,#F1E8D5 68%,#E6DAC1);display:grid;place-items:center;padding:14px;box-shadow:0 2px 4px rgba(20,20,42,.14),0 18px 44px rgba(20,20,42,.18),inset 0 0 0 1px rgba(201,154,62,.35),inset 0 0 0 6px rgba(255,255,255,.35)}
+.jrndoc .jrn-medallion img{width:100%;height:100%;object-fit:contain}
+.jrndoc .jrn-snap{margin-top:22px;background:var(--sf);border:1px solid var(--line);border-radius:15px;overflow:hidden;display:grid;grid-template-columns:1.3fr 1fr 1fr;box-shadow:0 1px 2px rgba(20,20,42,.05),0 10px 34px rgba(20,20,42,.05)}
+.jrndoc .jrn-scell{padding:16px 20px;border-top:1px solid var(--line2);border-left:1px solid var(--line2)}
+.jrndoc .jrn-scell:nth-child(-n+3){border-top:none}
+.jrndoc .jrn-scell:nth-child(3n+1){border-left:none}
+.jrndoc .jrn-k{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px}
+.jrndoc .jrn-v{font-size:15px;font-weight:600;color:var(--ink);line-height:1.3}
+.jrndoc .jrn-scell.value .jrn-v{font-family:'Fraunces',serif;font-size:22px}
+.jrndoc .jrn-sec{margin-top:44px}
+.jrndoc .jrn-sechead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.jrndoc .jrn-sechead h2{font-family:'Fraunces',serif;font-weight:500;font-size:clamp(22px,3.4vw,28px);letter-spacing:-.012em}
+.jrndoc .jrn-note{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.05em;color:var(--ink3)}
+.jrndoc .jrn-ribbon{display:grid;grid-template-columns:repeat(7,1fr);background:var(--sf);border:1px solid var(--line);border-radius:15px;padding:22px 14px 16px;position:relative}
+.jrndoc .jrn-rnode{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px}
+.jrndoc .jrn-rdot{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--sf);border:2px solid var(--line);font-size:11px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:var(--ink3)}
+.jrndoc .jrn-rnode.done .jrn-rdot{background:var(--good);border-color:var(--good);color:#fff}
+.jrndoc .jrn-rnode.now .jrn-rdot{background:var(--g2);border-color:var(--g2);color:#fff;box-shadow:0 0 0 4px var(--nowbg)}
+.jrndoc .jrn-rlbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.03em;line-height:1.25;text-transform:uppercase;color:var(--ink3);max-width:74px}
+.jrndoc .jrn-rnode.now .jrn-rlbl{color:var(--brass);font-weight:600}
+.jrndoc .jrn-ribfoot{margin-top:14px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink2)}
+.jrndoc .jrn-ribfoot b{color:var(--brass)}
+.jrndoc .jrn-spot{background:var(--sf);border:1px solid rgba(201,154,62,.4);border-radius:15px;padding:24px 26px;position:relative;overflow:hidden}
+.jrndoc .jrn-spot::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(135deg,var(--g1),var(--g2))}
+.jrndoc .jrn-spk{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.jrndoc .jrn-tag{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:#fff;background:linear-gradient(135deg,var(--g1),var(--g2));padding:4px 10px;border-radius:20px}
+.jrndoc .jrn-exc{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3)}
+.jrndoc .jrn-spot h3{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(19px,3vw,24px);margin-bottom:10px}
+.jrndoc .jrn-lede2{margin:0;color:var(--ink2);font-size:14.5px;max-width:66ch}
+.jrndoc .jrn-lanes{margin-top:20px;display:flex;flex-direction:column;gap:12px}
+.jrndoc .jrn-pgroup{position:relative;display:flex;flex-direction:column;gap:10px;padding:16px 14px 14px 20px;border-radius:12px;background:var(--sf2);border:1px solid var(--line2)}
+.jrndoc .jrn-pgroup::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:3px;background:linear-gradient(135deg,var(--g1),var(--g2))}
+.jrndoc .jrn-ptag{position:absolute;top:-9px;left:16px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--brass);background:var(--sf);padding:2px 9px;border-radius:20px;border:1px solid rgba(201,154,62,.4)}
+.jrndoc .jrn-lane{display:grid;grid-template-columns:104px 1fr;align-items:center;gap:14px}
+.jrndoc .jrn-lname{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:600;text-align:right}
+.jrndoc .jrn-lbar{display:flex;gap:6px}
+.jrndoc .jrn-seg{padding:9px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--ink);background:var(--sf);border:1px solid var(--line);white-space:nowrap;line-height:1.15}
+.jrndoc .jrn-seg.demo{background:rgba(201,154,62,.12);border-color:rgba(201,154,62,.45)}
+.jrndoc .jrn-seg.gold{background:linear-gradient(135deg,var(--g1),var(--g2));border-color:transparent;color:#fff}
+.jrndoc .jrn-merge{display:flex;align-items:center;gap:10px;padding-left:118px;color:var(--g2);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.jrndoc .jrn-ln{flex:1;height:1px;background:linear-gradient(90deg,var(--g2),transparent)}
+.jrndoc .jrn-lane:last-child .jrn-lbar .jrn-seg{flex:1;text-align:center}
+.jrndoc .jrn-timeline{display:flex;flex-direction:column}
+.jrndoc .jrn-phase{display:grid;grid-template-columns:38px 1fr;column-gap:22px}
+.jrndoc .jrn-rail{display:flex;flex-direction:column;align-items:center;padding-top:4px}
+.jrndoc .jrn-dot{width:34px;height:34px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;background:var(--sf);border:2px solid var(--line);color:var(--ink3)}
+.jrndoc .jrn-phase.done .jrn-dot{background:var(--goodbg);border-color:var(--good);color:var(--good)}
+.jrndoc .jrn-phase.now .jrn-dot{background:var(--g2);border-color:var(--g2);color:#fff;box-shadow:0 0 0 4px var(--nowbg)}
+.jrndoc .jrn-line{flex:1 1 auto;width:2px;background:var(--line);margin:8px 0}
+.jrndoc .jrn-phase:last-child .jrn-line{display:none}
+.jrndoc .jrn-card{background:var(--sf);border:1px solid var(--line);border-radius:15px;padding:22px 24px;margin-bottom:24px;position:relative;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,42,.05),0 10px 30px rgba(20,20,42,.05)}
+.jrndoc .jrn-phase.now .jrn-card{border-color:rgba(201,154,62,.55)}
+.jrndoc .jrn-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:transparent}
+.jrndoc .jrn-phase.done .jrn-card::before{background:var(--good)}
+.jrndoc .jrn-phase.now .jrn-card::before{background:linear-gradient(180deg,var(--g1),var(--g2))}
+.jrndoc .jrn-chead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px;flex-wrap:wrap}
+.jrndoc .jrn-kick{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--brass);margin-bottom:5px}
+.jrndoc .jrn-chead h3{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(18px,3vw,22px);line-height:1.14}
+.jrndoc .jrn-st{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.08em;font-weight:600;text-transform:uppercase;padding:5px 11px;border-radius:20px;white-space:nowrap;background:rgba(20,20,42,.05);color:var(--ink2)}
+.jrndoc .jrn-st.done{background:var(--goodbg);color:var(--good)}
+.jrndoc .jrn-st.now{background:var(--nowbg);color:var(--brass)}
+.jrndoc .jrn-what{margin:0;color:var(--ink2);font-size:14.5px}
+.jrndoc .jrn-inset{margin-top:14px;display:flex;gap:10px;align-items:flex-start;background:var(--nowbg);border:1px solid rgba(201,154,62,.35);border-radius:11px;padding:11px 14px}
+.jrndoc .jrn-inset span{color:var(--g2)}
+.jrndoc .jrn-inset p{margin:0;font-size:13px;color:var(--ink)}
+.jrndoc .jrn-inset b{color:var(--brass)}
+.jrndoc .jrn-two{display:grid;grid-template-columns:1fr 1fr;gap:14px 26px;margin-top:16px}
+.jrndoc .jrn-h{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
+.jrndoc .jrn-two ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.jrndoc .jrn-two li{font-size:13.5px;color:var(--ink);line-height:1.4;padding-left:16px;position:relative}
+.jrndoc .jrn-two li::before{content:"";position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:1px;background:var(--g2);transform:rotate(45deg)}
+.jrndoc .jrn-two ul.you li::before{background:var(--ink3)}
+.jrndoc .jrn-cfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line2)}
+.jrndoc .jrn-dur{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink2)}
+.jrndoc .jrn-dur b{color:var(--ink)}
+.jrndoc .jgate{display:inline-flex;align-items:center;gap:9px;margin-left:auto;background:var(--gatebg);border:1px solid rgba(201,154,62,.5);border-radius:11px;padding:7px 13px}
+.jrndoc .jg-lbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--brass)}
+.jrndoc .jg-amt{font-family:'Fraunces',serif;font-weight:600;font-size:15px;color:var(--ink)}
+.jrndoc .jg-pct{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--brass);background:var(--sf);padding:2px 7px;border-radius:12px}
+.jrndoc .jg-delta{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;color:var(--brass);background:var(--sf);padding:2px 8px;border-radius:12px;white-space:nowrap}
+.jrndoc .jgate.paid{border-color:rgba(62,124,90,.5);background:var(--goodbg)}
+.jrndoc .jgate.paid .jg-lbl,.jrndoc .jgate.paid .jg-pct{color:var(--good)}
+.jrndoc .jgate.part{border-color:rgba(201,154,62,.6);background:var(--nowbg)}
+.jrndoc .jrn-twrap{overflow-x:auto;border:1px solid var(--line);border-radius:15px;background:var(--sf)}
+.jrndoc table{width:100%;border-collapse:collapse;min-width:520px}
+.jrndoc thead th{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);font-weight:500;text-align:left;padding:14px 20px;border-bottom:1px solid var(--line)}
+.jrndoc th.r,.jrndoc td.r{text-align:right}
+.jrndoc tbody td{padding:14px 20px;border-bottom:1px solid var(--line2);font-size:14px;color:var(--ink)}
+.jrndoc td.amt{font-family:'IBM Plex Mono',monospace;font-weight:600}
+.jrndoc .jrn-ms{font-weight:600}
+.jrndoc .jrn-sub{display:block;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;color:var(--ink3);margin-top:3px}
+.jrndoc .jrn-pill{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.06em;font-weight:600;text-transform:uppercase;padding:4px 10px;border-radius:20px;display:inline-block;background:rgba(20,20,42,.05);color:var(--ink2)}
+.jrndoc .jrn-pill.paid{background:var(--goodbg);color:var(--good)}
+.jrndoc .jrn-pill.part{background:var(--nowbg);color:var(--brass)}
+.jrndoc tfoot td{padding:15px 20px;font-weight:700;border-top:2px solid var(--line)}
+.jrndoc tfoot .amt{font-family:'Fraunces',serif;font-size:17px;color:var(--brass)}
+.jrndoc .jrn-paynote{margin:14px 2px 0;font-size:12.5px;color:var(--ink3)}
+.jrndoc .jrn-scope{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.jrndoc .jrn-scard{background:var(--sf);border:1px solid var(--line);border-radius:15px;padding:18px}
+.jrndoc .jrn-sh{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.jrndoc .jrn-ic{width:30px;height:30px;border-radius:8px;background:var(--gatebg);color:var(--g2);display:grid;place-items:center;flex:0 0 auto}
+.jrndoc .jrn-sh h4{font-family:'Fraunces',serif;font-weight:600;font-size:15px}
+.jrndoc .jrn-scard ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.jrndoc .jrn-scard li{font-size:13px;color:var(--ink2);line-height:1.35;padding-left:15px;position:relative}
+.jrndoc .jrn-scard li::before{content:"";position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--g2)}
+.jrndoc .jrn-team{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.jrndoc .jrn-member{background:var(--sf);border:1px solid var(--line);border-radius:15px;padding:18px 20px;display:flex;align-items:center;gap:16px;font-size:13px;color:var(--ink2)}
+.jrndoc .jrn-mbadge{width:44px;height:44px;flex:0 0 auto;border-radius:11px;background:var(--sf2);display:grid;place-items:center;border:1px solid var(--line2)}
+.jrndoc .jrn-mbadge img{width:28px;height:auto}
+.jrndoc .jrn-role{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--brass);margin-bottom:3px}
+.jrndoc .jrn-nm{font-family:'Fraunces',serif;font-weight:600;font-size:18px;color:var(--ink)}
+.jrndoc .jrn-ph{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink2);margin-top:4px}
+.jrndoc .jrn-foot{margin-top:52px;padding-top:24px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.jrndoc .jrn-fbrand{display:flex;align-items:center;gap:12px}
+.jrndoc .jrn-fbrand img{height:40px;width:auto}
+.jrndoc .jrn-fbrand b{font-family:'Fraunces',serif;font-size:14px;font-weight:600;color:var(--ink);letter-spacing:.04em}
+.jrndoc .jrn-fbrand small{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--brass);margin-top:2px}
+.jrndoc .jrn-fr{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);text-align:right;line-height:1.7}
+@media (max-width:680px){.jrndoc .jrn-hero{grid-template-columns:1fr;gap:22px}.jrndoc .jrn-medallion{order:-1;width:112px;height:112px}.jrndoc .jrn-snap{grid-template-columns:1fr 1fr}.jrndoc .jrn-scell:nth-child(3n+1){border-left:1px solid var(--line2)}.jrndoc .jrn-scell:nth-child(odd){border-left:none}.jrndoc .jrn-scell:nth-child(-n+2){border-top:none}.jrndoc .jrn-scope,.jrndoc .jrn-team{grid-template-columns:1fr}.jrndoc .jrn-rlbl{font-size:8px}.jrndoc .jrn-two{grid-template-columns:1fr}}
+@media print{.jrndoc{max-width:none;padding:0}.jrndoc .jrn-card,.jrndoc .jrn-phase,.jrndoc .jrn-spot,.jrndoc .jrn-scard,.jrndoc .jrn-member,.jrndoc .jrn-snap,.jrndoc .jrn-ribbon,.jrndoc .jrn-twrap{break-inside:avoid}.jrndoc .pgbreak{break-before:page}.jrndoc *{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{size:A4;margin:12mm}}
+`; }
+
+/* Insert one row into journey_shares and return a client link. */
+async function journeyShareLink(ctx,html){
+  const {data,error}=await sb.from("journey_shares").insert({
+    project_id:ctx.p.id, html:html, fast_track:ctx.fastTrack,
+    title:(ctx.clients?ctx.clients+" · ":"")+"Journey Plan",
+    client_name:ctx.clients||null, created_by:me.id
+  }).select("token").single();
+  if(error) throw new Error("Could not create the share link: "+error.message);
+  return JOURNEY_VIEW_BASE+"?t="+data.token;
+}
+
+/* Open the journey-plan preview + actions for a project. */
+async function pwJourneyPlan(p){
+  if(!canWrite()) return toast("You don't have access to generate client documents.");
+  openModal(`<div class="modal-h">Client journey plan · ${esc(p.code||p.name||"")}</div>
+    <div class="modal-b" style="max-height:70vh;overflow:auto"><div id="jrnPrev" style="min-height:120px;color:var(--ink-soft)">Building the plan…</div></div>
+    <div class="modal-f" style="flex-wrap:wrap;gap:8px">
+      <label style="display:flex;align-items:center;gap:7px;font-size:13px;margin-right:auto;cursor:pointer"><input type="checkbox" id="jrnFast"> Fast-track (parallel demolition)</label>
+      <button class="ghost" onclick="closeModal()">Close</button>
+      <button class="ghost" id="jrnPrint">⬇ Download / Print PDF</button>
+      ${p.client_phone?`<button class="wa-btn" id="jrnWa">Share on WhatsApp</button>`:""}
+      <button class="ghost" id="jrnMail">✉ Email link</button>
+      <button class="primary" id="jrnLink">🔗 Create share link</button>
+    </div>`);
+  let ctx=null, html="";
+  async function build(){
+    const prev=$("#jrnPrev"); if(prev) prev.textContent="Building the plan…";
+    ctx=await journeyContext(p,{fastTrack:$("#jrnFast")&&$("#jrnFast").checked});
+    html=jrnDocHtml(ctx);
+    if($("#jrnPrev")) $("#jrnPrev").innerHTML=html;
+  }
+  await build();
+  if($("#jrnFast")) $("#jrnFast").onchange=build;
+  if($("#jrnPrint")) $("#jrnPrint").onclick=()=>{
+    const w=window.open("","_blank");
+    if(!w) return toast("Allow pop-ups to download the PDF");
+    w.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Journey Plan · ${esc(ctx.clients||p.name||"")}</title>${JRN_FONTS}</head><body style="margin:0;background:#F6F1E7">${html}</body></html>`);
+    w.document.close();
+    setTimeout(()=>{ try{w.focus();}catch(_){}; w.print(); },700);
+  };
+  async function makeLink(btn){
+    const b=btn; const old=b.textContent; b.disabled=true; b.textContent="Creating…";
+    try{ const url=await journeyShareLink(ctx,html);
+      await navigator.clipboard.writeText(url).catch(()=>{});
+      toast("Share link created & copied");
+      return url;
+    }catch(e){ toast(e.message||"Could not create link"); return null; }
+    finally{ b.disabled=false; b.textContent=old; }
+  }
+  if($("#jrnLink")) $("#jrnLink").onclick=()=>makeLink($("#jrnLink"));
+  if($("#jrnWa")) $("#jrnWa").onclick=async()=>{
+    const url=await makeLink($("#jrnWa")); if(!url) return;
+    const first=(ctx.clients||"there").split(/[&,]/)[0].trim().split(/\s+/).slice(-1)[0]||"there";
+    const msg=`Dear ${first},\n\nWarm greetings from Lintel Space Atelier. Here is your personalised project journey plan — every stage of your home's transformation, what to expect, and the payment schedule:\n\n${url}\n\nDo reach out to your team any time. We look forward to building your home with you.\n\n— Team Lintel Space Atelier`;
+    waOpen(p.client_phone,msg);
+  };
+  if($("#jrnMail")) $("#jrnMail").onclick=async()=>{
+    const url=await makeLink($("#jrnMail")); if(!url) return;
+    const to=(p.client_email||"").trim();
+    const subj="Your Lintel Space Atelier journey plan";
+    const bodyTxt=`Dear ${esc(ctx.clients||"Client")},\n\nHere is your personalised project journey plan for ${p.code||"your project"} — every stage of your home's transformation, what to expect, and the payment schedule:\n\n${url}\n\nWarm regards,\nTeam Lintel Space Atelier\nWhere luxury meets functionality`;
+    window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(bodyTxt)}`;
+  };
+}
+
 
 /* One-click download — replaces "print, then Save as PDF". */
 async function gDownloadPdf(p){
