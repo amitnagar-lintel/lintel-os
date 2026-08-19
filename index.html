@@ -2396,6 +2396,52 @@ async function drawBoard(){
   s2lStartTicker();
 }
 
+/* ===== Client identity + structured site address (ADDR-01) ===== */
+function panValid(v){ return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(String(v||"").trim().toUpperCase()); }
+function composeSiteAddr(o){ o=o||{}; return [o.site_door_no,o.site_society,o.site_area,o.site_city,o.site_pincode].map(x=>String(x||"").trim()).filter(Boolean).join(", "); }
+function mapsSearchUrl(q){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(String(q||"").trim()+", India"); }
+/* Pull lat,lng out of a pasted Google Maps URL (long links only; short goo.gl links carry no coords). */
+function parseMapLatLng(url){
+  url=String(url||"");
+  const m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/[?&](?:query|q)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i) || url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  return m ? {lat:parseFloat(m[1]), lng:parseFloat(m[2])} : {lat:null, lng:null};
+}
+/* Open Google Maps pre-searched with whatever address parts are typed in a given field group. */
+function openSiteMap(prefix){
+  const parts=[prefix+"door",prefix+"soc",prefix+"area",prefix+"city",prefix+"pin"].map(id=>{const el=$("#"+id);return el?el.value.trim():"";}).filter(Boolean);
+  if(!parts.length) return toast("Type the address first, then tap Map to pin it");
+  window.open(mapsSearchUrl(parts.join(", ")),"_blank");
+}
+/* Structured site-address inputs (prefix keeps ids unique per form). */
+function siteAddrFields(o, prefix){
+  o=o||{};
+  return `<div class="grid2">
+      <div class="field"><label>Door / Flat / House no.</label><input id="${prefix}door" value="${esc(o.site_door_no||"")}" placeholder="e.g. A-1203"></div>
+      <div class="field"><label>Society / Building / Apartment</label><input id="${prefix}soc" value="${esc(o.site_society||"")}" placeholder="e.g. Prestige Shantiniketan"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Area / Locality / Street</label><input id="${prefix}area" value="${esc(o.site_area||"")}" placeholder="e.g. Whitefield"></div>
+      <div class="field"><label>City</label><input id="${prefix}city" value="${esc(o.site_city||"Bengaluru")}"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Pincode</label><input id="${prefix}pin" value="${esc(o.site_pincode||"")}" inputmode="numeric" maxlength="6" placeholder="560066"></div>
+      <div class="field"><label>Google Maps location <span style="font-weight:400;color:var(--ink-soft)">(paste pin link)</span></label>
+        <div style="display:flex;gap:6px"><input id="${prefix}map" value="${esc(o.site_map_url||"")}" placeholder="https://maps.app.goo.gl/…" style="flex:1">
+        <button type="button" class="ghost sm" onclick="openSiteMap('${prefix}')" title="Find & pin on Google Maps" style="white-space:nowrap">📍 Map</button></div></div>
+    </div>`;
+}
+/* Read a structured site-address group back into a DB-ready object. Falls back to the
+   legacy free-text address when no structured parts were entered (no data loss). */
+function readSiteAddr(prefix, legacyFreeText){
+  const g=id=>{const el=$("#"+id);return el?el.value.trim():"";};
+  const o={ site_door_no:g(prefix+"door")||null, site_society:g(prefix+"soc")||null, site_area:g(prefix+"area")||null,
+            site_city:g(prefix+"city")||null, site_pincode:g(prefix+"pin")||null, site_map_url:g(prefix+"map")||null };
+  const ll=parseMapLatLng(o.site_map_url); o.site_lat=ll.lat; o.site_lng=ll.lng;
+  const substantive = o.site_door_no||o.site_society||o.site_area||o.site_pincode; // a lone "Bengaluru" city is not an address
+  o.site_address = substantive ? composeSiteAddr(o) : (String(legacyFreeText||"").trim() || null);
+  return o;
+}
+
 function leadForm(lead){
   const l=lead||{};
   const qualBlock=Object.keys(QUAL).map(k=>`
@@ -2410,9 +2456,12 @@ function leadForm(lead){
         <div class="field"><label>Email</label><input id="f_email" value="${esc(l.email||"")}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Current address</label><input id="f_caddr" value="${esc(l.current_address||"")}"></div>
-        <div class="field"><label>Site address</label><input id="f_saddr" value="${esc(l.site_address||"")}"></div>
+        <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label><input id="f_pan" value="${esc(l.pan||"")}" maxlength="10" style="text-transform:uppercase" placeholder="Required to convert to a project"></div>
+        <div class="field"><label>Current / residential address</label><input id="f_caddr" value="${esc(l.current_address||"")}"></div>
       </div>
+      <div class="sec-label">Site address <span style="font-weight:400;font-size:11px;color:var(--ink-soft);text-transform:none;letter-spacing:0">— where the work happens</span></div>
+      ${siteAddrFields(l,"f_s")}
+      ${(!composeSiteAddr(l) && (l.site_address||"").trim())?`<div class="s2l-hint">On file: ${esc(l.site_address)} — re-enter above in the structured fields.</div>`:""}
       <div class="grid2">
         <div class="field"><label>Project type</label><select id="f_ptype">${opts(PROJECT_TYPES,l.project_type)}</select></div>
         <div class="field"><label>Source</label><select id="f_src">${opts(SOURCES,l.source)}</select></div>
@@ -2452,8 +2501,13 @@ function leadForm(lead){
     const t=el.dataset.t; if(picked.has(t)){picked.delete(t);el.classList.remove("on");}else{picked.add(t);el.classList.add("on");}
   });
   $("#saveLead").onclick=async()=>{
+    const _sa=readSiteAddr("f_s", l.site_address);
+    const _pan=($("#f_pan")?$("#f_pan").value.trim().toUpperCase():"")||null;
+    if(_pan && !panValid(_pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const row={ name:$("#f_name").value.trim(), phone:$("#f_phone").value.trim(), email:$("#f_email").value.trim(),
-      current_address:$("#f_caddr").value.trim(), site_address:$("#f_saddr").value.trim(),
+      pan:_pan, current_address:$("#f_caddr").value.trim(),
+      site_address:_sa.site_address, site_door_no:_sa.site_door_no, site_society:_sa.site_society, site_area:_sa.site_area,
+      site_city:_sa.site_city, site_pincode:_sa.site_pincode, site_map_url:_sa.site_map_url, site_lat:_sa.site_lat, site_lng:_sa.site_lng,
       project_type:$("#f_ptype").value, source:$("#f_src").value,
       expected_value:Number($("#f_val").value||0)||estValueFromBand(l.budget_band), next_follow_up:$("#f_fu").value||null,
       stage:lead?$("#f_stage").value:"new", notes:$("#f_notes").value.trim(), tags:[...picked],
@@ -3370,6 +3424,16 @@ async function convertLead(l){
     <div class="modal-h">Convert lead to project</div>
     <div class="modal-b">
       <div class="banner">This creates a live project from <b>${esc(l.name||"")}</b>, carries over the BOQ${total?` (${fmt(total)})`:""}, and marks the lead won.</div>
+      <div class="sec-label">Client details <span style="font-weight:400;font-size:11px;color:#A33C3C;text-transform:none;letter-spacing:0">— all required to open a project</span></div>
+      <div class="grid2">
+        <div class="field"><label>Contact number</label><input id="cv_phone" value="${esc(l.phone||"")}" placeholder="required"></div>
+        <div class="field"><label>Email</label><input id="cv_email" value="${esc(l.email||"")}" placeholder="required"></div>
+      </div>
+      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label><input id="cv_pan" value="${esc(l.pan||"")}" maxlength="10" style="text-transform:uppercase" placeholder="required"></div>
+      <div class="sec-label" style="margin-top:6px">Site address</div>
+      ${siteAddrFields(l,"cv_s")}
+      ${(!composeSiteAddr(l) && (l.site_address||"").trim())?`<div class="s2l-hint">On file: ${esc(l.site_address)} — please structure it in the fields above.</div>`:""}
+      <div class="rule"></div>
       <div class="grid2">
         <div class="field"><label>Assign designer (interior designer)</label><select id="cv_designer">${staffOpts(l.designer_id)}</select></div>
         <div class="field"><label>Project manager</label><select id="cv_pm">${staffOpts(l.pm_id)}</select></div>
@@ -3388,6 +3452,15 @@ async function convertLead(l){
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
   $("#cv_go").onclick=async()=>{
+    // ── client-data gate: no project without contact, email, site address, PAN ──
+    const phone=$("#cv_phone").value.trim(), email=$("#cv_email").value.trim(), pan=$("#cv_pan").value.trim().toUpperCase();
+    const sa=readSiteAddr("cv_s", l.site_address);
+    const missing=[];
+    if(!phone) missing.push("contact number");
+    if(!email || !/.+@.+\..+/.test(email)) missing.push("a valid email");
+    if(!sa.site_address) missing.push("site address"); else if(!sa.site_pincode) missing.push("site pincode");
+    if(!pan) missing.push("PAN"); else if(!panValid(pan)) missing.push("a valid PAN (ABCDE1234F)");
+    if(missing.length) return toast("Can't convert yet — please add "+missing.join(", ")+".");
     // ── 10% advance gate: no project without the client's commitment ──
     const adv=Number($("#cv_adv").value||0);
     const need=(Number(total)||0)*0.10;
@@ -3398,8 +3471,10 @@ async function convertLead(l){
     const designer=$("#cv_designer").value?Number($("#cv_designer").value):null;
     const pm=$("#cv_pm").value?Number($("#cv_pm").value):null;
     const {data:proj,error}=await sb.from("projects").insert({
-      code, name:l.name, client_name:l.name, client_phone:l.phone, client_email:l.email, property_type:l.property_type,
-      site_address:l.site_address||l.locality, lead_id:l.id, contract_value:Number($("#cv_val").value||total||0),
+      code, name:l.name, client_name:l.name, client_phone:phone, client_email:email, pan, property_type:l.property_type,
+      site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
+      site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
+      lead_id:l.id, contract_value:Number($("#cv_val").value||total||0),
       consultant_id:l.consultant_id||null, designer_id:designer, pm_id:pm||me.id, status:"active", current_stage:"Briefing",
       converted_at:new Date().toISOString()
     }).select().single();
@@ -3419,7 +3494,11 @@ async function convertLead(l){
     });
     if(payErr) toast("Project created, but the advance could not be saved: "+payErr.message);
     await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
-    await sb.from("leads").update({stage:"won",designer_id:designer,updated_at:new Date().toISOString()}).eq("id",l.id);
+    // write the confirmed client details back to the lead so lead & project stay in sync
+    await sb.from("leads").update({stage:"won",designer_id:designer,phone,email,pan,
+      site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
+      site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
+      updated_at:new Date().toISOString()}).eq("id",l.id);
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Converted to project ${code} · advance ${fmt(adv)} received${designer?" · designer "+staffName(designer):""} · BOQ locked`,by_user:me.id});
     closeModal(); activeLead=null; render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
@@ -3573,7 +3652,9 @@ function newProjectForm(){
         <div class="field"><label>Project type</label><select id="np_ptype">${opts(PROJECT_TYPES)}</select></div>
         <div class="field"><label>Status</label><select id="np_status">${opts(["active","on_hold","completed","cancelled"])}</select></div>
       </div>
-      <div class="field"><label>Site address</label><input id="np_site"></div>
+      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label><input id="np_pan" maxlength="10" style="text-transform:uppercase"></div>
+      <div class="sec-label">Site address</div>
+      ${siteAddrFields({},"nps")}
       <div class="grid2">
         <div class="field"><label>Contract value (₹)</label><input id="np_val" type="number" placeholder="0"></div>
         <div class="field"><label>Project manager</label><select id="np_pm">${staffOpts()}</select></div>
@@ -3589,10 +3670,15 @@ function newProjectForm(){
     const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
     const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
     const pmDir=$("#np_pm").value?Number($("#np_pm").value):null;
+    const _npsa=readSiteAddr("nps", null);
+    const _nppan=($("#np_pan")?$("#np_pan").value.trim().toUpperCase():"")||null;
+    if(_nppan && !panValid(_nppan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const {data:proj,error}=await sb.from("projects").insert({
       code, name, client_name:name, client_phone:$("#np_phone").value.trim()||null,
-      client_email:$("#np_email").value.trim()||null, property_type:$("#np_ptype").value,
-      site_address:$("#np_site").value.trim()||null, contract_value:Number($("#np_val").value||0),
+      client_email:$("#np_email").value.trim()||null, pan:_nppan, property_type:$("#np_ptype").value,
+      site_address:_npsa.site_address, site_door_no:_npsa.site_door_no, site_society:_npsa.site_society, site_area:_npsa.site_area,
+      site_city:_npsa.site_city, site_pincode:_npsa.site_pincode, site_map_url:_npsa.site_map_url, site_lat:_npsa.site_lat, site_lng:_npsa.site_lng,
+      contract_value:Number($("#np_val").value||0),
       status:$("#np_status").value, current_stage:"Briefing", converted_at:new Date().toISOString()
     }).select().single();
     if(error) return toast(error.message);
@@ -6121,6 +6207,8 @@ async function vendorForm(p,body,v){
 /* ---- Client Details ---- */
 function pwClient(p,body){
   const ro=!canWrite();
+  const pinUrl = (p.site_lat!=null&&p.site_lng!=null) ? `https://www.google.com/maps/search/?api=1&query=${p.site_lat},${p.site_lng}` : (p.site_map_url||"");
+  const pinLink = pinUrl?` <a href="${esc(pinUrl)}" target="_blank" rel="noopener" style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0;color:var(--brass-deep)">📍 View pin</a>`:"";
   body.innerHTML=`<div class="pw-card">
     <div class="grid2">
       <div class="field"><label>Client name</label>${ro?`<div>${esc(p.client_name||p.name||"—")}</div>`:`<input id="pc_name" value="${esc(p.client_name||p.name||"")}">`}</div>
@@ -6128,9 +6216,11 @@ function pwClient(p,body){
     </div>
     <div class="grid2">
       <div class="field"><label>Email</label>${ro?`<div>${esc(p.client_email||"—")}</div>`:`<input id="pc_email" value="${esc(p.client_email||"")}">`}</div>
-      <div class="field"><label>Project type</label>${ro?`<div>${esc(p.property_type||"—")}</div>`:`<select id="pc_ptype">${opts(PROJECT_TYPES,p.property_type)}</select>`}</div>
+      <div class="field"><label>PAN</label>${ro?`<div>${esc(p.pan||"—")}</div>`:`<input id="pc_pan" value="${esc(p.pan||"")}" maxlength="10" style="text-transform:uppercase">`}</div>
     </div>
-    <div class="field"><label>Site address</label>${ro?`<div>${esc(p.site_address||"—")}</div>`:`<input id="pc_site" value="${esc(p.site_address||"")}">`}</div>
+    <div class="field"><label>Project type</label>${ro?`<div>${esc(p.property_type||"—")}</div>`:`<select id="pc_ptype">${opts(PROJECT_TYPES,p.property_type)}</select>`}</div>
+    <div class="sec-label">Site address${pinLink}</div>
+    ${ro?`<div class="field"><div>${esc(p.site_address||"—")}</div></div>`:siteAddrFields(p,"pcs")}
     <div class="grid2">
       <div class="field"><label>Start date</label>${ro?`<div>${p.start_date||"—"}</div>`:`<input id="pc_start" type="date" value="${p.start_date||""}">`}</div>
       <div class="field"><label>Target end</label>${ro?`<div>${p.target_end||"—"}</div>`:`<input id="pc_end" type="date" value="${p.target_end||""}">`}</div>
@@ -6143,9 +6233,14 @@ function pwClient(p,body){
     ${ro?"":`<div style="margin-top:14px"><button class="primary" id="pcSave">Save changes</button></div>`}
   </div>`;
   if(!ro) $("#pcSave").onclick=async()=>{
+    const sa=readSiteAddr("pcs", p.site_address);
+    const pan=($("#pc_pan")?$("#pc_pan").value.trim().toUpperCase():"")||null;
+    if(pan && !panValid(pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
     const row={ client_name:$("#pc_name").value.trim(), client_phone:$("#pc_phone").value.trim(),
-      client_email:$("#pc_email").value.trim(), property_type:$("#pc_ptype").value,
-      site_address:$("#pc_site").value.trim(), start_date:$("#pc_start").value||null,
+      client_email:$("#pc_email").value.trim(), pan, property_type:$("#pc_ptype").value,
+      site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
+      site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
+      start_date:$("#pc_start").value||null,
       target_end:$("#pc_end").value||null, contract_value:Number($("#pc_val").value||0),
       status:$("#pc_status").value, notes:$("#pc_notes").value.trim() };
     const {error}=await sb.from("projects").update(row).eq("id",p.id);
