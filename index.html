@@ -8975,9 +8975,11 @@ async function gNewRevision(p, body){
   }).eq("id",id);
   const {data:srcItems}=await sb.from("boq_items").select("*").eq("boq_version_id",src.id);
   if(srcItems&&srcItems.length){
-    const copies=srcItems.map(r=>{ const c={...r}; delete c.id; c.boq_version_id=id; return c; });
+    // `amount` is a GENERATED column (qty*rate) — Postgres rejects any inserted value,
+    // so it must be stripped from the copy (as must the source row id).
+    const copies=srcItems.map(r=>{ const c={...r}; delete c.id; delete c.amount; c.boq_version_id=id; return c; });
     const {error:cErr}=await sb.from("boq_items").insert(copies);
-    if(cErr) toast("Revision created, but copying items failed: "+cErr.message);
+    if(cErr){ toast("Could not copy the BOQ items: "+cErr.message); return; }
   }
   gLogActivity(p,"New BOQ option created from "+(src.version_label||("v"+src.version)));
   G.openVersionId=id; gStopAutosave();
