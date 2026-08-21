@@ -733,6 +733,47 @@
     border:none;background:var(--navy);color:var(--brass);font-size:20px;box-shadow:var(--shadow);
     display:flex;align-items:center;justify-content:center;transition:transform .15s}
   #assistFab:hover{transform:scale(1.06)}
+  /* ===== Team chat ===== */
+  #chatFab{position:fixed;right:20px;bottom:84px;z-index:600;width:52px;height:52px;border-radius:50%;
+    border:none;background:var(--paper);color:var(--navy);font-size:21px;border:1px solid var(--line-2);
+    box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;transition:transform .15s;cursor:pointer}
+  #chatFab:hover{transform:scale(1.06)}
+  #chatFab .cbadge{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;
+    background:#C0392B;color:#fff;font:700 11px/19px Inter,sans-serif;text-align:center;display:none}
+  #chatPanel{position:fixed;right:20px;bottom:84px;z-index:610;width:380px;max-width:calc(100vw - 24px);
+    height:600px;max-height:calc(100vh - 120px);display:none;flex-direction:column;background:var(--paper);
+    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(13,13,39,.15),0 16px 48px rgba(13,13,39,.22);overflow:hidden}
+  #chatPanel.open{display:flex}
+  .chat-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--navy);color:#fff}
+  .chat-head b{font-size:14px;flex:1}
+  .chat-head button{background:none;border:none;color:#fff;font-size:16px;cursor:pointer;opacity:.85;padding:2px 6px}
+  .chat-list{flex:1;overflow-y:auto}
+  .chat-conv{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line)}
+  .chat-conv:hover{background:#F3EFE6}
+  .chat-conv .cav{width:34px;height:34px;border-radius:50%;background:var(--navy);color:var(--brass);
+    display:flex;align-items:center;justify-content:center;font:700 12px Inter,sans-serif;flex:none}
+  .chat-conv .cnm{flex:1;font-size:13.5px;font-weight:600;color:var(--ink)}
+  .chat-conv .cnm small{display:block;font-weight:400;font-size:11px;color:var(--ink-soft)}
+  .chat-conv .cun{min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#C0392B;color:#fff;font:700 11px/19px Inter,sans-serif;text-align:center}
+  .chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#F6F3EC}
+  .cmsg{max-width:82%;padding:8px 11px;border-radius:12px;font-size:13.5px;line-height:1.45;word-break:break-word}
+  .cmsg.mine{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:4px}
+  .cmsg.theirs{align-self:flex-start;background:#fff;border:1px solid var(--line-2);border-bottom-left-radius:4px}
+  .cmsg .cwho{font-size:10.5px;font-weight:700;color:var(--brass-deep);margin-bottom:2px}
+  .cmsg.mine .cwho{color:var(--brass)}
+  .cmsg .cts{display:block;font-size:9.5px;opacity:.55;margin-top:3px;text-align:right}
+  .cfile{display:inline-flex;align-items:center;gap:7px;margin-top:4px;padding:7px 10px;border-radius:9px;cursor:pointer;
+    background:rgba(223,176,94,.14);border:1px solid rgba(223,176,94,.5);font-size:12.5px;font-weight:600}
+  .cmsg.theirs .cfile{color:var(--navy)}
+  .cmsg.mine .cfile{color:var(--brass)}
+  .chat-compose{flex:none;display:flex;align-items:flex-end;gap:8px;padding:10px;border-top:1px solid var(--line-2);background:var(--paper)}
+  .chat-compose textarea{flex:1;resize:none;border:1px solid var(--line-2);border-radius:10px;padding:9px 11px;font:inherit;font-size:13.5px;max-height:96px;min-height:38px;outline:none;background:#fff}
+  .chat-compose textarea:focus{border-color:var(--brass)}
+  .chat-compose .cbtn{flex:none;border:none;border-radius:10px;background:var(--navy);color:var(--brass);width:38px;height:38px;font-size:16px;cursor:pointer}
+  .chat-compose .cclip{flex:none;border:1px solid var(--line-2);border-radius:10px;background:#fff;width:38px;height:38px;font-size:16px;cursor:pointer;color:var(--ink-soft)}
+  .chat-pending{font-size:11.5px;color:var(--ink-soft);padding:0 12px 8px;display:flex;align-items:center;gap:6px}
+  .chat-pending button{border:none;background:none;color:#A33C3C;cursor:pointer;font-size:13px}
+  @media (max-width:520px){ #chatPanel{right:8px;left:8px;width:auto;bottom:76px} }
   #assistPanel{position:fixed;right:20px;bottom:84px;z-index:600;width:380px;max-width:calc(100vw - 24px);
     height:560px;max-height:calc(100vh - 120px);display:none;flex-direction:column;background:var(--paper);
     border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(13,13,39,.15),0 16px 48px rgba(13,13,39,.22);overflow:hidden}
@@ -9095,6 +9136,167 @@ function wnOpen(list,manual){
   const b=$("#wnGotIt");
   if(b) b.onclick=()=>{ localStorage.setItem(WN_KEY,WHATS_NEW[0].build); wnPaintBadge(); closeModal(); };
 }
+/* ===================== TEAM CHAT =====================
+   Internal chat for staff: one "Lintel Team" channel + 1:1 DMs, with file
+   sharing (BOQs, drawings, docs) via the private chat-files bucket.
+   Tables: chat_messages / chat_reads (CHAT-01) · realtime on INSERT ·
+   unread badge via chat_unread(). Self-contained: injects its own FAB. */
+const CHAT={open:false, view:"list", conv:null, people:[], unread:{}, file:null, rt:null, poll:null};
+function chatDmKey(a,b){ const [x,y]=[String(a),String(b)].sort(); return "dm:"+x+":"+y; }
+function chatName(p){ const n=p.full_name||""; return (!n||n.indexOf("@")>-1) ? (p.email||"").split("@")[0] : n; }
+function chatInitials(n){ return n.split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase(); }
+function chatFmtSize(b){ b=Number(b)||0; return b>1048576?(b/1048576).toFixed(1)+" MB":b>1024?Math.round(b/1024)+" KB":b+" B"; }
+function chatTs(iso){ const d=new Date(iso), today=new Date().toDateString()===d.toDateString();
+  return (today?"":d.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+" ")+d.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"}); }
+function chatTotalUnread(){ return Object.values(CHAT.unread).reduce((s,n)=>s+(Number(n)||0),0); }
+function chatPaintBadge(){ const b=document.querySelector("#chatFab .cbadge"); if(!b) return;
+  const n=chatTotalUnread(); b.style.display=n?"block":"none"; b.textContent=n>99?"99+":n; }
+
+async function chatRefreshUnread(){
+  try{ const {data}=await sb.rpc("chat_unread"); CHAT.unread=data||{}; chatPaintBadge();
+    if(CHAT.open&&CHAT.view==="list") chatRenderList(); }catch(e){}
+}
+async function chatLoadPeople(){
+  const {data}=await sb.from("profiles").select("id,full_name,email,role,is_active").eq("is_active",true);
+  CHAT.people=(data||[]).filter(p=>p.id!==me.id && p.email!=="contact@lintelspace.com");
+}
+function chatToggle(){
+  CHAT.open=!CHAT.open;
+  $("#chatPanel").classList.toggle("open",CHAT.open);
+  if(CHAT.open){ CHAT.view="list"; chatRenderList(); chatRefreshUnread();
+    CHAT.poll=setInterval(()=>{ if(CHAT.view==="thread"&&CHAT.conv) chatLoadThread(true); chatRefreshUnread(); },25000);
+  } else { clearInterval(CHAT.poll); }
+}
+function chatRenderList(){
+  CHAT.view="list"; CHAT.conv=null;
+  $("#chatHeadTitle").textContent="Team chat"; $("#chatBack").style.display="none";
+  const un=k=>Number(CHAT.unread[k]||0);
+  $("#chatBody").innerHTML=`<div class="chat-list">
+    <div class="chat-conv" data-conv="team"><div class="cav">LT</div>
+      <div class="cnm"># Lintel Team<small>everyone at Lintel</small></div>
+      ${un("team")?`<span class="cun">${un("team")}</span>`:""}</div>
+    ${CHAT.people.map(p=>{ const k=chatDmKey(me.id,p.id), n=chatName(p);
+      return `<div class="chat-conv" data-conv="${k}" data-peer="${p.id}"><div class="cav">${esc(chatInitials(n))}</div>
+        <div class="cnm">${esc(n)}<small>${esc((p.role||"").replace(/_/g," "))}</small></div>
+        ${un(k)?`<span class="cun">${un(k)}</span>`:""}</div>`; }).join("")}
+  </div>`;
+  $("#chatBody").querySelectorAll("[data-conv]").forEach(el=>el.onclick=()=>chatOpenConv(el.dataset.conv, el.dataset.peer||null));
+}
+async function chatOpenConv(key, peerId){
+  CHAT.view="thread"; CHAT.conv={key, peer:peerId};
+  const title=key==="team"?"# Lintel Team":chatName(CHAT.people.find(p=>p.id===peerId)||{});
+  $("#chatHeadTitle").textContent=title; $("#chatBack").style.display="";
+  $("#chatBody").innerHTML=`<div class="chat-msgs" id="chatMsgs"><div style="color:var(--ink-soft);font-size:12px;text-align:center;padding:20px">Loading…</div></div>
+    <div class="chat-pending" id="chatPend" style="display:none"></div>
+    <div class="chat-compose">
+      <button class="cclip" id="chatClip" title="Attach a file (BOQ, drawing, doc — up to 25 MB)">📎</button>
+      <input type="file" id="chatFile" style="display:none">
+      <textarea id="chatText" rows="1" placeholder="Message ${esc(title)}…"></textarea>
+      <button class="cbtn" id="chatSend" title="Send">➤</button>
+    </div>`;
+  $("#chatClip").onclick=()=>$("#chatFile").click();
+  $("#chatFile").onchange=()=>{ const f=$("#chatFile").files[0]; if(!f) return;
+    if(f.size>26214400) return toast("File is over 25 MB — share a link instead");
+    CHAT.file=f; const pd=$("#chatPend"); pd.style.display="flex";
+    pd.innerHTML=`📎 ${esc(f.name)} <span style="opacity:.6">(${chatFmtSize(f.size)})</span> <button id="chatUnfile">✕</button>`;
+    $("#chatUnfile").onclick=()=>{ CHAT.file=null; $("#chatFile").value=""; pd.style.display="none"; };
+  };
+  $("#chatSend").onclick=chatSend;
+  $("#chatText").onkeydown=e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); chatSend(); } };
+  await chatLoadThread();
+  chatMarkRead();
+}
+async function chatLoadThread(silent){
+  const c=CHAT.conv; if(!c) return;
+  const {data:msgs}=await sb.from("chat_messages").select("*").eq("conv_key",c.key).order("id",{ascending:false}).limit(100);
+  const list=(msgs||[]).reverse(); const box=$("#chatMsgs"); if(!box) return;
+  const stick=!silent || (box.scrollHeight-box.scrollTop-box.clientHeight<80);
+  box.innerHTML=list.length?list.map(m=>{
+    const mine=m.sender===me.id;
+    const who=mine?"You":(chatName(CHAT.people.find(p=>p.id===m.sender)||{})||staffNameByProfile(m.sender)||"Team");
+    return `<div class="cmsg ${mine?"mine":"theirs"}">
+      ${(!mine&&c.key==="team")?`<div class="cwho">${esc(who)}</div>`:""}
+      ${m.body?esc(m.body).replace(/\n/g,"<br>"):""}
+      ${m.file_path?`<div class="cfile" data-fp="${esc(m.file_path)}" title="Download">📄 ${esc(m.file_name||"file")} <span style="opacity:.65;font-weight:400">${m.file_size?chatFmtSize(m.file_size):""}</span></div>`:""}
+      <span class="cts">${chatTs(m.created_at)}</span></div>`;
+  }).join(""):`<div style="color:var(--ink-soft);font-size:12.5px;text-align:center;padding:26px">No messages yet — say hello 👋</div>`;
+  box.querySelectorAll("[data-fp]").forEach(el=>el.onclick=async()=>{
+    const {data,error}=await sb.storage.from("chat-files").createSignedUrl(el.dataset.fp,3600);
+    if(error||!data||!data.signedUrl) return toast("Could not open the file: "+((error&&error.message)||"try again"));
+    window.open(data.signedUrl,"_blank");
+  });
+  if(stick) box.scrollTop=box.scrollHeight;
+}
+async function chatMarkRead(){
+  const c=CHAT.conv; if(!c) return;
+  await sb.from("chat_reads").upsert({user_id:me.id, conv_key:c.key, last_read_at:new Date().toISOString()});
+  CHAT.unread[c.key]=0; chatPaintBadge();
+}
+async function chatSend(){
+  const c=CHAT.conv; if(!c) return;
+  const txt=$("#chatText").value.trim();
+  if(!txt && !CHAT.file) return;
+  const btn=$("#chatSend"); btn.disabled=true; btn.textContent="…";
+  try{
+    let filePath=null, fileName=null, fileSize=null;
+    if(CHAT.file){
+      const f=CHAT.file;
+      const safe=f.name.replace(/[^A-Za-z0-9._-]+/g,"_").slice(-80);
+      filePath=(c.key==="team"?"team":c.key.replace(/[^A-Za-z0-9-]+/g,"_"))+"/"+Date.now()+"_"+safe;
+      const {error:upErr}=await sb.storage.from("chat-files").upload(filePath,f);
+      if(upErr) throw new Error("Upload failed: "+upErr.message);
+      fileName=f.name; fileSize=f.size;
+    }
+    const {error}=await sb.from("chat_messages").insert({
+      conv_key:c.key, sender:me.id, recipient:c.key==="team"?null:c.peer,
+      body:txt||null, file_path:filePath, file_name:fileName, file_size:fileSize
+    });
+    if(error) throw new Error(error.message);
+    $("#chatText").value=""; CHAT.file=null; const cf=$("#chatFile"); if(cf) cf.value="";
+    const pd=$("#chatPend"); if(pd) pd.style.display="none";
+    await chatLoadThread(); chatMarkRead();
+  }catch(e){ toast(String(e.message||e)); }
+  finally{ btn.disabled=false; btn.textContent="➤"; }
+}
+function chatRealtime(){
+  try{
+    if(CHAT.rt) return;
+    CHAT.rt=sb.channel("chat-live")
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"chat_messages"},payload=>{
+        const m=payload.new||{};
+        if(CHAT.open&&CHAT.view==="thread"&&CHAT.conv&&m.conv_key===CHAT.conv.key){
+          chatLoadThread(true); chatMarkRead();
+        } else if(m.sender!==me.id){
+          CHAT.unread[m.conv_key]=(Number(CHAT.unread[m.conv_key])||0)+1; chatPaintBadge();
+          if(CHAT.open&&CHAT.view==="list") chatRenderList();
+        }
+      }).subscribe();
+  }catch(e){ /* realtime unavailable -> the 25s poll still covers it */ }
+}
+(function chatBoot(){
+  let tries=0;
+  const t=setInterval(async()=>{
+    if(++tries>90){ clearInterval(t); return; }
+    const app=document.getElementById("app");
+    if(typeof me==="undefined"||!me||!me.id||!app||getComputedStyle(app).display==="none") return;
+    clearInterval(t);
+    if(document.getElementById("chatFab")) return;
+    document.body.insertAdjacentHTML("beforeend",
+      `<button id="chatFab" title="Team chat">💬<span class="cbadge"></span></button>
+       <div id="chatPanel">
+         <div class="chat-head"><button id="chatBack" style="display:none">←</button><b id="chatHeadTitle">Team chat</b><button id="chatClose">✕</button></div>
+         <div id="chatBody" style="display:flex;flex-direction:column;flex:1;overflow:hidden"></div>
+       </div>`);
+    $("#chatFab").onclick=chatToggle;
+    $("#chatClose").onclick=chatToggle;
+    $("#chatBack").onclick=()=>chatRenderList();
+    await chatLoadPeople();
+    chatRefreshUnread();
+    chatRealtime();
+    setInterval(chatRefreshUnread, 60000);   // badge keeps up even with the panel closed
+  },800);
+})();
+
 (function wnBoot(){
   let tries=0;
   const t=setInterval(()=>{
