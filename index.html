@@ -3161,6 +3161,63 @@ async function csatTrigger(stage, scope){   // scope: {lead_id} | {project_id}
   }catch(e){ console.warn("csat:",e); return null; }
 }
 
+/* Client portal panel — share link + client message thread (project Overview). */
+const PORTAL_URL="https://os.lintelspace.com/portal.html?t=";
+async function portalPanel(p, hostSel){
+  const host=$(hostSel); if(!host) return;
+  const w=canWrite();
+  const on=!!(p.portal_token&&p.portal_enabled_at);
+  let msgs=[];
+  if(on){ const {data}=await sb.from("client_messages").select("*").eq("project_id",p.id).order("id",{ascending:false}).limit(30); msgs=(data||[]).reverse(); }
+  const unread=msgs.filter(m=>m.sender==="client"&&!m.read_by_staff_at).length;
+  const link=on?PORTAL_URL+p.portal_token:"";
+  const pin=String(p.client_phone||"").replace(/\D/g,"").slice(-4);
+  host.innerHTML=`<div class="sec-label" style="border:none;padding:0">Client portal${unread?` <span style="background:#C0392B;color:#fff;border-radius:9px;padding:1px 7px;font-size:10.5px">${unread} new</span>`:""}</div>
+    <div style="margin-top:8px;font-size:12.5px">
+    ${!on?`<div style="color:var(--ink-soft);line-height:1.5">Give ${esc((p.client_name||"the client").split(" ")[0])} a private link to track progress, download invoices and message the team.</div>
+      ${w?`<button class="primary sm" id="ptEnable" style="margin-top:8px">Enable portal</button>`:""}`
+    :`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="ghost sm" id="ptCopy" title="${esc(link)}">🔗 Copy link</button>
+        ${p.client_phone?`<button class="ghost sm" id="ptWa">🟢 WhatsApp</button>`:""}
+        ${isAdminLevel()?`<button class="ghost sm" id="ptOff" title="Switches the client's link off">Off</button>`:""}
+      </div>
+      ${pin?`<div style="font-size:11px;color:var(--ink-soft);margin-bottom:8px">Client unlocks payments with PIN <b>${pin}</b> (last 4 of their mobile).</div>`:""}
+      <div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+        ${msgs.length?msgs.map(m=>`<div style="align-self:${m.sender==="client"?"flex-start":"flex-end"};max-width:88%;padding:6px 10px;border-radius:10px;font-size:12.5px;line-height:1.45;${m.sender==="client"?"background:#fff;border:1px solid var(--line-2)":"background:var(--navy);color:#fff"}">
+            ${m.sender==="client"?`<div style="font-size:10px;font-weight:700;color:var(--brass-deep)">${esc((p.client_name||"Client").split(" ")[0])}</div>`:""}
+            ${esc(m.body).replace(/\n/g,"<br>")}
+            <div style="font-size:9px;opacity:.55;text-align:right">${new Date(m.created_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}</div>
+          </div>`).join(""):`<div style="color:var(--ink-soft);font-size:12px;text-align:center;padding:8px">No client messages yet.</div>`}
+      </div>
+      ${w?`<div style="display:flex;gap:6px"><input id="ptReply" placeholder="Reply to the client…" style="flex:1;font-size:12.5px"><button class="primary sm" id="ptSend">Send</button></div>`:""}`}
+    </div>`;
+  if(!on && $("#ptEnable")) $("#ptEnable").onclick=async()=>{
+    const tok=p.portal_token||crypto.randomUUID();
+    const {error}=await sb.from("projects").update({portal_token:tok,portal_enabled_at:new Date().toISOString()}).eq("id",p.id);
+    if(error) return toast(error.message);
+    p.portal_token=tok; p.portal_enabled_at=new Date().toISOString();
+    toast("Portal enabled — share the link"); portalPanel(p,hostSel);
+  };
+  if($("#ptCopy")) $("#ptCopy").onclick=()=>{ navigator.clipboard.writeText(link).then(()=>toast("Portal link copied")); };
+  if($("#ptWa")) $("#ptWa").onclick=()=>{
+    const msg=`Hi ${(p.client_name||"").split(" ")[0]}! Track your Lintel home anytime here:\n${link}\n\nYou can see progress, download invoices and message us right on that page.${pin?` Use PIN ${pin} (last 4 digits of your mobile) to view payments.`:""}\n\n— Team Lintel`;
+    waOpen(p.client_phone,msg);
+  };
+  if($("#ptOff")) $("#ptOff").onclick=async()=>{
+    if(!confirm("Switch the client's portal link off? The page will stop opening until you enable it again.")) return;
+    await sb.from("projects").update({portal_enabled_at:null}).eq("id",p.id);
+    p.portal_enabled_at=null; toast("Portal switched off"); portalPanel(p,hostSel);
+  };
+  if($("#ptSend")) $("#ptSend").onclick=async()=>{
+    const body=$("#ptReply").value.trim(); if(!body) return;
+    const {error}=await sb.from("client_messages").insert({project_id:p.id,sender:"staff",staff_id:me.id,body});
+    if(error) return toast(error.message);
+    portalPanel(p,hostSel);
+  };
+  // opening the card marks client messages read
+  if(on && unread) sb.from("client_messages").update({read_by_staff_at:new Date().toISOString()}).eq("project_id",p.id).eq("sender","client").is("read_by_staff_at",null).then(()=>{},()=>{});
+}
+
 /* CSAT panel — 5-stage strip for a project (or lead). Renders into #pwCsat. */
 async function csatPanel(scope, hostSel){
   const host=$(hostSel); if(!host) return;
@@ -4632,6 +4689,7 @@ async function pwOverview(p,body){
       </div>
       <div class="ov-side">
         <div class="pw-card" id="pwCsat"><div class="sec-label" style="border:none;padding:0">Client feedback (CSAT)</div><div style="font-size:12px;color:var(--ink-soft);margin-top:8px">Loading…</div></div>
+        <div class="pw-card" id="pwPortal"><div class="sec-label" style="border:none;padding:0">Client portal</div><div style="font-size:12px;color:var(--ink-soft);margin-top:8px">Loading…</div></div>
         <div class="pw-card">
           <div class="sec-label" style="border:none;padding:0">Action items due</div>
           ${openActions.length?`<div class="mini-list">${openActions.slice(0,5).map(a=>{
@@ -4680,6 +4738,7 @@ async function pwOverview(p,body){
   if($("#ovTeam")) $("#ovTeam").onclick=()=>{ projectTab="team"; renderProjectWorkspace(p.id); };
   renderProjectActivity(p);
   csatPanel({project_id:p.id, lead_id:p.lead_id||null}, "#pwCsat");
+  portalPanel(p, "#pwPortal");
   if(!ro){
     body.querySelectorAll(".tl2-sel").forEach(sel=>sel.onchange=async()=>{
       const status=sel.value, id=sel.dataset.ms;

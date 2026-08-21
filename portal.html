@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your project · Lintel Space Atelier</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--navy:#0D0D27;--brass:#DFB05E;--brassd:#946F33;--ink:#23233F;--soft:#6B6560;--grey:#9A9490;--line:#E7E2D8;--paper:#FBFAF7;--green:#2E7D5B;--red:#A33C3C}
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{background:#F3F1EC;color:var(--ink);font-family:Inter,-apple-system,sans-serif;-webkit-text-size-adjust:100%}
+  .top{background:var(--navy);border-bottom:3px solid var(--brass);padding:16px 20px;color:#F7F2E9;position:sticky;top:0;z-index:5}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:15px;letter-spacing:2.5px;text-transform:uppercase;font-weight:500}
+  .brand small{display:block;font-size:8.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--brass);margin-top:2px;font-weight:400}
+  .wrap{max-width:620px;margin:16px auto 60px;padding:0 14px}
+  .card{background:#fff;border-radius:14px;box-shadow:0 14px 40px -22px rgba(13,13,39,.35);padding:20px 18px;margin-bottom:14px}
+  h1{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:21px;margin:0 0 4px;color:var(--navy)}
+  h2{font-size:11px;font-weight:700;letter-spacing:2px;color:var(--grey);text-transform:uppercase;margin:0 0 4px}
+  .rule{width:30px;height:2px;background:var(--brass);margin-bottom:14px}
+  .sub{font-size:13px;color:var(--soft);line-height:1.6}
+  .chip{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:#FFF6E2;color:var(--brassd);border:1px solid var(--brass)}
+  /* stage timeline */
+  .tl{margin-top:6px}
+  .tl-row{display:flex;gap:12px;align-items:flex-start;padding:7px 0}
+  .tl-dot{width:22px;height:22px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid var(--line);background:var(--paper);color:var(--grey)}
+  .tl-row.done .tl-dot{background:var(--green);border-color:var(--green);color:#fff}
+  .tl-row.now  .tl-dot{background:var(--brass);border-color:var(--brass);color:var(--navy)}
+  .tl-nm{font-size:13.5px;font-weight:600;padding-top:2px}
+  .tl-row.done .tl-nm{color:var(--green)} .tl-row.now .tl-nm{color:var(--brassd)}
+  .tl-dt{font-size:11px;color:var(--grey);padding-top:3px;margin-left:auto}
+  /* payments */
+  .bar{height:9px;border-radius:6px;background:#EFEAE0;overflow:hidden;margin:8px 0 4px}
+  .bar>div{height:100%;background:linear-gradient(90deg,var(--brass),#C89440);border-radius:6px}
+  .mrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+  .mrow:first-of-type{border-top:none}
+  .m-ic{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px}
+  .m-ic.paid{background:#EEF6EF;color:var(--green)} .m-ic.due{background:#FFF6E2;color:var(--brassd)} .m-ic.later{background:#F1EFEA;color:var(--grey)}
+  .m-nm{flex:1;min-width:0}.m-nm b{font-size:13.5px;display:block}.m-nm span{font-size:11px;color:var(--grey)}
+  .m-amt{font-size:13.5px;font-weight:700;white-space:nowrap}
+  .m-act{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
+  .lbtn{display:inline-block;font-size:11.5px;font-weight:600;color:var(--brassd);border:1px solid var(--brass);border-radius:7px;padding:4px 10px;text-decoration:none;cursor:pointer;background:#fff}
+  .lbtn.pay{background:var(--navy);color:var(--brass);border-color:var(--navy)}
+  /* messages */
+  .msgs{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:4px 0 10px}
+  .msg{max-width:85%;padding:8px 12px;border-radius:12px;font-size:13.5px;line-height:1.5;word-break:break-word}
+  .msg.client{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:4px}
+  .msg.staff{align-self:flex-start;background:var(--paper);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg .ts{display:block;font-size:9.5px;opacity:.55;margin-top:3px;text-align:right}
+  .composer{display:flex;gap:8px;align-items:flex-end}
+  .composer textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:13.5px;min-height:42px;max-height:110px;outline:none;background:var(--paper)}
+  .composer textarea:focus{border-color:var(--brass);background:#fff}
+  .composer button{border:none;border-radius:10px;background:var(--navy);color:var(--brass);width:44px;height:42px;font-size:16px;cursor:pointer}
+  .btn{width:100%;border:none;border-radius:11px;padding:14px;font:600 15px Inter;background:var(--navy);color:#fff;cursor:pointer}
+  .pin{display:flex;gap:8px;justify-content:center;margin:14px 0}
+  .pin input{width:52px;height:56px;text-align:center;font:700 22px Inter;border:1.5px solid var(--line);border-radius:10px;outline:none;background:var(--paper)}
+  .pin input:focus{border-color:var(--brass);background:#fff}
+  .err{color:var(--red);font-size:12.5px;text-align:center;min-height:16px;margin-top:6px}
+  .state{padding:46px 18px;text-align:center;color:var(--soft)}
+  .state h1{margin-bottom:8px}
+  .spin{width:26px;height:26px;border:2px solid var(--line);border-top-color:var(--brass);border-radius:50%;margin:0 auto 14px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:8px 14px 26px;line-height:1.7}
+  .foot a{color:var(--brassd);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="top"><div class="brand">Lintel Space Atelier<small>Where luxury meets functionality</small></div></div>
+<div class="wrap" id="wrap"><div class="card"><div class="state"><div class="spin"></div>Loading your project…</div></div></div>
+<div class="foot">Questions? Your Lintel team is one message away · <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a> · +91 99165 58777<br>© Lintel Space Atelier · lintelspace.com</div>
+<script>
+(function(){
+  var FN="https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/portal";
+  var token=new URLSearchParams(location.search).get("t")||"";
+  var wrap=document.getElementById("wrap");
+  var PIN=sessionStorage.getItem("lsa_pin_"+token)||"";
+  var esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");};
+  var inr=function(n){n=Math.round(Number(n)||0);return "₹"+n.toLocaleString("en-IN");};
+  var dS=function(d){if(!d)return "";var x=new Date(String(d).length<=10?d+"T00:00:00":d);return isNaN(+x)?"":x.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});};
+  var tS=function(d){var x=new Date(d);var today=new Date().toDateString()===x.toDateString();return (today?"":x.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+" ")+x.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"});};
+  function fail(t,m){wrap.innerHTML='<div class="card"><div class="state"><h1>'+esc(t)+'</h1><div class="sub">'+esc(m)+'</div></div></div>';}
+  if(!token) return fail("Link incomplete","Please open the link exactly as shared by your Lintel team.");
+
+  var D=null;
+  function load(){
+    return fetch(FN+"?t="+encodeURIComponent(token)+(PIN?"&pin="+encodeURIComponent(PIN):""))
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){ if(!res.ok||res.j.error) throw new Error(res.j.error||"Could not load"); D=res.j; render(); })
+      .catch(function(e){ fail("We couldn't open your project", e.message||"Please check your connection and try again."); });
+  }
+
+  function stageRow(s,i,curIdx){
+    var cls=s.status==="done"?"done":(i===curIdx?"now":"");
+    var ic=s.status==="done"?"✓":(i===curIdx?"●":(i+1));
+    var dt=s.done_date?("Completed "+dS(s.done_date)):(s.target_date?("Target "+dS(s.target_date)):"");
+    return '<div class="tl-row '+cls+'"><div class="tl-dot">'+ic+'</div><div class="tl-nm">'+esc(s.stage)+'</div><div class="tl-dt">'+esc(dt)+'</div></div>';
+  }
+
+  function invoiceHtml(pi){
+    var today=dS(pi.created_at)||dS(new Date().toISOString());
+    return '<div style="font-family:Georgia,serif;max-width:720px;margin:0 auto;color:#1a1a1a">'
+      +'<div style="background:#0D0D27;color:#fff;padding:22px 30px;display:flex;justify-content:space-between">'
+      +'<div><div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>'
+      +'<div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">Survey No.36/4, site no.25 to 30, Ground Floor,<br>Ramky House, Kalyan Nagar, Bengaluru 560043<br>+91 9916558777 · contact@lintelspace.com</div></div>'
+      +'<div style="text-align:right"><div style="font-size:19px;letter-spacing:1px">PROFORMA INVOICE</div>'
+      +'<div style="font-size:13px;color:#DFB05E;margin-top:6px">'+esc(pi.pi_number)+'</div>'
+      +'<div style="font-size:12px;color:#9CA0B0;margin-top:4px">'+esc(today)+'</div></div></div>'
+      +'<div style="padding:24px 30px">'
+      +'<div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Bill To</div>'
+      +'<div style="font-size:15px;font-weight:600">'+esc(pi.client_name||"")+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0">'
+      +'<thead><tr style="background:#F6F4EF;text-align:left"><th style="padding:11px 12px;font-size:12px;color:#8A8FA3">DESCRIPTION</th><th style="padding:11px 12px;font-size:12px;color:#8A8FA3;text-align:right">AMOUNT</th></tr></thead>'
+      +'<tbody><tr style="border-bottom:1px solid #ECECEC"><td style="padding:14px 12px">'+esc(pi.milestone_label||pi.remark||"Milestone payment")+'</td>'
+      +'<td style="padding:14px 12px;text-align:right;font-weight:600">'+inr(pi.amount)+'</td></tr></tbody></table>'
+      +'<div style="display:flex;justify-content:flex-end"><div style="width:260px;display:flex;justify-content:space-between;padding:12px;background:#0D0D27;color:#fff;border-radius:6px"><span style="font-weight:600">Amount Payable</span><span style="font-weight:700;color:#DFB05E">'+inr(pi.amount)+'</span></div></div>'
+      +'<div style="margin-top:22px;display:flex;gap:24px;flex-wrap:wrap">'
+      +'<div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Pay via UPI</div><div style="font-size:14px;font-weight:600">Lintels234@idfcbank</div></div>'
+      +'<div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Bank Details</div><div style="font-size:13px;line-height:1.6">IDFC FIRST Bank · Jayanagar Branch<br>A/c: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED<br>A/c No: 10218270193 · IFSC: IDFB0080156</div></div></div>'
+      +'<div style="margin-top:22px;padding-top:14px;border-top:1px solid #ECECEC;font-size:11px;color:#999">This is a proforma invoice for advance/milestone payment and is not a tax invoice.<br>Lintel Space Atelier · Where luxury meets functionality</div>'
+      +'</div></div>';
+  }
+  function openInvoice(pi){
+    var w=window.open("","_blank");
+    if(!w) return alert("Please allow popups to view the invoice");
+    w.document.write('<html><head><title>'+esc(pi.pi_number)+'</title></head><body style="margin:0">'+invoiceHtml(pi)+'<div style="text-align:center;padding:16px"><button onclick="window.print()" style="padding:10px 26px;font-size:14px;background:#0D0D27;color:#DFB05E;border:none;border-radius:8px;cursor:pointer">Print / Save as PDF</button></div></body></html>');
+    w.document.close();
+  }
+
+  function render(){
+    var stages=D.stages||[];
+    var curIdx=stages.findIndex(function(s){return s.status!=="done";}); if(curIdx<0) curIdx=stages.length-1;
+    var doneN=stages.filter(function(s){return s.status==="done";}).length;
+    var html='';
+    // ---- hero ----
+    html+='<div class="card"><h1>Hello '+esc(D.client_first||"there")+' 👋</h1>'
+      +'<div class="sub">Here\'s the live status of your home — <b>'+esc(D.code||"")+'</b>'+(D.consultant?' · your consultant is <b>'+esc(D.consultant.name)+'</b>':'')+'</div>'
+      +'<div style="margin-top:10px"><span class="chip">'+esc(D.current_stage||"In progress")+'</span> <span class="sub" style="font-size:12px">'+doneN+' of '+stages.length+' stages complete</span></div></div>';
+    // ---- timeline ----
+    html+='<div class="card"><h2>Project journey</h2><div class="rule"></div><div class="tl">'
+      +stages.map(function(s,i){return stageRow(s,i,curIdx);}).join("")+'</div></div>';
+    // ---- payments ----
+    if(D.unlocked){
+      var pct=D.value_total?Math.min(100,Math.round(D.paid_total/D.value_total*100)):0;
+      html+='<div class="card"><h2>Payments</h2><div class="rule"></div>'
+        +'<div class="sub"><b style="color:var(--ink)">'+inr(D.paid_total)+'</b> received of <b style="color:var(--ink)">'+inr(D.value_total)+'</b> · '+pct+'%</div>'
+        +'<div class="bar"><div style="width:'+pct+'%"></div></div>'
+        +(D.milestones||[]).map(function(m){
+          var paid=m.status==="paid", part=m.status==="part_paid";
+          var due=!paid&&!part&&(m.status==="link_sent"||m.pi_number);
+          var ic=paid?'<div class="m-ic paid">✓</div>':(due||part)?'<div class="m-ic due">●</div>':'<div class="m-ic later">○</div>';
+          var pi=(D.invoices||[]).filter(function(v){return v.milestone_id===m.id;}).pop();
+          if(pi) pi.milestone_label=m.label;
+          var acts='';
+          if(pi) acts+='<span class="lbtn" data-pi="'+esc(pi.pi_number)+'">📄 Invoice</span>';
+          if(!paid&&m.razorpay_link) acts+='<a class="lbtn pay" href="'+esc(m.razorpay_link)+'" target="_blank" rel="noopener">Pay now →</a>';
+          return '<div class="mrow">'+ic+'<div class="m-nm"><b>'+esc(m.label)+'</b>'
+            +'<span>'+(paid?("Paid"+(m.paid_at?" · "+dS(m.paid_at):"")):part?"Partly paid":due?"Due now":"Upcoming")+(m.percent?" · "+m.percent+"%":"")+'</span>'
+            +(acts?'<div class="m-act">'+acts+'</div>':'')+'</div>'
+            +'<div class="m-amt">'+inr(m.amount)+'</div></div>';
+        }).join("")+'</div>';
+      // ---- messages ----
+      html+='<div class="card"><h2>Messages with your team</h2><div class="rule"></div>'
+        +'<div class="msgs" id="pMsgs">'+((D.messages||[]).length?(D.messages||[]).map(function(m){
+            return '<div class="msg '+(m.sender==="client"?"client":"staff")+'">'+esc(m.body).replace(/\n/g,"<br>")+'<span class="ts">'+tS(m.created_at)+'</span></div>';
+          }).join(""):'<div class="sub" style="text-align:center;padding:14px">Questions about your project? Write to us here — the team replies right on this page.</div>')+'</div>'
+        +'<div class="composer"><textarea id="pText" rows="1" placeholder="Write to your Lintel team…"></textarea><button id="pSend">➤</button></div>'
+        +'<div class="err" id="pErr"></div></div>';
+    } else {
+      html+='<div class="card"><h2>Payments &amp; messages</h2><div class="rule"></div>'
+        +'<div class="sub" style="text-align:center">To protect your details, enter the <b>last 4 digits of your registered mobile number</b>.</div>'
+        +'<div class="pin">'+[0,1,2,3].map(function(i){return '<input inputmode="numeric" maxlength="1" id="pin'+i+'">';}).join("")+'</div>'
+        +'<button class="btn" id="pinGo">Unlock</button><div class="err" id="pinErr"></div></div>';
+    }
+    wrap.innerHTML=html;
+
+    wrap.querySelectorAll("[data-pi]").forEach(function(el){
+      el.onclick=function(){ var pi=(D.invoices||[]).find(function(v){return v.pi_number===el.dataset.pi;}); if(pi) openInvoice(pi); };
+    });
+    if(D.unlocked){
+      var box=document.getElementById("pMsgs"); if(box) box.scrollTop=box.scrollHeight;
+      var send=document.getElementById("pSend"), txt=document.getElementById("pText"), err=document.getElementById("pErr");
+      if(send) send.onclick=function(){
+        var body=txt.value.trim(); if(!body) return;
+        send.disabled=true;
+        fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:token,pin:PIN,action:"message",body:body})})
+        .then(function(r){return r.json();}).then(function(j){
+          send.disabled=false;
+          if(j.error){err.textContent=j.error;return;}
+          txt.value=""; err.textContent=""; load();
+        }).catch(function(){send.disabled=false;err.textContent="Network error — try again";});
+      };
+      if(txt) txt.onkeydown=function(e){ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send.onclick();} };
+    } else {
+      var ins=[0,1,2,3].map(function(i){return document.getElementById("pin"+i);});
+      ins.forEach(function(el,i){ el.oninput=function(){ el.value=el.value.replace(/\D/g,""); if(el.value&&i<3) ins[i+1].focus(); };
+        el.onkeydown=function(e){ if(e.key==="Backspace"&&!el.value&&i>0) ins[i-1].focus(); }; });
+      if(ins[0]) ins[0].focus();
+      document.getElementById("pinGo").onclick=function(){
+        var pin=ins.map(function(el){return el.value;}).join("");
+        if(pin.length<4){document.getElementById("pinErr").textContent="Enter all 4 digits";return;}
+        PIN=pin; sessionStorage.setItem("lsa_pin_"+token,pin);
+        load().then(function(){ if(D&&!D.unlocked){ PIN=""; sessionStorage.removeItem("lsa_pin_"+token); document.getElementById("pinErr").textContent="That didn't match — use the last 4 digits of the mobile number we have on file."; } });
+      };
+    }
+  }
+  load();
+  setInterval(function(){ if(D&&D.unlocked) load(); }, 45000);   // keep messages fresh
+})();
+</script>
+</body>
+</html>
