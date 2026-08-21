@@ -4968,6 +4968,56 @@ async function generateProforma(p, milestone){
   }finally{ generateProforma._busy=false; }
 }
 
+/* Share a proforma invoice PDF into the team chat (Team channel or a DM).
+   Renders the same #pidoc sheet to PDF via html2pdf (loaded on demand),
+   uploads it to the private chat-files bucket and posts the message. */
+async function piSendToChat(p, milestone, piNumber, docHtml){
+  if(!CHAT.people.length){ try{ await chatLoadPeople(); }catch(e){} }
+  const amt=Number(milestone.amount)||0;
+  const label=piNumber+" · "+(p.code||p.name||"")+" · "+fmt(amt);
+  openModal(`<div class="modal-h">Send proforma invoice to chat</div>
+    <div class="modal-b">
+      <div class="banner">Shares the PDF of <b>${esc(label)}</b> in chat. Recipients can download it from the conversation.</div>
+      <div class="field"><label>Send to</label>
+        <select id="pic_dest"><option value="team"># Lintel Team (everyone)</option>
+          ${CHAT.people.map(pe=>`<option value="${pe.id}">${esc(chatName(pe))}</option>`).join("")}</select></div>
+      <div class="field"><label>Note (optional)</label><input id="pic_note" placeholder="e.g. PI raised for the design sign-off milestone"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="pic_go">Send →</button></div>`);
+  $("#pic_go").onclick=async()=>{
+    const dest=$("#pic_dest").value, note=$("#pic_note").value.trim();
+    const btn=$("#pic_go"); btn.disabled=true; btn.textContent="Building PDF…";
+    try{
+      await gLoadLib(GPDF_LIB);
+      // render the sheet off-screen at its print width so the capture is clean
+      const host=document.createElement("div");
+      host.style.cssText="position:fixed;left:-2000px;top:0;width:760px;background:#fff;z-index:-1";
+      host.innerHTML=docHtml; document.body.appendChild(host);
+      let blob;
+      try{
+        blob=await html2pdf().from(host.firstElementChild||host)
+          .set({margin:[8,8,10,8], jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+                html2canvas:{scale:2,useCORS:true,windowWidth:Math.max(window.innerWidth,900)}})
+          .outputPdf("blob");
+      } finally { host.remove(); }
+      btn.textContent="Uploading…";
+      const fname=("Lintel_"+piNumber).replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf";
+      const convKey=dest==="team"?"team":chatDmKey(me.id,dest);
+      const path=(dest==="team"?"team":convKey.replace(/[^A-Za-z0-9-]+/g,"_"))+"/"+Date.now()+"_"+fname;
+      const {error:upErr}=await sb.storage.from("chat-files").upload(path, blob, {contentType:"application/pdf"});
+      if(upErr) throw new Error("Upload failed: "+upErr.message);
+      const {error}=await sb.from("chat_messages").insert({
+        conv_key:convKey, sender:me.id, recipient:dest==="team"?null:dest,
+        body:note||("Proforma invoice · "+label), file_path:path, file_name:fname, file_size:blob.size
+      });
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast("Invoice sent to "+(dest==="team"?"# Lintel Team":chatName(CHAT.people.find(x=>x.id===dest)||{})));
+      if(p.lead_id) sb.from("lead_activities").insert({lead_id:p.lead_id,type:"Note",text:"Proforma invoice shared to chat · "+label,by_user:me.id}).then(()=>{},()=>{});
+    }catch(e){ toast(String(e.message||e)); btn.disabled=false; btn.textContent="Send →"; }
+  };
+}
+
 function showProformaDoc(p, milestone, piNumber, boqRef){
   const amt=Number(milestone.amount)||0;
   const today=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
@@ -5049,6 +5099,7 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
     <div class="modal-f">
       <button class="ghost" onclick="closeModal()">Close</button>
       ${p.client_phone?`<button class="wa-btn" id="pi-wa">Send on WhatsApp</button>`:''}
+      <button class="ghost" id="pi-chat" title="Share this proforma invoice PDF with the team chat">💬 Send to chat</button>
       <button class="ghost" id="pi-print">Print / PDF</button>
       <button class="primary" id="pi-mail">✉ Email to client</button>
     </div>`);
@@ -5068,6 +5119,7 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
     w.document.write(`<html><head><title>${esc(piNumber)}</title></head><body style="margin:0">${doc}</body></html>`);
     w.document.close(); setTimeout(()=>w.print(),300);
   };
+  $("#pi-chat").onclick=()=>piSendToChat(p, milestone, piNumber, doc);
   if($("#pi-wa")) $("#pi-wa").onclick=()=>{
     const msg=`Dear ${p.client_name||'Client'},\n\nPlease find your proforma invoice ${piNumber} for ${milestone.label}.\n\nAmount payable: ₹${amt.toLocaleString('en-IN')}\n\nRefer to ${boqRef} shared earlier for the detailed scope.\n\nPay via UPI: Lintels234@idfcbank\nBank: IDFC FIRST · A/c 10218270193 · IFSC IDFB0080156\n\nKindly share the reference once paid. Thank you!\n\n— Team Lintel`;
     waOpen(p.client_phone,msg);
