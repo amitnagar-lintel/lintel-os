@@ -9230,6 +9230,12 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b33",date:"21 Aug 2026",title:"Team chat, client portal & sales dashboard",points:[
+    "<b>Team chat</b>: press the new <b>💬</b> at the bottom-right — message the whole team in <b># Lintel Team</b> or any teammate 1-to-1, and attach files up to 25 MB with the 📎 (BOQs, drawings, docs). A red badge shows unread messages.",
+    "<b>Send to chat</b>: every BOQ and proforma invoice now has a <b>💬 Send to chat</b> button — it shares the PDF straight into a chat conversation.",
+    "<b>Client portal</b>: open a project → Overview → <b>Client portal</b> card → Enable, then Copy link or WhatsApp it. The client sees their stage journey, payments (with invoice download & Pay-now), and can message the team — payments unlock with the last 4 digits of their mobile. Their messages appear in the same card with a reply box.",
+    "<b>Monthly sales graph</b> on the dashboard (from April, ex-GST) and CSAT feedback surveys now go out automatically at five project stages.",
+    "Leads: structured <b>site address</b> (society, door no, area, pincode + Google-Maps pin) and conversion now requires phone, email, address & PAN. PAN shows masked except to admins."]},
   {build:"b25",date:"31 Jul 2026",title:"A calmer, cleaner Lintel OS",points:[
     "Project workspaces are now <b>6 tabs</b>: Payments, Work Orders & Procurement live under <b>Finance</b>; Design, Moodboard, Canvas & Vastu under <b>Studio</b>; Execution, Documents & Team under <b>Site</b>. Every old link still lands in the right place.",
     "Lead workspaces: Moodboard & Vastu are grouped under <b>Studio</b>, and Activity & Notes are one tab.",
@@ -10661,7 +10667,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b29 · 08 Aug 2026";
+const APP_BUILD = "b33 · 21 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
