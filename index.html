@@ -8307,6 +8307,7 @@ function gRender(p, body){
       ${canWrite()&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
       <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
+      <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
       <button class="primary" id="gPrint">Print / PDF</button>
     </div>
   </div>
@@ -8320,6 +8321,7 @@ function gRender(p, body){
   if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); G.projectId?pwBoq(p,body):leadBoqGenerator(p,body); };
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
   if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
+  if($("#gChat")) $("#gChat").onclick=()=>gSendToChat(p);
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
   if(!ro) gStartAutosave(p); // autosave every 5s while editing this BOQ
   else gStopAutosave();      // locked (or read-only): never autosave
@@ -8965,6 +8967,45 @@ async function gDownloadPdf(p){
     setTimeout(()=>URL.revokeObjectURL(a.href),3000);
     toast("PDF downloaded");
   }catch(e){ toast("Could not build the PDF: "+(e.message||e)); }
+}
+
+/* Share the client quotation PDF into the team chat (Team channel or a DM).
+   Builds the same PDF as Download, uploads it to the private chat-files bucket,
+   and posts a chat message — recipients get it live with a download chip. */
+async function gSendToChat(p){
+  if(!CHAT.people.length){ try{ await chatLoadPeople(); }catch(e){} }
+  const v=G.ver||{};
+  const label=(v.version_label||("v"+(v.version||1)))+(G.projectId?" · "+(p.code||p.name||""):" · "+(p.name||""));
+  openModal(`<div class="modal-h">Send BOQ to chat</div>
+    <div class="modal-b">
+      <div class="banner">Shares the client quotation PDF of <b>${esc(label)}</b> in chat. Recipients can download it from the conversation.</div>
+      <div class="field"><label>Send to</label>
+        <select id="gc_dest"><option value="team"># Lintel Team (everyone)</option>
+          ${CHAT.people.map(pe=>`<option value="${pe.id}">${esc(chatName(pe))}</option>`).join("")}</select></div>
+      <div class="field"><label>Note (optional)</label><input id="gc_note" placeholder="e.g. Final option B for the Sharma site — please review"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="gc_go">Send →</button></div>`);
+  $("#gc_go").onclick=async()=>{
+    const dest=$("#gc_dest").value, note=$("#gc_note").value.trim();
+    const btn=$("#gc_go"); btn.disabled=true; btn.textContent="Building PDF…";
+    try{
+      const blob=await gPdfBlob(p);
+      btn.textContent="Uploading…";
+      const fname=gPdfName();
+      const convKey=dest==="team"?"team":chatDmKey(me.id,dest);
+      const path=(dest==="team"?"team":convKey.replace(/[^A-Za-z0-9-]+/g,"_"))+"/"+Date.now()+"_"+fname.replace(/[^A-Za-z0-9._-]+/g,"_");
+      const {error:upErr}=await sb.storage.from("chat-files").upload(path, blob, {contentType:"application/pdf"});
+      if(upErr) throw new Error("Upload failed: "+upErr.message);
+      const {error}=await sb.from("chat_messages").insert({
+        conv_key:convKey, sender:me.id, recipient:dest==="team"?null:dest,
+        body:note||("BOQ · "+label), file_path:path, file_name:fname, file_size:blob.size
+      });
+      if(error) throw new Error(error.message);
+      closeModal();
+      toast("BOQ sent to "+(dest==="team"?"# Lintel Team":chatName(CHAT.people.find(x=>x.id===dest)||{})));
+      gLogActivity(p,"BOQ shared to chat · "+label);
+    }catch(e){ toast(String(e.message||e)); btn.disabled=false; btn.textContent="Send →"; }
+  };
 }
 
 /* Email the proposal to the client from contact@lintelspace.com, BCC the team.
