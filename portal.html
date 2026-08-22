@@ -209,15 +209,22 @@
     if(D.unlocked){
       var box=document.getElementById("pMsgs"); if(box) box.scrollTop=box.scrollHeight;
       var send=document.getElementById("pSend"), txt=document.getElementById("pText"), err=document.getElementById("pErr");
+      var sending=false;
       if(send) send.onclick=function(){
-        var body=txt.value.trim(); if(!body) return;
-        send.disabled=true;
-        fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:token,pin:PIN,action:"message",body:body,to_member_id:(document.getElementById("pTo")||{}).value||null})})
+        var body=txt.value.trim(); if(!body||sending) return;
+        sending=true; send.disabled=true; txt.disabled=true;
+        var toSel=document.getElementById("pTo"), toId=toSel?toSel.value:"", toName=toSel&&toSel.value?toSel.options[toSel.selectedIndex].textContent.split(" · ")[0]:"";
+        // show it instantly — the server confirms in the background
+        var m=document.createElement("div"); m.className="msg client";
+        m.innerHTML='<div class="who">You'+(toName?" → "+esc(toName):"")+'</div>'+esc(body).replace(/\n/g,"<br>")+'<span class="ts">sending…</span>';
+        var box=document.getElementById("pMsgs"); var empty=box.querySelector(".sub"); if(empty) empty.remove(); box.appendChild(m); box.scrollTop=box.scrollHeight;
+        txt.value="";
+        fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:token,pin:PIN,action:"message",body:body,to_member_id:toId||null})})
         .then(function(r){return r.json();}).then(function(j){
-          send.disabled=false;
-          if(j.error){err.textContent=j.error;return;}
-          txt.value=""; err.textContent=""; load();
-        }).catch(function(){send.disabled=false;err.textContent="Network error — try again";});
+          sending=false; send.disabled=false; txt.disabled=false; txt.focus();
+          if(j.error){ err.textContent=j.error; m.remove(); txt.value=body; return; }
+          err.textContent=""; m.querySelector(".ts").textContent=tS(new Date().toISOString());
+        }).catch(function(){ sending=false; send.disabled=false; txt.disabled=false; err.textContent="Network error — try again"; m.remove(); txt.value=body; });
       };
       if(txt) txt.onkeydown=function(e){ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send.onclick();} };
     } else {

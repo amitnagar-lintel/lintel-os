@@ -3193,29 +3193,34 @@ async function portalPanel(p, hostSel){
       </div>
       ${w?`<div style="display:flex;gap:6px"><input id="ptReply" placeholder="Reply to the client…" style="flex:1;font-size:12.5px"><button class="primary sm" id="ptSend">Send</button></div>`:""}`}
     </div>`;
-  if(!on && $("#ptEnable")) $("#ptEnable").onclick=async()=>{
+  const q=sel=>host.querySelector(sel);
+  if(!on && q("#ptEnable")) q("#ptEnable").onclick=async()=>{
     const tok=p.portal_token||crypto.randomUUID();
     const {error}=await sb.from("projects").update({portal_token:tok,portal_enabled_at:new Date().toISOString()}).eq("id",p.id);
     if(error) return toast(error.message);
     p.portal_token=tok; p.portal_enabled_at=new Date().toISOString();
     toast("Portal enabled — share the link"); portalPanel(p,hostSel);
   };
-  if($("#ptCopy")) $("#ptCopy").onclick=()=>{ navigator.clipboard.writeText(link).then(()=>toast("Portal link copied")); };
-  if($("#ptWa")) $("#ptWa").onclick=()=>{
+  if(q("#ptCopy")) q("#ptCopy").onclick=()=>{ navigator.clipboard.writeText(link).then(()=>toast("Portal link copied")); };
+  if(q("#ptWa")) q("#ptWa").onclick=()=>{
     const msg=`Hi ${(p.client_name||"").split(" ")[0]}! Track your Lintel home anytime here:\n${link}\n\nYou can see progress, download invoices and message us right on that page.${pin?` Use PIN ${pin} (last 4 digits of your mobile) to view payments.`:""}\n\n— Team Lintel`;
     waOpen(p.client_phone,msg);
   };
-  if($("#ptOff")) $("#ptOff").onclick=async()=>{
+  if(q("#ptOff")) q("#ptOff").onclick=async()=>{
     if(!confirm("Switch the client's portal link off? The page will stop opening until you enable it again.")) return;
     await sb.from("projects").update({portal_enabled_at:null}).eq("id",p.id);
     p.portal_enabled_at=null; toast("Portal switched off"); portalPanel(p,hostSel);
   };
-  if($("#ptSend")) $("#ptSend").onclick=async()=>{
-    const body=$("#ptReply").value.trim(); if(!body) return;
+  if(q("#ptSend")) q("#ptSend").onclick=async()=>{
+    const inp=q("#ptReply"), btn=q("#ptSend");
+    const body=(inp.value||"").trim(); if(!body) return;
+    btn.disabled=true; btn.textContent="…";
     const {error}=await sb.from("client_messages").insert({project_id:p.id,sender:"staff",staff_id:me.id,body});
-    if(error) return toast(error.message);
+    if(error){ btn.disabled=false; btn.textContent="Send"; return toast("Could not send: "+error.message); }
+    toast("Reply sent to the client");
     portalPanel(p,hostSel);
   };
+  if(q("#ptReply")) q("#ptReply").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); q("#ptSend").click(); } };
   // opening the card marks client messages read
   if(on && unread) sb.from("client_messages").update({read_by_staff_at:new Date().toISOString()}).eq("project_id",p.id).eq("sender","client").is("read_by_staff_at",null).then(()=>{},()=>{});
 }
@@ -10720,7 +10725,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b34 · 21 Aug 2026";
+const APP_BUILD = "b35 · 22 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
