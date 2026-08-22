@@ -110,6 +110,21 @@
   .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:8px 14px 20px;line-height:1.7} .foot a{color:var(--brassd);text-decoration:none}
   .jframe{width:100%;height:78vh;border:1px solid var(--line);border-radius:12px;background:#fff}
   .empty{text-align:center;padding:26px 12px;color:var(--soft);font-size:13px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+  .ph{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#EFEAE0;cursor:pointer}
+  .ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .ph span{position:absolute;left:0;right:0;bottom:0;padding:14px 8px 6px;font-size:10.5px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.65))}
+  .doc{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line);text-decoration:none;color:var(--ink)} .doc:first-of-type{border-top:none}
+  .doc .ic{width:36px;height:36px;border-radius:9px;background:var(--paper);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+  .doc b{display:block;font-size:13px} .doc span{font-size:11px;color:var(--grey)}
+  .ap{border:1px solid var(--brass);background:#FFF9EA;border-radius:12px;padding:14px;margin-bottom:10px}
+  .ap.done{border-color:var(--line);background:#fff}
+  .ap b{display:block;font-size:14px;color:var(--navy)} .ap .sub{margin:4px 0 8px}
+  .ap img{width:100%;max-height:260px;object-fit:contain;border-radius:8px;background:#F3F1EC;margin-bottom:8px}
+  .ap .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .ap .row button{flex:1;border-radius:9px;padding:11px;font:600 13px Inter;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink)}
+  .ap .row button.yes{background:var(--green);color:#fff;border-color:var(--green)}
+  .sign{border:1px solid var(--brass);background:#FFF9EA;border-radius:12px;padding:14px}
   .empty .big{font-size:34px;margin-bottom:6px}
 </style>
 </head>
@@ -120,6 +135,7 @@
 <nav class="tabs" id="tabs" style="display:none">
   <button class="tab on" data-tab="home"><span class="ic">🏠</span>Home<i class="dot"></i></button>
   <button class="tab" data-tab="journey"><span class="ic">🗺️</span>Journey<i class="dot"></i></button>
+  <button class="tab" data-tab="gallery"><span class="ic">🖼️</span>Gallery<i class="dot"></i></button>
   <button class="tab" data-tab="payments"><span class="ic">💳</span>Payments<i class="dot"></i></button>
   <button class="tab" data-tab="team"><span class="ic">💬</span>Team<i class="dot"></i></button>
   <button class="tab" data-tab="support"><span class="ic">🛡️</span>Support<i class="dot"></i></button>
@@ -196,16 +212,40 @@
       +'<button class="qbtn" data-go="team">💬 Message team</button>'
       +'<button class="qbtn" data-go="journey">🗺️ Journey plan</button>'
       +'<button class="qbtn" data-go="support">🛡️ '+(D.handed_over?"Support":"Warranty")+'</button></div></div>';
+    var pend=(D.approvals||[]).filter(function(a){return a.status==="pending";});
+    if(pend.length) h+='<div class="card" style="border:1px solid var(--brass)"><h2>Needs your approval</h2><div class="rule"></div><div class="sub">'+pend.length+' design'+(pend.length>1?'s are':' is')+' waiting for your go-ahead — '+pend.map(function(a){return '<b>'+esc(a.title)+'</b>';}).join(", ")+'.</div><div class="acts"><button class="lbtn dark" data-go="gallery">Review &amp; approve →</button></div></div>';
+    if(D.handover&&D.handover.can_sign) h+='<div class="card" style="border:1px solid var(--brass)"><h2>Handover sign-off</h2><div class="rule"></div><div class="sub">All snags are cleared. Please accept your handover to activate the warranty period.</div><div class="acts"><button class="lbtn dark" data-go="support">Accept handover →</button></div></div>';
     if(c) h+='<div class="card"><h2>Your design consultant</h2><div class="rule"></div><div class="person"><div class="av">'+esc(ini(c.name))+'</div><div><b>'+esc(c.name)+'</b><span>Your single point of contact at Lintel</span></div></div>'
       +'<div class="acts"><button class="lbtn dark" data-msg="'+c.id+'">💬 Message '+esc(c.name.split(" ")[0])+'</button>'+(c.phone?'<a class="lbtn" href="tel:'+esc(String(c.phone).replace(/\s+/g,""))+'">📞 Call</a>':'')+'</div></div>';
     h+='<div class="card"><h2>Project journey</h2><div class="rule"></div>'+st.map(function(s,i){var cls=s.status==="done"?"done":(i===cur?"now":"");var ic=s.status==="done"?"✓":(i===cur?"●":(i+1));var dt=s.done_date?("Completed "+dS(s.done_date)):(s.target_date?("Target "+dS(s.target_date)):"");
       return '<div class="tl-row '+cls+'"><div class="tl-dot">'+ic+'</div><div class="tl-nm">'+esc(s.stage)+'</div><div class="tl-dt">'+esc(dt)+'</div></div>';}).join("")+'</div>';
+    if(D.tracker_url) h+='<div class="card"><h2>Live site tracker</h2><div class="rule"></div><div class="sub">Room-by-room progress, site photos and anything we need from you — updated by your project team.</div><div class="acts"><a class="lbtn dark" href="'+esc(D.tracker_url)+'" target="_blank" rel="noopener">Open live tracker ↗</a></div></div>';
     if(D.site_address) h+='<div class="card"><h2>Site</h2><div class="rule"></div><div class="sub">📍 '+esc(D.site_address)+'</div></div>';
     return h;
   }
   function tabJourney(){
     if(D.journey_url) return '<div class="card" style="padding:12px"><h2>Your journey plan</h2><div class="rule"></div><div class="sub" style="margin-bottom:10px">Everything about how your home comes together — stages, timelines, what we need from you and when. Published '+esc(dS(D.journey_published_at))+'. <a href="'+esc(D.journey_url)+'" target="_blank" rel="noopener" style="color:var(--brassd)">Open full screen ↗</a></div><iframe class="jframe" src="'+esc(D.journey_url)+'" title="Journey plan"></iframe></div>';
     return '<div class="card"><h2>Your journey plan</h2><div class="rule"></div><div class="empty"><div class="big">🗺️</div>Your personalised journey plan — stages, timelines and what happens when — is being prepared by '+esc(D.consultant?D.consultant.name:"your consultant")+'. It will appear here the moment it\'s published.<br><br><button class="lbtn dark" data-go="team">Ask your team about it</button></div></div>';
+  }
+  function tabGallery(){
+    var aps=D.approvals||[], pend=aps.filter(function(a){return a.status==="pending";}), past=aps.filter(function(a){return a.status!=="pending";});
+    var h='';
+    if(!D.unlocked&&(aps.length)) h+=pinCard("Design approvals");
+    if(D.unlocked&&aps.length){
+      h+='<div class="card"><h2>Design approvals</h2><div class="rule"></div>'
+        +(pend.length?pend.map(function(a){ var f=a.file||{};
+          return '<div class="ap"><b>'+esc(a.title)+'</b><div class="sub">'+(a.note?esc(a.note):'Please review and approve, or tell us what to change.')+'</div>'
+            +(f.url?(f.is_image?'<img src="'+esc(f.url)+'" alt="">':'<a class="lbtn" href="'+esc(f.url)+'" target="_blank" rel="noopener">📄 Open '+esc(f.title||"file")+'</a>'):'')
+            +'<textarea rows="2" placeholder="Comments (required if requesting changes)" data-apc="'+a.id+'" style="margin-top:8px"></textarea>'
+            +'<div class="row"><button data-apd="'+a.id+'" data-dec="changes_requested">✏️ Request changes</button><button class="yes" data-apd="'+a.id+'" data-dec="approved">✅ Approve</button></div><div class="err" data-ape="'+a.id+'"></div></div>';
+        }).join(""):'<div class="sub">Nothing waiting for you right now.</div>')
+        +(past.length?'<div style="margin-top:8px">'+past.map(function(a){return '<div class="ap done"><b>'+esc(a.title)+' <span class="st '+(a.status==="approved"?"resolved":"open")+'" style="margin-left:6px">'+(a.status==="approved"?"Approved":"Changes requested")+'</span></b><div class="sub">'+esc(dS(a.decided_at))+(a.client_comment?' · “'+esc(a.client_comment)+'”':'')+'</div></div>';}).join("")+'</div>':'')+'</div>';
+    }
+    var ph=D.photos||[];
+    h+='<div class="card"><h2>Site photos</h2><div class="rule"></div>'+(ph.length?'<div class="grid">'+ph.map(function(x){return '<a class="ph" href="'+esc(x.url)+'" target="_blank" rel="noopener"><img src="'+esc(x.url)+'" alt="" loading="lazy"><span>'+esc(x.room||"")+(x.caption?' · '+esc(x.caption):'')+(x.taken_at?' · '+esc(dS(x.taken_at)):'')+'</span></a>';}).join("")+'</div>':'<div class="empty"><div class="big">📷</div>Photos from your site will appear here as work progresses — your project team curates them for you.</div>')+'</div>';
+    var docs=(D.documents||[]);
+    h+='<div class="card"><h2>Documents &amp; designs</h2><div class="rule"></div>'+(docs.length?docs.map(function(d){return '<a class="doc" href="'+esc(d.url||"#")+'" target="_blank" rel="noopener"><div class="ic">'+(d.is_image?"🖼️":d.kind==="design"?"📐":"📄")+'</div><div><b>'+esc(d.title)+'</b><span>'+esc(d.kind==="design"?"Design":"Document")+(d.version?' · '+esc(d.version):'')+' · '+esc(dS(d.uploaded_at))+'</span></div></a>';}).join(""):'<div class="empty"><div class="big">📐</div>Drawings, 3D views and documents your team shares with you will be listed here.</div>')+'</div>';
+    return h;
   }
   function tabPayments(){
     if(!D.unlocked) return pinCard("Payments");
@@ -245,8 +285,13 @@
     } else {
       h+='<div class="card"><h2>Your warranty</h2><div class="rule"></div><div class="sub" style="margin-bottom:6px">'+(w.start?'Active since <b>'+esc(dS(w.start))+'</b>. Coverage by item:':'Your warranty is being registered by your team.')+'</div>'
         +terms.map(function(t){return '<div class="wrow"><div><b>'+esc(t.label)+'</b><span>'+t.years+' year'+(t.years>1?'s':'')+(t.note?' · '+esc(t.note):'')+'</span></div><div class="exp">'+(t.expires?'valid till<br><b>'+esc(dS(t.expires))+'</b>':'')+'</div></div>';}).join("")
-        +'<div class="sub" style="font-size:11.5px;margin-top:10px">Warranty covers manufacturing and workmanship defects under normal use, as per the Lintel Warranty Charter shared at handover.</div></div>';
+        +'<div class="sub" style="font-size:11.5px;margin-top:10px">Warranty covers manufacturing and workmanship defects under normal use, as per the Lintel Warranty Charter.</div>'
+        +'<div class="acts"><a class="lbtn" href="'+esc(D.charter_url||"#")+'" target="_blank" rel="noopener">📘 Read the Warranty Charter (PDF)</a></div></div>';
     }
+    var ho=D.handover||{};
+    if(ho.signed_at) h+='<div class="card"><h2>Handover</h2><div class="rule"></div><div class="sub">✅ Handover accepted by <b>'+esc(ho.signed_name||"you")+'</b> on '+esc(dS(ho.signed_at))+'.</div></div>';
+    else if(ho.can_sign) h+='<div class="card"><h2>Handover sign-off</h2><div class="rule"></div><div class="sign"><div class="sub" style="margin-bottom:8px">All snags are cleared. By accepting, you confirm your home has been handed over to your satisfaction — this starts your warranty period.</div><div class="field"><label>Your full name</label><input type="text" id="hoName" placeholder="Type your name to sign"></div><button class="btn" id="hoGo" style="margin-top:0">Accept handover</button><div class="err" id="hoErr"></div></div></div>';
+    else if(ho.status&&ho.status!=="clear"&&D.handed_over) h+='<div class="card"><h2>Handover</h2><div class="rule"></div><div class="sub">'+(ho.open_snags?ho.open_snags+' snag'+(ho.open_snags>1?'s':'')+' being cleared by your team.':'Your team is completing final checks.')+' You\'ll be able to sign off here once everything is clear.</div></div>';
     if(!D.unlocked) return h+pinCard("Support requests");
     var tks=D.tickets||[];
     if(D.handed_over){
@@ -277,7 +322,8 @@
     tabsEl.querySelector('[data-tab="payments"]').classList.toggle("has",!!(D.milestones||[]).find(function(m){return m.status!=="paid"&&(m.status==="link_sent"||m.pi_number);}));
     tabsEl.querySelector('[data-tab="support"]').classList.toggle("has",!!(D.tickets||[]).find(function(t){return t.status!=="resolved"&&t.status!=="closed";}));
     tabsEl.querySelector('[data-tab="journey"]').classList.toggle("has",!!D.journey_url && !sessionStorage.getItem("lsa_j_"+token));
-    wrap.innerHTML = TAB==="journey"?tabJourney():TAB==="payments"?tabPayments():TAB==="team"?tabTeam():TAB==="support"?tabSupport():tabHome();
+    tabsEl.querySelector('[data-tab="gallery"]').classList.toggle("has",!!(D.approvals||[]).find(function(a){return a.status==="pending";}));
+    wrap.innerHTML = TAB==="journey"?tabJourney():TAB==="gallery"?tabGallery():TAB==="payments"?tabPayments():TAB==="team"?tabTeam():TAB==="support"?tabSupport():tabHome();
     if(TAB==="journey"&&D.journey_url) sessionStorage.setItem("lsa_j_"+token,"1");
     bindPin();
     wrap.querySelectorAll("[data-go]").forEach(function(el){ el.onclick=function(){ TAB=el.dataset.go; sessionStorage.setItem("lsa_tab_"+token,TAB); render(); window.scrollTo(0,0); }; });
@@ -306,6 +352,13 @@
       .then(function(j){ if(j.error){ e.textContent=j.error; go.disabled=false; go.textContent="Submit request"; return; } ok.textContent="Received — request #"+j.ticket_id+". We'll acknowledge within 24 hours."; setTimeout(load,900); })
       .catch(function(){ e.textContent="Network error — try again"; go.disabled=false; go.textContent="Submit request"; });
     };
+    wrap.querySelectorAll("[data-apd]").forEach(function(b){ b.onclick=function(){
+      var id=b.dataset.apd, dec=b.dataset.dec, ta=wrap.querySelector('[data-apc="'+id+'"]'), e=wrap.querySelector('[data-ape="'+id+'"]'); var c=(ta.value||"").trim(); e.textContent="";
+      if(dec==="changes_requested"&&!c) return e.textContent="Please tell us what you'd like changed.";
+      if(dec==="approved"&&!confirm("Approve “"+b.closest(".ap").querySelector("b").textContent+"”? Your team will proceed on this basis.")) return;
+      b.disabled=true; post({action:"approval",approval_id:Number(id),decision:dec,comment:c}).then(function(j){ if(j.error){ e.textContent=j.error; b.disabled=false; return; } load(); }); }; });
+    var hoGo=document.getElementById("hoGo"); if(hoGo) hoGo.onclick=function(){ var n=document.getElementById("hoName").value.trim(), e=document.getElementById("hoErr"); e.textContent=""; if(!n) return e.textContent="Please type your name to sign."; hoGo.disabled=true;
+      post({action:"handover_sign",name:n}).then(function(j){ if(j.error){ e.textContent=j.error; hoGo.disabled=false; return; } load(); }); };
     wrap.querySelectorAll("[data-tks]").forEach(function(b){ b.onclick=function(){ var ta=wrap.querySelector('[data-tkn="'+b.dataset.tks+'"]'); var body=(ta.value||"").trim(); if(!body) return; b.disabled=true;
       post({action:"ticket_note",ticket_id:Number(b.dataset.tks),body:body}).then(function(j){ if(j.error){ alert(j.error); b.disabled=false; return; } load(); }); }; });
   }

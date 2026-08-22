@@ -7645,6 +7645,10 @@ async function pwFiles(p,body,kind){
   const label=kind==="design"?"Design":"Document";
   const {data:files,error:fErr}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false}).order("id",{ascending:false});
   if(fErr){ body.innerHTML=`<div class="pw-card" style="font-size:13px;color:var(--clay)">Couldn't load files: ${esc(fErr.message)}</div>`; return; }
+  if(kind==="design"&&files&&files.length){
+    const {data:aps}=await sb.from("design_approvals").select("*").eq("project_id",p.id).order("id",{ascending:false});
+    files.forEach(f=>{ f._ap=(aps||[]).find(a=>Number(a.file_id)===Number(f.id))||null; });
+  }
   body.innerHTML=`<div class="pw-card">
     ${canWorkProject()?`<div class="upbar">
       <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg"':''}>
@@ -7665,7 +7669,7 @@ function renderFileList(files,kind){
     ${files.map(f=>`<tr><td><b>${esc(f.title||f.storage_path.split("/").pop())}</b></td>
       <td class="mono">${esc(f.version||"—")}</td><td>${esc(f.file_type||"—")}</td>
       <td>${new Date(f.uploaded_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
-      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${canWrite()?` · <button class="linkbtn" data-cv="${f.id}" data-vis="${f.client_visible?1:0}" title="Show in the client's tracker document vault">${f.client_visible?"✓ client":"share"}</button>`:""}${(canWrite()||(isDesignPartner()&&f.uploaded_by===me.id))?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
+      <td><button class="linkbtn" data-dl="${f.storage_path}">Open</button>${canWrite()?` · <button class="linkbtn" data-cv="${f.id}" data-vis="${f.client_visible?1:0}" title="Show on the client's portal (Gallery / Documents)">${f.client_visible?"✓ client":"share"}</button>`:""}${(kind==="design"&&canWrite())?(f._ap?` · <span style="font-size:11px;font-weight:700;color:${f._ap.status==="approved"?"#2E7D5B":f._ap.status==="changes_requested"?"#B7791F":"#946F33"}" title="${esc(f._ap.client_comment||"")}">${f._ap.status==="approved"?"✅ Approved":f._ap.status==="changes_requested"?"✏️ Changes requested":"⏳ Awaiting client"}</span>`:` · <button class="linkbtn" data-ap="${f.id}" data-title="${esc(f.title||f.storage_path.split("/").pop())}" title="Send this to the client's portal for approval (notifies them on WhatsApp/email)">Ask client to approve</button>`):""}${(canWrite()||(isDesignPartner()&&f.uploaded_by===me.id))?` · <button class="linkbtn del" data-del="${f.id}" data-path="${f.storage_path}">Delete</button>`:""}</td></tr>`).join("")}
   </tbody></table>`;
 }
 function bindFileDownloads(){
@@ -7673,6 +7677,18 @@ function bindFileDownloads(){
     const {data,error}=await sb.storage.from("project-files").createSignedUrl(b.dataset.dl,3600);
     if(error) return toast(error.message);
     window.open(data.signedUrl,"_blank");
+  });
+  document.querySelectorAll("[data-ap]").forEach(b=>b.onclick=async()=>{
+    const note=prompt(`Ask the client to approve “${b.dataset.title}”?\n\nOptional note to the client (what to look at, what's decided):`,"");
+    if(note===null) return;
+    b.disabled=true;
+    // the file must be visible on the portal for the client to see it
+    await sb.from("project_files").update({client_visible:true}).eq("id",b.dataset.ap);
+    const {error}=await sb.from("design_approvals").insert({project_id:activeProject,file_id:Number(b.dataset.ap),title:b.dataset.title,note:(note||"").trim()||null,requested_by:me.id});
+    if(error){ b.disabled=false; return toast("Could not request: "+error.message); }
+    toast("Approval requested — the client is being notified");
+    const {data:p}=await sb.from("projects").select("*").eq("id",activeProject).single();
+    if(p) drawProjectTab(p);
   });
   document.querySelectorAll("[data-cv]").forEach(b=>b.onclick=async()=>{
     const vis=b.dataset.vis==="1";
@@ -9237,6 +9253,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b36",date:"22 Aug 2026",title:"Client portal: approvals, gallery, support & notifications",points:[
+    "<b>Ask the client to approve a design</b>: Studio → Design files → <b>Ask client to approve</b> on any file. It appears on their portal with Approve / Request changes; you get an email with their decision and the file row shows ✅ / ✏️ / ⏳.",
+    "<b>Clients are now notified</b> (email now, WhatsApp once Meta approves the template) whenever you reply on the portal, a support request changes status, or you request an approval.",
+    "Portal <b>Gallery</b> tab: site photos and documents you mark <b>share</b> appear there. <b>Support</b> tab: warranty coverage with expiry dates, the Warranty Charter PDF, raise & track requests, and handover sign-off once snags are clear.",
+    "Portal <b>Journey</b> tab shows the Journey Plan automatically once you publish a share link from the project."]},
   {build:"b33",date:"21 Aug 2026",title:"Team chat, client portal & sales dashboard",points:[
     "<b>Team chat</b>: press the new <b>💬</b> at the bottom-right — message the whole team in <b># Lintel Team</b> or any teammate 1-to-1, and attach files up to 25 MB with the 📎 (BOQs, drawings, docs). A red badge shows unread messages.",
     "<b>Send to chat</b>: every BOQ and proforma invoice now has a <b>💬 Send to chat</b> button — it shares the PDF straight into a chat conversation.",
@@ -10725,7 +10746,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b35 · 22 Aug 2026";
+const APP_BUILD = "b36 · 22 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
