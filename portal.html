@@ -3,245 +3,314 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Your project · Lintel Space Atelier</title>
+<title>Your home · Lintel Space Atelier</title>
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#0D0D27">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{--navy:#0D0D27;--brass:#DFB05E;--brassd:#946F33;--ink:#23233F;--soft:#6B6560;--grey:#9A9490;--line:#E7E2D8;--paper:#FBFAF7;--green:#2E7D5B;--red:#A33C3C}
+  :root{--navy:#0D0D27;--brass:#DFB05E;--brassd:#946F33;--ink:#23233F;--soft:#6B6560;--grey:#9A9490;--line:#E7E2D8;--paper:#FBFAF7;--green:#2E7D5B;--red:#A33C3C;--amber:#B7791F}
   *{box-sizing:border-box} html,body{margin:0;padding:0}
-  body{background:#F3F1EC;color:var(--ink);font-family:Inter,-apple-system,sans-serif;-webkit-text-size-adjust:100%}
-  .top{background:var(--navy);border-bottom:3px solid var(--brass);padding:16px 20px;color:#F7F2E9;position:sticky;top:0;z-index:5}
-  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:15px;letter-spacing:2.5px;text-transform:uppercase;font-weight:500}
-  .brand small{display:block;font-size:8.5px;letter-spacing:2.6px;text-transform:uppercase;color:var(--brass);margin-top:2px;font-weight:400}
-  .wrap{max-width:620px;margin:16px auto 60px;padding:0 14px}
-  .card{background:#fff;border-radius:14px;box-shadow:0 14px 40px -22px rgba(13,13,39,.35);padding:20px 18px;margin-bottom:14px}
-  h1{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:21px;margin:0 0 4px;color:var(--navy)}
-  h2{font-size:11px;font-weight:700;letter-spacing:2px;color:var(--grey);text-transform:uppercase;margin:0 0 4px}
-  .rule{width:30px;height:2px;background:var(--brass);margin-bottom:14px}
+  body{background:#F3F1EC;color:var(--ink);font-family:Inter,-apple-system,sans-serif;-webkit-text-size-adjust:100%;padding-bottom:74px}
+  .top{background:var(--navy);border-bottom:3px solid var(--brass);padding:14px 18px;color:#F7F2E9;position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:14px;letter-spacing:2.5px;text-transform:uppercase;font-weight:500}
+  .brand small{display:block;font-size:8px;letter-spacing:2.6px;text-transform:uppercase;color:var(--brass);margin-top:2px;font-weight:400}
+  .code{font-size:11px;color:var(--brass);letter-spacing:1px;white-space:nowrap}
+  .wrap{max-width:640px;margin:14px auto 0;padding:0 14px}
+  .card{background:#fff;border-radius:14px;box-shadow:0 14px 40px -24px rgba(13,13,39,.35);padding:18px;margin-bottom:12px}
+  h1{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:22px;margin:0 0 4px;color:var(--navy);letter-spacing:-.01em}
+  h2{font-size:10.5px;font-weight:700;letter-spacing:2px;color:var(--grey);text-transform:uppercase;margin:0 0 4px}
+  .rule{width:28px;height:2px;background:var(--brass);margin-bottom:12px}
   .sub{font-size:13px;color:var(--soft);line-height:1.6}
-  .chip{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:#FFF6E2;color:var(--brassd);border:1px solid var(--brass)}
-  /* stage timeline */
-  .tl{margin-top:6px}
+  .chip{display:inline-block;padding:3px 11px;border-radius:20px;font-size:11.5px;font-weight:700;background:#FFF6E2;color:var(--brassd);border:1px solid var(--brass)}
+  .chip.green{background:#EEF6EF;color:var(--green);border-color:#9CC7A6}
+  .chip.grey{background:#F1EFEA;color:var(--soft);border-color:var(--line)}
+  /* tabs */
+  .tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .tab{flex:1;border:none;background:none;font:600 10.5px Inter;color:var(--grey);display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;cursor:pointer;position:relative}
+  .tab .ic{font-size:18px;line-height:1}
+  .tab.on{color:var(--navy)} .tab.on .ic{transform:translateY(-1px)}
+  .tab .dot{position:absolute;top:2px;right:calc(50% - 16px);width:8px;height:8px;border-radius:50%;background:var(--red);display:none}
+  .tab.has .dot{display:block}
+  @media(min-width:700px){ body{padding-bottom:20px} .tabs{position:static;max-width:640px;margin:0 auto 12px;border:1px solid var(--line);border-radius:12px;padding:6px} .wrap{margin-top:14px} }
+  /* progress */
+  .pbar{height:8px;border-radius:6px;background:#EFEAE0;overflow:hidden;margin:10px 0 6px}
+  .pbar>div{height:100%;background:linear-gradient(90deg,var(--brass),#C89440);border-radius:6px;transition:width .5s}
+  .now{display:flex;gap:12px;align-items:flex-start;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
+  .now .big{font-size:26px;line-height:1}
+  .now b{display:block;font-size:13.5px;color:var(--navy)} .now span{font-size:12px;color:var(--soft);line-height:1.5}
+  .qa{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .qbtn{border:1px solid var(--line);border-radius:11px;padding:12px 10px;background:#fff;font:600 12.5px Inter;color:var(--navy);cursor:pointer;text-align:left;display:flex;gap:8px;align-items:center;text-decoration:none}
+  .qbtn.primary{background:var(--navy);color:var(--brass);border-color:var(--navy)}
   .tl-row{display:flex;gap:12px;align-items:flex-start;padding:7px 0}
   .tl-dot{width:22px;height:22px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid var(--line);background:var(--paper);color:var(--grey)}
   .tl-row.done .tl-dot{background:var(--green);border-color:var(--green);color:#fff}
-  .tl-row.now  .tl-dot{background:var(--brass);border-color:var(--brass);color:var(--navy)}
-  .tl-nm{font-size:13.5px;font-weight:600;padding-top:2px}
-  .tl-row.done .tl-nm{color:var(--green)} .tl-row.now .tl-nm{color:var(--brassd)}
-  .tl-dt{font-size:11px;color:var(--grey);padding-top:3px;margin-left:auto}
+  .tl-row.now .tl-dot{background:var(--brass);border-color:var(--brass);color:var(--navy)}
+  .tl-nm{font-size:13.5px;font-weight:600;padding-top:2px} .tl-row.done .tl-nm{color:var(--green)} .tl-row.now .tl-nm{color:var(--brassd)}
+  .tl-dt{font-size:11px;color:var(--grey);padding-top:3px;margin-left:auto;white-space:nowrap}
+  /* consultant card */
+  .person{display:flex;gap:12px;align-items:center}
+  .av{width:44px;height:44px;border-radius:50%;background:var(--navy);color:var(--brass);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:none}
+  .person b{display:block;font-size:14px} .person span{font-size:12px;color:var(--soft)}
+  .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .lbtn{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--brassd);border:1px solid var(--brass);border-radius:8px;padding:7px 12px;text-decoration:none;cursor:pointer;background:#fff}
+  .lbtn.pay,.lbtn.dark{background:var(--navy);color:var(--brass);border-color:var(--navy)}
   /* payments */
-  .bar{height:9px;border-radius:6px;background:#EFEAE0;overflow:hidden;margin:8px 0 4px}
-  .bar>div{height:100%;background:linear-gradient(90deg,var(--brass),#C89440);border-radius:6px}
-  .mrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
-  .mrow:first-of-type{border-top:none}
+  .mrow{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)} .mrow:first-of-type{border-top:none}
   .m-ic{width:26px;height:26px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px}
   .m-ic.paid{background:#EEF6EF;color:var(--green)} .m-ic.due{background:#FFF6E2;color:var(--brassd)} .m-ic.later{background:#F1EFEA;color:var(--grey)}
-  .m-nm{flex:1;min-width:0}.m-nm b{font-size:13.5px;display:block}.m-nm span{font-size:11px;color:var(--grey)}
+  .m-nm{flex:1;min-width:0} .m-nm b{font-size:13.5px;display:block} .m-nm span{font-size:11px;color:var(--grey)}
   .m-amt{font-size:13.5px;font-weight:700;white-space:nowrap}
   .m-act{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
-  .lbtn{display:inline-block;font-size:11.5px;font-weight:600;color:var(--brassd);border:1px solid var(--brass);border-radius:7px;padding:4px 10px;text-decoration:none;cursor:pointer;background:#fff}
-  .lbtn.pay{background:var(--navy);color:var(--brass);border-color:var(--navy)}
-  /* messages */
-  .msgs{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:4px 0 10px}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-top:1px solid var(--line)} .kv:first-of-type{border-top:none}
+  .kv b{color:var(--navy)}
+  /* team + messages */
+  .team{display:flex;flex-direction:column;gap:8px}
+  .tm{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--paper);cursor:pointer}
+  .tm:hover,.tm.on{border-color:var(--brass);background:#FFF9EA}
+  .tm .av{width:38px;height:38px;font-size:12px}
+  .tm b{display:block;font-size:13.5px} .tm span{font-size:11.5px;color:var(--grey)}
+  .tm .go{margin-left:auto;color:var(--brassd);font-size:18px}
+  .msgs{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;padding:4px 0 10px}
   .msg{max-width:85%;padding:8px 12px;border-radius:12px;font-size:13.5px;line-height:1.5;word-break:break-word}
   .msg.client{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:4px}
   .msg.staff{align-self:flex-start;background:var(--paper);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg .who{font-size:10.5px;font-weight:700;color:var(--brassd);margin-bottom:2px} .msg.client .who{color:var(--brass)}
   .msg .ts{display:block;font-size:9.5px;opacity:.55;margin-top:3px;text-align:right}
-  .msg .who{font-size:10.5px;font-weight:700;color:var(--brassd);margin-bottom:2px}
-  .msg.client .who{color:var(--brass)}
-  .team{display:flex;flex-wrap:wrap;gap:8px}
-  .tm{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);cursor:pointer;font-size:12.5px}
-  .tm:hover,.tm.on{border-color:var(--brass);background:#FFF9EA}
-  .tm .av{width:28px;height:28px;border-radius:50%;background:var(--navy);color:var(--brass);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px}
-  .tm b{display:block}.tm span{font-size:10.5px;color:var(--grey)}
   .to-sel{font-size:12px;color:var(--soft);margin-bottom:6px}
-  .to-sel select{font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:#fff;color:var(--ink)}
+  select,textarea,input[type=text]{font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--paper);color:var(--ink);outline:none;width:100%}
+  select:focus,textarea:focus,input:focus{border-color:var(--brass);background:#fff}
+  .to-sel select{width:auto;padding:5px 8px;font-size:12.5px;border-radius:8px;background:#fff}
   .composer{display:flex;gap:8px;align-items:flex-end}
-  .composer textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:13.5px;min-height:42px;max-height:110px;outline:none;background:var(--paper)}
-  .composer textarea:focus{border-color:var(--brass);background:#fff}
-  .composer button{border:none;border-radius:10px;background:var(--navy);color:var(--brass);width:44px;height:42px;font-size:16px;cursor:pointer}
-  .btn{width:100%;border:none;border-radius:11px;padding:14px;font:600 15px Inter;background:var(--navy);color:#fff;cursor:pointer}
+  .composer textarea{flex:1;resize:none;min-height:42px;max-height:110px}
+  .composer button{border:none;border-radius:10px;background:var(--navy);color:var(--brass);width:44px;height:42px;font-size:16px;cursor:pointer;flex:none}
+  .btn{width:100%;border:none;border-radius:11px;padding:13px;font:600 14.5px Inter;background:var(--navy);color:#fff;cursor:pointer;margin-top:10px}
+  .btn:disabled{opacity:.55}
+  .field{margin-bottom:10px} .field label{display:block;font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--grey);text-transform:uppercase;margin-bottom:5px}
+  /* support */
+  .wrow{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13px} .wrow:first-of-type{border-top:none}
+  .wrow b{display:block;font-size:13px;color:var(--navy)} .wrow span{font-size:11.5px;color:var(--grey)}
+  .wrow .exp{text-align:right;white-space:nowrap;font-size:12px;color:var(--soft)}
+  .tk{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:10px;background:#fff}
+  .tk-h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+  .tk-h b{font-size:13.5px;color:var(--navy)} .tk-h small{display:block;font-size:11px;color:var(--grey);margin-top:2px}
+  .st{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .st.open{background:#FFF6E2;color:var(--brassd)} .st.ack,.st.in_progress{background:#EAF0F6;color:#3F6A96} .st.resolved,.st.closed{background:#EEF6EF;color:var(--green)}
+  .steps{display:flex;gap:4px;margin:10px 0 6px}
+  .steps i{flex:1;height:5px;border-radius:3px;background:#EFEAE0} .steps i.on{background:var(--brass)} .steps i.done{background:var(--green)}
+  .ev{font-size:12px;color:var(--soft);padding:4px 0;border-top:1px dashed var(--line)} .ev b{color:var(--ink);font-weight:600}
   .pin{display:flex;gap:8px;justify-content:center;margin:14px 0}
-  .pin input{width:52px;height:56px;text-align:center;font:700 22px Inter;border:1.5px solid var(--line);border-radius:10px;outline:none;background:var(--paper)}
-  .pin input:focus{border-color:var(--brass);background:#fff}
+  .pin input{width:52px;height:56px;text-align:center;font:700 22px Inter;border:1.5px solid var(--line);border-radius:10px;outline:none;background:var(--paper);padding:0}
   .err{color:var(--red);font-size:12.5px;text-align:center;min-height:16px;margin-top:6px}
+  .ok{color:var(--green);font-size:12.5px;text-align:center;min-height:16px;margin-top:6px}
   .state{padding:46px 18px;text-align:center;color:var(--soft)}
-  .state h1{margin-bottom:8px}
   .spin{width:26px;height:26px;border:2px solid var(--line);border-top-color:var(--brass);border-radius:50%;margin:0 auto 14px;animation:sp .8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
-  .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:8px 14px 26px;line-height:1.7}
-  .foot a{color:var(--brassd);text-decoration:none}
+  .foot{text-align:center;font-size:11.5px;color:#8a8a99;padding:8px 14px 20px;line-height:1.7} .foot a{color:var(--brassd);text-decoration:none}
+  .jframe{width:100%;height:78vh;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .empty{text-align:center;padding:26px 12px;color:var(--soft);font-size:13px;line-height:1.6}
+  .empty .big{font-size:34px;margin-bottom:6px}
 </style>
 </head>
 <body>
-<div class="top"><div class="brand">Lintel Space Atelier<small>Where luxury meets functionality</small></div></div>
-<div class="wrap" id="wrap"><div class="card"><div class="state"><div class="spin"></div>Loading your project…</div></div></div>
-<div class="foot">Questions? Your Lintel team is one message away · <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a> · +91 99165 58777<br>© Lintel Space Atelier · lintelspace.com</div>
+<div class="top"><div class="brand">Lintel Space Atelier<small>Where luxury meets functionality</small></div><div class="code" id="hdrCode"></div></div>
+<div class="wrap" id="wrap"><div class="card"><div class="state"><div class="spin"></div>Opening your home…</div></div></div>
+<div class="foot">Your Lintel team is one message away · <a href="mailto:contact@lintelspace.com">contact@lintelspace.com</a> · +91 99165 58777<br>© Lintel Space Atelier · lintelspace.com</div>
+<nav class="tabs" id="tabs" style="display:none">
+  <button class="tab on" data-tab="home"><span class="ic">🏠</span>Home<i class="dot"></i></button>
+  <button class="tab" data-tab="journey"><span class="ic">🗺️</span>Journey<i class="dot"></i></button>
+  <button class="tab" data-tab="payments"><span class="ic">💳</span>Payments<i class="dot"></i></button>
+  <button class="tab" data-tab="team"><span class="ic">💬</span>Team<i class="dot"></i></button>
+  <button class="tab" data-tab="support"><span class="ic">🛡️</span>Support<i class="dot"></i></button>
+</nav>
 <script>
 (function(){
   var FN="https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/portal";
   var token=new URLSearchParams(location.search).get("t")||"";
-  var wrap=document.getElementById("wrap");
+  var wrap=document.getElementById("wrap"), tabsEl=document.getElementById("tabs");
   var PIN=sessionStorage.getItem("lsa_pin_"+token)||"";
+  var TAB=sessionStorage.getItem("lsa_tab_"+token)||"home";
+  var D=null, pendingTo=null;
   var esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");};
   var inr=function(n){n=Math.round(Number(n)||0);return "₹"+n.toLocaleString("en-IN");};
   var dS=function(d){if(!d)return "";var x=new Date(String(d).length<=10?d+"T00:00:00":d);return isNaN(+x)?"":x.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});};
   var tS=function(d){var x=new Date(d);var today=new Date().toDateString()===x.toDateString();return (today?"":x.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+" ")+x.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"});};
+  var ini=function(n){return String(n||"").split(/\s+/).slice(0,2).map(function(x){return x[0]||"";}).join("").toUpperCase();};
+  var STAGE_HINT={"Briefing":"We're capturing your requirements, lifestyle and wishlist in detail.","Design":"Your designer is turning the brief into concepts, layouts and 3D views for your approval.","Proposal/BOQ":"Your detailed bill of quantities and proposal are being finalised.","Production":"Your modular units are being manufactured in our factory to the approved drawings.","Installation":"Our site team is installing and finishing your home.","Handover":"Final checks, snag clearance and your warranty activation."};
+  var CAT_LABEL={warranty_claim:"Warranty claim",service_request:"Service request",complaint:"Complaint",general:"General query"};
+  var ST_LABEL={open:"Received",ack:"Acknowledged",in_progress:"In progress",resolved:"Resolved",closed:"Closed"};
+  var ST_STEP={open:1,ack:2,in_progress:3,resolved:4,closed:4};
   function fail(t,m){wrap.innerHTML='<div class="card"><div class="state"><h1>'+esc(t)+'</h1><div class="sub">'+esc(m)+'</div></div></div>';}
   if(!token) return fail("Link incomplete","Please open the link exactly as shared by your Lintel team.");
-
-  var D=null;
+  function post(body){ return fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.assign({t:token,pin:PIN},body))}).then(function(r){return r.json();}); }
   function load(){
     return fetch(FN+"?t="+encodeURIComponent(token)+(PIN?"&pin="+encodeURIComponent(PIN):""))
       .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
       .then(function(res){ if(!res.ok||res.j.error) throw new Error(res.j.error||"Could not load"); D=res.j; render(); })
-      .catch(function(e){ fail("We couldn't open your project", e.message||"Please check your connection and try again."); });
+      .catch(function(e){ fail("We couldn't open your home", e.message||"Please check your connection and try again."); });
   }
 
-  function stageRow(s,i,curIdx){
-    var cls=s.status==="done"?"done":(i===curIdx?"now":"");
-    var ic=s.status==="done"?"✓":(i===curIdx?"●":(i+1));
-    var dt=s.done_date?("Completed "+dS(s.done_date)):(s.target_date?("Target "+dS(s.target_date)):"");
-    return '<div class="tl-row '+cls+'"><div class="tl-dot">'+ic+'</div><div class="tl-nm">'+esc(s.stage)+'</div><div class="tl-dt">'+esc(dt)+'</div></div>';
+  // ---------- shared pieces ----------
+  function pinCard(what){
+    return '<div class="card"><h2>'+esc(what)+'</h2><div class="rule"></div>'
+      +'<div class="sub" style="text-align:center">To keep your details private, enter the <b>last 4 digits of your registered mobile number</b>.</div>'
+      +'<div class="pin">'+[0,1,2,3].map(function(i){return '<input inputmode="numeric" maxlength="1" id="pin'+i+'">';}).join("")+'</div>'
+      +'<button class="btn" id="pinGo" style="margin-top:0">Unlock</button><div class="err" id="pinErr"></div></div>';
   }
-
+  function bindPin(){
+    var ins=[0,1,2,3].map(function(i){return document.getElementById("pin"+i);}); if(!ins[0]) return;
+    ins.forEach(function(el,i){ el.oninput=function(){ el.value=el.value.replace(/\D/g,""); if(el.value&&i<3) ins[i+1].focus(); if(i===3&&el.value) document.getElementById("pinGo").click(); };
+      el.onkeydown=function(e){ if(e.key==="Backspace"&&!el.value&&i>0) ins[i-1].focus(); }; });
+    ins[0].focus();
+    document.getElementById("pinGo").onclick=function(){
+      var pin=ins.map(function(el){return el.value;}).join(""); if(pin.length<4){document.getElementById("pinErr").textContent="Enter all 4 digits";return;}
+      PIN=pin; sessionStorage.setItem("lsa_pin_"+token,pin);
+      load().then(function(){ if(D&&!D.unlocked){ PIN=""; sessionStorage.removeItem("lsa_pin_"+token); var e=document.getElementById("pinErr"); if(e) e.textContent="That didn't match — use the last 4 digits of the mobile number we have on file."; } });
+    };
+  }
   function invoiceHtml(pi){
     var today=dS(pi.created_at)||dS(new Date().toISOString());
-    return '<div style="font-family:Georgia,serif;max-width:720px;margin:0 auto;color:#1a1a1a">'
-      +'<div style="background:#0D0D27;color:#fff;padding:22px 30px;display:flex;justify-content:space-between">'
-      +'<div><div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>'
-      +'<div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">Survey No.36/4, site no.25 to 30, Ground Floor,<br>Ramky House, Kalyan Nagar, Bengaluru 560043<br>+91 9916558777 · contact@lintelspace.com</div></div>'
-      +'<div style="text-align:right"><div style="font-size:19px;letter-spacing:1px">PROFORMA INVOICE</div>'
-      +'<div style="font-size:13px;color:#DFB05E;margin-top:6px">'+esc(pi.pi_number)+'</div>'
-      +'<div style="font-size:12px;color:#9CA0B0;margin-top:4px">'+esc(today)+'</div></div></div>'
-      +'<div style="padding:24px 30px">'
-      +'<div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Bill To</div>'
-      +'<div style="font-size:15px;font-weight:600">'+esc(pi.client_name||"")+'</div>'
-      +'<table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0">'
-      +'<thead><tr style="background:#F6F4EF;text-align:left"><th style="padding:11px 12px;font-size:12px;color:#8A8FA3">DESCRIPTION</th><th style="padding:11px 12px;font-size:12px;color:#8A8FA3;text-align:right">AMOUNT</th></tr></thead>'
-      +'<tbody><tr style="border-bottom:1px solid #ECECEC"><td style="padding:14px 12px">'+esc(pi.milestone_label||pi.remark||"Milestone payment")+'</td>'
-      +'<td style="padding:14px 12px;text-align:right;font-weight:600">'+inr(pi.amount)+'</td></tr></tbody></table>'
+    return '<div style="font-family:Georgia,serif;max-width:720px;margin:0 auto;color:#1a1a1a"><div style="background:#0D0D27;color:#fff;padding:22px 30px;display:flex;justify-content:space-between"><div><div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div><div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">Survey No.36/4, site no.25 to 30, Ground Floor,<br>Ramky House, Kalyan Nagar, Bengaluru 560043<br>+91 9916558777 · contact@lintelspace.com</div></div><div style="text-align:right"><div style="font-size:19px;letter-spacing:1px">PROFORMA INVOICE</div><div style="font-size:13px;color:#DFB05E;margin-top:6px">'+esc(pi.pi_number)+'</div><div style="font-size:12px;color:#9CA0B0;margin-top:4px">'+esc(today)+'</div></div></div>'
+      +'<div style="padding:24px 30px"><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Bill To</div><div style="font-size:15px;font-weight:600">'+esc(pi.client_name||"")+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:14px;margin:18px 0"><thead><tr style="background:#F6F4EF;text-align:left"><th style="padding:11px 12px;font-size:12px;color:#8A8FA3">DESCRIPTION</th><th style="padding:11px 12px;font-size:12px;color:#8A8FA3;text-align:right">AMOUNT</th></tr></thead><tbody><tr style="border-bottom:1px solid #ECECEC"><td style="padding:14px 12px">'+esc(pi.milestone_label||pi.remark||"Milestone payment")+'</td><td style="padding:14px 12px;text-align:right;font-weight:600">'+inr(pi.amount)+'</td></tr></tbody></table>'
       +'<div style="display:flex;justify-content:flex-end"><div style="width:260px;display:flex;justify-content:space-between;padding:12px;background:#0D0D27;color:#fff;border-radius:6px"><span style="font-weight:600">Amount Payable</span><span style="font-weight:700;color:#DFB05E">'+inr(pi.amount)+'</span></div></div>'
-      +'<div style="margin-top:22px;display:flex;gap:24px;flex-wrap:wrap">'
-      +'<div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Pay via UPI</div><div style="font-size:14px;font-weight:600">Lintels234@idfcbank</div></div>'
-      +'<div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Bank Details</div><div style="font-size:13px;line-height:1.6">IDFC FIRST Bank · Jayanagar Branch<br>A/c: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED<br>A/c No: 10218270193 · IFSC: IDFB0080156</div></div></div>'
-      +'<div style="margin-top:22px;padding-top:14px;border-top:1px solid #ECECEC;font-size:11px;color:#999">This is a proforma invoice for advance/milestone payment and is not a tax invoice.<br>Lintel Space Atelier · Where luxury meets functionality</div>'
-      +'</div></div>';
+      +'<div style="margin-top:22px;display:flex;gap:24px;flex-wrap:wrap"><div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Pay via UPI</div><div style="font-size:14px;font-weight:600">Lintels234@idfcbank</div></div><div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Bank Details</div><div style="font-size:13px;line-height:1.6">IDFC FIRST Bank · Jayanagar Branch<br>A/c: LINTEL SPACE ATELIER INDIA PRIVATE LIMITED<br>A/c No: 10218270193 · IFSC: IDFB0080156</div></div></div>'
+      +'<div style="margin-top:22px;padding-top:14px;border-top:1px solid #ECECEC;font-size:11px;color:#999">This is a proforma invoice for advance/milestone payment and is not a tax invoice.<br>Lintel Space Atelier · Where luxury meets functionality</div></div></div>';
   }
-  function openInvoice(pi){
-    var w=window.open("","_blank");
-    if(!w) return alert("Please allow popups to view the invoice");
-    w.document.write('<html><head><title>'+esc(pi.pi_number)+'</title></head><body style="margin:0">'+invoiceHtml(pi)+'<div style="text-align:center;padding:16px"><button onclick="window.print()" style="padding:10px 26px;font-size:14px;background:#0D0D27;color:#DFB05E;border:none;border-radius:8px;cursor:pointer">Print / Save as PDF</button></div></body></html>');
-    w.document.close();
+  function openInvoice(pi){ var w=window.open("","_blank"); if(!w) return alert("Please allow popups to view the invoice");
+    w.document.write('<html><head><title>'+esc(pi.pi_number)+'</title></head><body style="margin:0">'+invoiceHtml(pi)+'<div style="text-align:center;padding:16px"><button onclick="window.print()" style="padding:10px 26px;font-size:14px;background:#0D0D27;color:#DFB05E;border:none;border-radius:8px;cursor:pointer">Print / Save as PDF</button></div></body></html>'); w.document.close(); }
+
+  // ---------- tabs ----------
+  function tabHome(){
+    var st=D.stages||[], cur=st.findIndex(function(s){return s.status!=="done";}); if(cur<0) cur=st.length-1;
+    var done=st.filter(function(s){return s.status==="done";}).length, pct=st.length?Math.round(done/st.length*100):0;
+    var cs=st[cur]||{}, c=D.consultant;
+    var dueM=(D.milestones||[]).find(function(m){return m.status!=="paid"&&(m.status==="link_sent"||m.pi_number);});
+    var h='<div class="card"><h1>Hello '+esc(D.client_first||"there")+' 👋</h1><div class="sub">Welcome to your home\'s private page. Everything about your project — progress, payments, your team and support — lives here.</div>'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-top:12px"><span class="chip">'+esc(D.current_stage||"In progress")+'</span><span class="sub" style="font-size:12px">'+done+' of '+st.length+' stages complete</span></div>'
+      +'<div class="pbar"><div style="width:'+pct+'%"></div></div>'
+      +'<div class="now"><div class="big">'+(D.handed_over?"🏡":"✨")+'</div><div><b>'+(D.handed_over?"Your home is handed over":"Right now: "+esc(cs.stage||D.current_stage||""))+'</b><span>'+esc(D.handed_over?"Your warranty is active. Use the Support tab any time — we're here for the years ahead.":(STAGE_HINT[cs.stage]||"Your team is on it."))+(cs.target_date&&!D.handed_over?" Target: "+dS(cs.target_date)+".":"")+'</span></div></div>'
+      +'<div class="qa">'
+      +(dueM&&dueM.razorpay_link?'<a class="qbtn primary" href="'+esc(dueM.razorpay_link)+'" target="_blank" rel="noopener">💳 Pay '+inr(dueM.amount)+'</a>':'<button class="qbtn" data-go="payments">💳 Payments</button>')
+      +'<button class="qbtn" data-go="team">💬 Message team</button>'
+      +'<button class="qbtn" data-go="journey">🗺️ Journey plan</button>'
+      +'<button class="qbtn" data-go="support">🛡️ '+(D.handed_over?"Support":"Warranty")+'</button></div></div>';
+    if(c) h+='<div class="card"><h2>Your design consultant</h2><div class="rule"></div><div class="person"><div class="av">'+esc(ini(c.name))+'</div><div><b>'+esc(c.name)+'</b><span>Your single point of contact at Lintel</span></div></div>'
+      +'<div class="acts"><button class="lbtn dark" data-msg="'+c.id+'">💬 Message '+esc(c.name.split(" ")[0])+'</button>'+(c.phone?'<a class="lbtn" href="tel:'+esc(String(c.phone).replace(/\s+/g,""))+'">📞 Call</a>':'')+'</div></div>';
+    h+='<div class="card"><h2>Project journey</h2><div class="rule"></div>'+st.map(function(s,i){var cls=s.status==="done"?"done":(i===cur?"now":"");var ic=s.status==="done"?"✓":(i===cur?"●":(i+1));var dt=s.done_date?("Completed "+dS(s.done_date)):(s.target_date?("Target "+dS(s.target_date)):"");
+      return '<div class="tl-row '+cls+'"><div class="tl-dot">'+ic+'</div><div class="tl-nm">'+esc(s.stage)+'</div><div class="tl-dt">'+esc(dt)+'</div></div>';}).join("")+'</div>';
+    if(D.site_address) h+='<div class="card"><h2>Site</h2><div class="rule"></div><div class="sub">📍 '+esc(D.site_address)+'</div></div>';
+    return h;
+  }
+  function tabJourney(){
+    if(D.journey_url) return '<div class="card" style="padding:12px"><h2>Your journey plan</h2><div class="rule"></div><div class="sub" style="margin-bottom:10px">Everything about how your home comes together — stages, timelines, what we need from you and when. Published '+esc(dS(D.journey_published_at))+'. <a href="'+esc(D.journey_url)+'" target="_blank" rel="noopener" style="color:var(--brassd)">Open full screen ↗</a></div><iframe class="jframe" src="'+esc(D.journey_url)+'" title="Journey plan"></iframe></div>';
+    return '<div class="card"><h2>Your journey plan</h2><div class="rule"></div><div class="empty"><div class="big">🗺️</div>Your personalised journey plan — stages, timelines and what happens when — is being prepared by '+esc(D.consultant?D.consultant.name:"your consultant")+'. It will appear here the moment it\'s published.<br><br><button class="lbtn dark" data-go="team">Ask your team about it</button></div></div>';
+  }
+  function tabPayments(){
+    if(!D.unlocked) return pinCard("Payments");
+    var pct=D.value_total?Math.min(100,Math.round(D.paid_total/D.value_total*100)):0;
+    var h='<div class="card"><h2>Payment summary</h2><div class="rule"></div>'
+      +'<div class="kv"><span>Project value</span><b>'+inr(D.value_total)+'</b></div><div class="kv"><span>Received so far</span><b style="color:var(--green)">'+inr(D.paid_total)+'</b></div><div class="kv"><span>Balance</span><b>'+inr(Math.max(0,D.value_total-D.paid_total))+'</b></div>'
+      +'<div class="pbar"><div style="width:'+pct+'%"></div></div><div class="sub" style="font-size:12px">'+pct+'% paid</div></div>';
+    h+='<div class="card"><h2>Milestones</h2><div class="rule"></div>'+(D.milestones||[]).map(function(m){
+      var paid=m.status==="paid", part=m.status==="part_paid", due=!paid&&!part&&(m.status==="link_sent"||m.pi_number);
+      var ic=paid?'<div class="m-ic paid">✓</div>':(due||part)?'<div class="m-ic due">●</div>':'<div class="m-ic later">○</div>';
+      var pi=(D.invoices||[]).filter(function(v){return v.milestone_id===m.id;}).pop(); if(pi) pi.milestone_label=m.label;
+      var acts=''; if(pi) acts+='<span class="lbtn" data-pi="'+esc(pi.pi_number)+'">📄 Invoice</span>'; if(!paid&&m.razorpay_link) acts+='<a class="lbtn pay" href="'+esc(m.razorpay_link)+'" target="_blank" rel="noopener">Pay now →</a>';
+      return '<div class="mrow">'+ic+'<div class="m-nm"><b>'+esc(m.label)+'</b><span>'+(paid?("Paid"+(m.paid_at?" · "+dS(m.paid_at):"")):part?"Partly paid":due?"Due now":"Upcoming")+(m.percent?" · "+m.percent+"%":"")+'</span>'+(acts?'<div class="m-act">'+acts+'</div>':'')+'</div><div class="m-amt">'+inr(m.amount)+'</div></div>';
+    }).join("")+'</div>';
+    if((D.payments||[]).length) h+='<div class="card"><h2>Payments received</h2><div class="rule"></div>'+(D.payments||[]).map(function(x){return '<div class="kv"><span>'+esc(dS(x.paid_on))+(x.mode?' · '+esc(x.mode):'')+(x.reference?' <span style="color:var(--grey);font-size:11px">'+esc(x.reference)+'</span>':'')+'</span><b>'+inr(x.amount)+'</b></div>';}).join("")+'</div>';
+    h+='<div class="card"><h2>Pay by UPI / bank</h2><div class="rule"></div><div class="kv"><span>UPI</span><b>Lintels234@idfcbank</b></div><div class="kv"><span>Account</span><b style="text-align:right;font-size:12px">LINTEL SPACE ATELIER INDIA PVT LTD<br>IDFC FIRST · 10218270193 · IDFB0080156</b></div><div class="sub" style="font-size:12px;margin-top:8px">After a bank transfer, share the reference with your team and we\'ll update this page.</div></div>';
+    return h;
+  }
+  function tabTeam(){
+    var team=D.team||[];
+    var h='<div class="card"><h2>Your Lintel team</h2><div class="rule"></div><div class="sub" style="margin-bottom:10px">Tap a person to write to them directly.</div><div class="team">'
+      +team.map(function(m){return '<div class="tm" data-to="'+m.id+'"><div class="av">'+esc(ini(m.name))+'</div><div><b>'+esc(m.name)+'</b><span>'+esc(m.role)+'</span></div><span class="go">›</span></div>';}).join("")+'</div></div>';
+    if(!D.unlocked) return h+pinCard("Messages");
+    h+='<div class="card"><h2>Messages</h2><div class="rule"></div><div class="msgs" id="pMsgs">'+((D.messages||[]).length?(D.messages||[]).map(function(m){
+        var who=m.sender==="client"?("You"+(m.to_name?" → "+esc(m.to_name):"")):esc(m.from_name||"Lintel team");
+        return '<div class="msg '+(m.sender==="client"?"client":"staff")+'"><div class="who">'+who+'</div>'+esc(m.body).replace(/\n/g,"<br>")+'<span class="ts">'+tS(m.created_at)+'</span></div>';
+      }).join(""):'<div class="empty">Questions, ideas, a change of mind — write to us here. Your team replies right on this page, usually within a few hours.</div>')+'</div>'
+      +'<div class="to-sel">To: <select id="pTo"><option value="">Whole Lintel team</option>'+team.map(function(m){return '<option value="'+m.id+'"'+(pendingTo==m.id?' selected':'')+'>'+esc(m.name)+' · '+esc(m.role)+'</option>';}).join("")+'</select></div>'
+      +'<div class="composer"><textarea id="pText" rows="1" placeholder="Write to your Lintel team…"></textarea><button id="pSend">➤</button></div><div class="err" id="pErr"></div></div>';
+    return h;
+  }
+  function tabSupport(){
+    var w=D.warranty||{}, terms=w.terms||[];
+    var h='';
+    if(!D.handed_over){
+      h+='<div class="card"><h2>Warranty &amp; support</h2><div class="rule"></div><div class="empty"><div class="big">🛡️</div><b style="color:var(--navy)">Your warranty begins at handover.</b><br>Until then, your team handles everything through the Team tab — just message us.</div></div>';
+    } else {
+      h+='<div class="card"><h2>Your warranty</h2><div class="rule"></div><div class="sub" style="margin-bottom:6px">'+(w.start?'Active since <b>'+esc(dS(w.start))+'</b>. Coverage by item:':'Your warranty is being registered by your team.')+'</div>'
+        +terms.map(function(t){return '<div class="wrow"><div><b>'+esc(t.label)+'</b><span>'+t.years+' year'+(t.years>1?'s':'')+(t.note?' · '+esc(t.note):'')+'</span></div><div class="exp">'+(t.expires?'valid till<br><b>'+esc(dS(t.expires))+'</b>':'')+'</div></div>';}).join("")
+        +'<div class="sub" style="font-size:11.5px;margin-top:10px">Warranty covers manufacturing and workmanship defects under normal use, as per the Lintel Warranty Charter shared at handover.</div></div>';
+    }
+    if(!D.unlocked) return h+pinCard("Support requests");
+    var tks=D.tickets||[];
+    if(D.handed_over){
+      h+='<div class="card"><h2>Raise a request</h2><div class="rule"></div><div class="sub" style="margin-bottom:10px">Tell us what needs attention. We acknowledge within 24 hours and keep you updated here.</div>'
+        +'<div class="field"><label>Type</label><select id="tkCat"><option value="warranty_claim">Warranty claim — something isn\'t working / damaged</option><option value="service_request">Service request — adjustment, alignment, maintenance</option><option value="complaint">Complaint</option><option value="general">General query</option></select></div>'
+        +'<div class="field" id="tkWcWrap"><label>Which item?</label><select id="tkWc"><option value="">Select…</option>'+terms.map(function(t){return '<option value="'+esc(t.key)+'">'+esc(t.label)+'</option>';}).join("")+'</select></div>'
+        +'<div class="field"><label>Summary</label><input type="text" id="tkSubj" maxlength="140" placeholder="e.g. Kitchen drawer not closing smoothly"></div>'
+        +'<div class="field"><label>Details</label><textarea id="tkDetail" rows="3" placeholder="Where is it, what\'s happening, since when? Photos can be shared with your team on WhatsApp."></textarea></div>'
+        +'<button class="btn" id="tkGo">Submit request</button><div class="err" id="tkErr"></div><div class="ok" id="tkOk"></div></div>';
+    }
+    h+='<div class="card"><h2>Your requests</h2><div class="rule"></div>'+(tks.length?tks.map(function(t){
+      var step=ST_STEP[t.status]||1, doneAll=step>=4;
+      return '<div class="tk"><div class="tk-h"><div><b>'+esc(t.subject||CAT_LABEL[t.category]||"Request")+'</b><small>#'+t.id+' · '+esc(CAT_LABEL[t.category]||t.category)+(t.warranty_category?' · '+esc((terms.find(function(x){return x.key===t.warranty_category;})||{}).label||t.warranty_category):'')+' · raised '+esc(dS(t.created_at))+'</small></div><span class="st '+esc(t.status)+'">'+esc(ST_LABEL[t.status]||t.status)+'</span></div>'
+        +'<div class="steps">'+[1,2,3,4].map(function(i){return '<i class="'+(i<step?"done":i===step?(doneAll?"done":"on"):"")+'"></i>';}).join("")+'</div>'
+        +'<div class="sub" style="font-size:11px;display:flex;justify-content:space-between"><span>Received</span><span>Acknowledged</span><span>In progress</span><span>Resolved</span></div>'
+        +(t.detail?'<div class="sub" style="margin-top:8px">'+esc(t.detail)+'</div>':'')
+        +(t.events||[]).map(function(e){return '<div class="ev"><b>'+(e.kind==="client_msg"?"You":e.kind==="status_change"?"Lintel":"Lintel team")+'</b> · '+esc(tS(e.created_at))+' — '+esc(e.text||"")+'</div>';}).join("")
+        +(doneAll?'':'<div class="composer" style="margin-top:8px"><textarea rows="1" placeholder="Add an update or photo reference…" data-tkn="'+t.id+'"></textarea><button data-tks="'+t.id+'">➤</button></div>')
+        +'</div>';
+    }).join(""):'<div class="empty">No requests yet. '+(D.handed_over?"Raise one above whenever something needs our attention.":"")+'</div>')+'</div>';
+    return h;
   }
 
   function render(){
-    var stages=D.stages||[];
-    var curIdx=stages.findIndex(function(s){return s.status!=="done";}); if(curIdx<0) curIdx=stages.length-1;
-    var doneN=stages.filter(function(s){return s.status==="done";}).length;
-    var html='';
-    // ---- hero ----
-    html+='<div class="card"><h1>Hello '+esc(D.client_first||"there")+' 👋</h1>'
-      +'<div class="sub">Here\'s the live status of your home — <b>'+esc(D.code||"")+'</b>'+(D.consultant?' · your consultant is <b>'+esc(D.consultant.name)+'</b>':'')+'</div>'
-      +'<div style="margin-top:10px"><span class="chip">'+esc(D.current_stage||"In progress")+'</span> <span class="sub" style="font-size:12px">'+doneN+' of '+stages.length+' stages complete</span></div></div>';
-    // ---- timeline ----
-    html+='<div class="card"><h2>Project journey</h2><div class="rule"></div><div class="tl">'
-      +stages.map(function(s,i){return stageRow(s,i,curIdx);}).join("")+'</div></div>';
-    // ---- your team ----
-    var team=D.team||[];
-    if(team.length){
-      html+='<div class="card"><h2>Your Lintel team</h2><div class="rule"></div><div class="sub" style="margin-bottom:10px">Tap a person to write to them directly, or message the whole team below.</div><div class="team">'
-        +team.map(function(m){ var ini=m.name.split(/\s+/).slice(0,2).map(function(x){return x[0]||"";}).join("").toUpperCase();
-          return '<div class="tm" data-to="'+m.id+'"><div class="av">'+esc(ini)+'</div><div><b>'+esc(m.name)+'</b><span>'+esc(m.role)+'</span></div></div>'; }).join("")
-        +'</div></div>';
-    }
-    // ---- payments ----
-    if(D.unlocked){
-      var pct=D.value_total?Math.min(100,Math.round(D.paid_total/D.value_total*100)):0;
-      html+='<div class="card"><h2>Payments</h2><div class="rule"></div>'
-        +'<div class="sub"><b style="color:var(--ink)">'+inr(D.paid_total)+'</b> received of <b style="color:var(--ink)">'+inr(D.value_total)+'</b> · '+pct+'%</div>'
-        +'<div class="bar"><div style="width:'+pct+'%"></div></div>'
-        +(D.milestones||[]).map(function(m){
-          var paid=m.status==="paid", part=m.status==="part_paid";
-          var due=!paid&&!part&&(m.status==="link_sent"||m.pi_number);
-          var ic=paid?'<div class="m-ic paid">✓</div>':(due||part)?'<div class="m-ic due">●</div>':'<div class="m-ic later">○</div>';
-          var pi=(D.invoices||[]).filter(function(v){return v.milestone_id===m.id;}).pop();
-          if(pi) pi.milestone_label=m.label;
-          var acts='';
-          if(pi) acts+='<span class="lbtn" data-pi="'+esc(pi.pi_number)+'">📄 Invoice</span>';
-          if(!paid&&m.razorpay_link) acts+='<a class="lbtn pay" href="'+esc(m.razorpay_link)+'" target="_blank" rel="noopener">Pay now →</a>';
-          return '<div class="mrow">'+ic+'<div class="m-nm"><b>'+esc(m.label)+'</b>'
-            +'<span>'+(paid?("Paid"+(m.paid_at?" · "+dS(m.paid_at):"")):part?"Partly paid":due?"Due now":"Upcoming")+(m.percent?" · "+m.percent+"%":"")+'</span>'
-            +(acts?'<div class="m-act">'+acts+'</div>':'')+'</div>'
-            +'<div class="m-amt">'+inr(m.amount)+'</div></div>';
-        }).join("")+'</div>';
-      // ---- messages ----
-      html+='<div class="card"><h2>Messages with your team</h2><div class="rule"></div>'
-        +'<div class="msgs" id="pMsgs">'+((D.messages||[]).length?(D.messages||[]).map(function(m){
-            var who=m.sender==="client"?("You"+(m.to_name?" → "+esc(m.to_name):"")):esc(m.from_name||"Lintel team");
-            return '<div class="msg '+(m.sender==="client"?"client":"staff")+'"><div class="who">'+who+'</div>'+esc(m.body).replace(/\n/g,"<br>")+'<span class="ts">'+tS(m.created_at)+'</span></div>';
-          }).join(""):'<div class="sub" style="text-align:center;padding:14px">Questions about your project? Write to us here — the team replies right on this page.</div>')+'</div>'
-        +'<div class="to-sel">To: <select id="pTo"><option value="">Whole Lintel team</option>'+(D.team||[]).map(function(m){return '<option value="'+m.id+'">'+esc(m.name)+' · '+esc(m.role)+'</option>';}).join("")+'</select></div>'
-        +'<div class="composer"><textarea id="pText" rows="1" placeholder="Write to your Lintel team…"></textarea><button id="pSend">➤</button></div>'
-        +'<div class="err" id="pErr"></div></div>';
-    } else {
-      html+='<div class="card"><h2>Payments &amp; messages</h2><div class="rule"></div>'
-        +'<div class="sub" style="text-align:center">To protect your details, enter the <b>last 4 digits of your registered mobile number</b>.</div>'
-        +'<div class="pin">'+[0,1,2,3].map(function(i){return '<input inputmode="numeric" maxlength="1" id="pin'+i+'">';}).join("")+'</div>'
-        +'<button class="btn" id="pinGo">Unlock</button><div class="err" id="pinErr"></div></div>';
-    }
-    wrap.innerHTML=html;
-
-    wrap.querySelectorAll("[data-to]").forEach(function(el){
-      el.onclick=function(){
-        wrap.querySelectorAll(".tm").forEach(function(x){x.classList.toggle("on",x===el);});
-        var sel=document.getElementById("pTo"), txt=document.getElementById("pText");
-        if(sel){ sel.value=el.dataset.to; txt.placeholder="Write to "+el.querySelector("b").textContent+"…"; txt.focus(); txt.scrollIntoView({behavior:"smooth",block:"center"}); }
-        else { var pin0=document.getElementById("pin0"); if(pin0){ pin0.scrollIntoView({behavior:"smooth",block:"center"}); pin0.focus(); } }
-      };
-    });
-    wrap.querySelectorAll("[data-pi]").forEach(function(el){
-      el.onclick=function(){ var pi=(D.invoices||[]).find(function(v){return v.pi_number===el.dataset.pi;}); if(pi) openInvoice(pi); };
-    });
-    if(D.unlocked){
-      var box=document.getElementById("pMsgs"); if(box) box.scrollTop=box.scrollHeight;
-      var send=document.getElementById("pSend"), txt=document.getElementById("pText"), err=document.getElementById("pErr");
-      var sending=false;
-      if(send) send.onclick=function(){
-        var body=txt.value.trim(); if(!body||sending) return;
-        sending=true; send.disabled=true; txt.disabled=true;
-        var toSel=document.getElementById("pTo"), toId=toSel?toSel.value:"", toName=toSel&&toSel.value?toSel.options[toSel.selectedIndex].textContent.split(" · ")[0]:"";
-        // show it instantly — the server confirms in the background
-        var m=document.createElement("div"); m.className="msg client";
-        m.innerHTML='<div class="who">You'+(toName?" → "+esc(toName):"")+'</div>'+esc(body).replace(/\n/g,"<br>")+'<span class="ts">sending…</span>';
-        var box=document.getElementById("pMsgs"); var empty=box.querySelector(".sub"); if(empty) empty.remove(); box.appendChild(m); box.scrollTop=box.scrollHeight;
-        txt.value="";
-        fetch(FN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({t:token,pin:PIN,action:"message",body:body,to_member_id:toId||null})})
-        .then(function(r){return r.json();}).then(function(j){
-          sending=false; send.disabled=false; txt.disabled=false; txt.focus();
-          if(j.error){ err.textContent=j.error; m.remove(); txt.value=body; return; }
-          err.textContent=""; m.querySelector(".ts").textContent=tS(new Date().toISOString());
-        }).catch(function(){ sending=false; send.disabled=false; txt.disabled=false; err.textContent="Network error — try again"; m.remove(); txt.value=body; });
-      };
-      if(txt) txt.onkeydown=function(e){ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send.onclick();} };
-    } else {
-      var ins=[0,1,2,3].map(function(i){return document.getElementById("pin"+i);});
-      ins.forEach(function(el,i){ el.oninput=function(){ el.value=el.value.replace(/\D/g,""); if(el.value&&i<3) ins[i+1].focus(); };
-        el.onkeydown=function(e){ if(e.key==="Backspace"&&!el.value&&i>0) ins[i-1].focus(); }; });
-      if(ins[0]) ins[0].focus();
-      document.getElementById("pinGo").onclick=function(){
-        var pin=ins.map(function(el){return el.value;}).join("");
-        if(pin.length<4){document.getElementById("pinErr").textContent="Enter all 4 digits";return;}
-        PIN=pin; sessionStorage.setItem("lsa_pin_"+token,pin);
-        load().then(function(){ if(D&&!D.unlocked){ PIN=""; sessionStorage.removeItem("lsa_pin_"+token); document.getElementById("pinErr").textContent="That didn't match — use the last 4 digits of the mobile number we have on file."; } });
-      };
-    }
+    document.getElementById("hdrCode").textContent=D.code||"";
+    tabsEl.style.display="";
+    tabsEl.querySelectorAll(".tab").forEach(function(b){ b.classList.toggle("on",b.dataset.tab===TAB); b.onclick=function(){ TAB=b.dataset.tab; sessionStorage.setItem("lsa_tab_"+token,TAB); render(); window.scrollTo(0,0); }; });
+    tabsEl.querySelector('[data-tab="payments"]').classList.toggle("has",!!(D.milestones||[]).find(function(m){return m.status!=="paid"&&(m.status==="link_sent"||m.pi_number);}));
+    tabsEl.querySelector('[data-tab="support"]').classList.toggle("has",!!(D.tickets||[]).find(function(t){return t.status!=="resolved"&&t.status!=="closed";}));
+    tabsEl.querySelector('[data-tab="journey"]').classList.toggle("has",!!D.journey_url && !sessionStorage.getItem("lsa_j_"+token));
+    wrap.innerHTML = TAB==="journey"?tabJourney():TAB==="payments"?tabPayments():TAB==="team"?tabTeam():TAB==="support"?tabSupport():tabHome();
+    if(TAB==="journey"&&D.journey_url) sessionStorage.setItem("lsa_j_"+token,"1");
+    bindPin();
+    wrap.querySelectorAll("[data-go]").forEach(function(el){ el.onclick=function(){ TAB=el.dataset.go; sessionStorage.setItem("lsa_tab_"+token,TAB); render(); window.scrollTo(0,0); }; });
+    wrap.querySelectorAll("[data-msg]").forEach(function(el){ el.onclick=function(){ pendingTo=el.dataset.msg; TAB="team"; sessionStorage.setItem("lsa_tab_"+token,TAB); render(); var t=document.getElementById("pText"); if(t){ t.focus(); t.scrollIntoView({behavior:"smooth",block:"center"}); } }; });
+    wrap.querySelectorAll("[data-to]").forEach(function(el){ el.onclick=function(){ wrap.querySelectorAll(".tm").forEach(function(x){x.classList.toggle("on",x===el);}); var sel=document.getElementById("pTo"), txt=document.getElementById("pText");
+      if(sel){ sel.value=el.dataset.to; txt.placeholder="Write to "+el.querySelector("b").textContent+"…"; txt.focus(); txt.scrollIntoView({behavior:"smooth",block:"center"}); } else { pendingTo=el.dataset.to; var p0=document.getElementById("pin0"); if(p0){p0.scrollIntoView({behavior:"smooth",block:"center"});p0.focus();} } }; });
+    wrap.querySelectorAll("[data-pi]").forEach(function(el){ el.onclick=function(){ var pi=(D.invoices||[]).find(function(v){return v.pi_number===el.dataset.pi;}); if(pi) openInvoice(pi); }; });
+    var box=document.getElementById("pMsgs"); if(box) box.scrollTop=box.scrollHeight;
+    var send=document.getElementById("pSend"), txt=document.getElementById("pText"), err=document.getElementById("pErr"), sending=false;
+    if(send) send.onclick=function(){
+      var body=txt.value.trim(); if(!body||sending) return; sending=true; send.disabled=true; txt.disabled=true;
+      var toSel=document.getElementById("pTo"), toId=toSel?toSel.value:"", toName=toSel&&toSel.value?toSel.options[toSel.selectedIndex].textContent.split(" · ")[0]:"";
+      var m=document.createElement("div"); m.className="msg client"; m.innerHTML='<div class="who">You'+(toName?" → "+esc(toName):"")+'</div>'+esc(body).replace(/\n/g,"<br>")+'<span class="ts">sending…</span>';
+      var emp=box.querySelector(".empty"); if(emp) emp.remove(); box.appendChild(m); box.scrollTop=box.scrollHeight; txt.value="";
+      post({action:"message",body:body,to_member_id:toId||null}).then(function(j){ sending=false; send.disabled=false; txt.disabled=false; txt.focus();
+        if(j.error){ err.textContent=j.error; m.remove(); txt.value=body; return; } err.textContent=""; m.querySelector(".ts").textContent=tS(new Date().toISOString());
+      }).catch(function(){ sending=false; send.disabled=false; txt.disabled=false; err.textContent="Network error — try again"; m.remove(); txt.value=body; });
+    };
+    if(txt) txt.onkeydown=function(e){ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send.onclick();} };
+    var cat=document.getElementById("tkCat"); if(cat){ var wc=document.getElementById("tkWcWrap"); var sync=function(){ wc.style.display=(cat.value==="warranty_claim"||cat.value==="service_request")?"":"none"; }; cat.onchange=sync; sync(); }
+    var go=document.getElementById("tkGo"); if(go) go.onclick=function(){
+      var e=document.getElementById("tkErr"), ok=document.getElementById("tkOk"); e.textContent=""; ok.textContent="";
+      var detail=document.getElementById("tkDetail").value.trim(); if(!detail) return e.textContent="Please describe the issue so we can help quickly.";
+      go.disabled=true; go.textContent="Submitting…";
+      post({action:"ticket",category:cat.value,warranty_category:(document.getElementById("tkWc")||{}).value||null,subject:document.getElementById("tkSubj").value.trim(),detail:detail})
+      .then(function(j){ if(j.error){ e.textContent=j.error; go.disabled=false; go.textContent="Submit request"; return; } ok.textContent="Received — request #"+j.ticket_id+". We'll acknowledge within 24 hours."; setTimeout(load,900); })
+      .catch(function(){ e.textContent="Network error — try again"; go.disabled=false; go.textContent="Submit request"; });
+    };
+    wrap.querySelectorAll("[data-tks]").forEach(function(b){ b.onclick=function(){ var ta=wrap.querySelector('[data-tkn="'+b.dataset.tks+'"]'); var body=(ta.value||"").trim(); if(!body) return; b.disabled=true;
+      post({action:"ticket_note",ticket_id:Number(b.dataset.tks),body:body}).then(function(j){ if(j.error){ alert(j.error); b.disabled=false; return; } load(); }); }; });
   }
   load();
-  setInterval(function(){ if(D&&D.unlocked) load(); }, 45000);   // keep messages fresh
+  setInterval(function(){ if(D&&D.unlocked&&(TAB==="team"||TAB==="support")) load(); }, 45000);
 })();
 </script>
 </body>
