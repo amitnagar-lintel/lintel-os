@@ -1405,7 +1405,7 @@ async function enter(session){
 }
 
 /* ---------- toast + modal ---------- */
-function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200);}
+function toast(msg,ms){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),ms||2200);}
 /* ---- WhatsApp click-to-chat ---- */
 function waNumber(phone){
   let d=String(phone||"").replace(/[^0-9]/g,"");
@@ -1663,8 +1663,8 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim()))?"":"none";
 }
 /* CSAT on the dashboard: KPI tile (avg ★ this month) + low-score watchlist strip */
 /* Monthly sales — booked (converted) value ex-GST per month, FY-to-date from April.
@@ -1795,6 +1795,7 @@ async function renderDashboard(){
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashClientReplies"></div>
+      <div id="dashClientPortal"></div>
       <div id="dashCsatLow"></div>
       <div id="dashPostSales"></div>
       <div id="dashDelivery"></div>
@@ -1852,6 +1853,7 @@ async function renderDashboard(){
   renderDeliveryRadar("#dashDelivery");
   renderCsatDash();
   renderMonthlySales();
+  if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
 
@@ -3184,7 +3186,7 @@ async function portalPanel(p, hostSel){
       ${pin?`<div style="font-size:11px;color:var(--ink-soft);margin-bottom:8px">Client unlocks payments with PIN <b>${pin}</b> (last 4 of their mobile).</div>`:""}
       <div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
         ${msgs.length?msgs.map(m=>`<div style="align-self:${m.sender==="client"?"flex-start":"flex-end"};max-width:88%;padding:6px 10px;border-radius:10px;font-size:12.5px;line-height:1.45;${m.sender==="client"?"background:#fff;border:1px solid var(--line-2)":"background:var(--navy);color:#fff"}">
-            ${m.sender==="client"?`<div style="font-size:10px;font-weight:700;color:var(--brass-deep)">${esc((p.client_name||"Client").split(" ")[0])}</div>`:""}
+            ${m.sender==="client"?`<div style="font-size:10px;font-weight:700;color:var(--brass-deep)">${esc((p.client_name||"Client").split(" ")[0])}${m.to_member_id?` → ${esc(staffName(m.to_member_id)||"team")}`:""}</div>`:`<div style="font-size:10px;font-weight:700;color:var(--brass)">${esc(staffNameByProfile(m.staff_id)||"Lintel")}</div>`}
             ${esc(m.body).replace(/\n/g,"<br>")}
             <div style="font-size:9px;opacity:.55;text-align:right">${new Date(m.created_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}</div>
           </div>`).join(""):`<div style="color:var(--ink-soft);font-size:12px;text-align:center;padding:8px">No client messages yet.</div>`}
@@ -9233,7 +9235,8 @@ const WHATS_NEW=[
   {build:"b33",date:"21 Aug 2026",title:"Team chat, client portal & sales dashboard",points:[
     "<b>Team chat</b>: press the new <b>💬</b> at the bottom-right — message the whole team in <b># Lintel Team</b> or any teammate 1-to-1, and attach files up to 25 MB with the 📎 (BOQs, drawings, docs). A red badge shows unread messages.",
     "<b>Send to chat</b>: every BOQ and proforma invoice now has a <b>💬 Send to chat</b> button — it shares the PDF straight into a chat conversation.",
-    "<b>Client portal</b>: open a project → Overview → <b>Client portal</b> card → Enable, then Copy link or WhatsApp it. The client sees their stage journey, payments (with invoice download & Pay-now), and can message the team — payments unlock with the last 4 digits of their mobile. Their messages appear in the same card with a reply box.",
+    "<b>Client portal</b>: open a project → Overview → <b>Client portal</b> card → Enable, then Copy link or WhatsApp it. The client sees their stage journey, their project team, payments (with invoice download & Pay-now), and can write to the whole team or to one person — payments unlock with the last 4 digits of their mobile.",
+    "<b>When a client writes</b>, you'll see a pop-up toast instantly, a red count on the 💬 button, a <b>Clients waiting</b> section at the top of the chat drawer (tap to read & reply right there), and a strip in the dashboard's Needs-attention card. Messages addressed to you are marked <b>for you</b>.",
     "<b>Monthly sales graph</b> on the dashboard (from April, ex-GST) and CSAT feedback surveys now go out automatically at five project stages.",
     "Leads: structured <b>site address</b> (society, door no, area, pincode + Google-Maps pin) and conversion now requires phone, email, address & PAN. PAN shows masked except to admins."]},
   {build:"b25",date:"31 Jul 2026",title:"A calmer, cleaner Lintel OS",points:[
@@ -9306,7 +9309,39 @@ function chatInitials(n){ return n.split(/\s+/).slice(0,2).map(x=>x[0]||"").join
 function chatFmtSize(b){ b=Number(b)||0; return b>1048576?(b/1048576).toFixed(1)+" MB":b>1024?Math.round(b/1024)+" KB":b+" B"; }
 function chatTs(iso){ const d=new Date(iso), today=new Date().toDateString()===d.toDateString();
   return (today?"":d.toLocaleDateString("en-IN",{day:"numeric",month:"short"})+" ")+d.toLocaleTimeString("en-IN",{hour:"numeric",minute:"2-digit"}); }
-function chatTotalUnread(){ return Object.values(CHAT.unread).reduce((s,n)=>s+(Number(n)||0),0); }
+function chatTotalUnread(){ return Object.values(CHAT.unread).reduce((s,n)=>s+(Number(n)||0),0) + (CHAT.inbox||[]).reduce((s,r)=>s+(Number(r.unread)||0),0); }
+/* My team_directory id (client messages are addressed to team_directory members) */
+function myMemberId(){ const e=(me&&me.email||"").toLowerCase(); const st=(STAFF||[]).find(x=>String(x.email||"").toLowerCase()===e); return st?st.id:null; }
+async function chatRefreshInbox(){
+  try{ const {data}=await sb.rpc("client_inbox"); CHAT.inbox=Array.isArray(data)?data:[]; chatPaintBadge();
+    if(CHAT.open&&CHAT.view==="list") chatRenderList(); renderClientInboxStrip(); }catch(e){}
+}
+/* Dashboard "Needs attention" strip: clients waiting on the portal */
+function renderClientInboxStrip(){
+  const host=$("#dashClientPortal"); if(!host) return;
+  const rows=CHAT.inbox||[]; const mine=myMemberId();
+  if(!rows.length){ host.innerHTML=""; if(typeof dashAttnSync==="function") dashAttnSync(); return; }
+  host.innerHTML=`<div class="cr-strip"><div class="cr-head"><span class="cr-title">Clients waiting on the portal <span class="cr-n">${rows.reduce((s,r)=>s+Number(r.unread||0),0)}</span></span></div>
+    ${rows.map(r=>`<div class="cr-item" data-cp="${r.project_id}" style="cursor:pointer"><div class="cr-main">
+      <div><b>${esc(r.client_name||r.name)}</b> <span style="color:var(--ink-soft);font-size:11px">· ${esc(r.code||"")}${r.last_to_member_id?` · to ${esc(staffName(r.last_to_member_id))}`:""}${mine&&Number(r.last_to_member_id)===Number(mine)?` <span style="background:#C0392B;color:#fff;border-radius:8px;padding:0 6px;font-size:10px">for you</span>`:""}</span></div>
+      <div style="font-size:12px;color:var(--ink-soft);font-style:italic;margin-top:2px">“${esc(String(r.last_body||"").slice(0,120))}”</div></div>
+      <span class="cr-n">${r.unread}</span></div>`).join("")}</div>`;
+  host.querySelectorAll("[data-cp]").forEach(el=>el.onclick=()=>chatOpenClient(Number(el.dataset.cp)));
+  if(typeof dashAttnSync==="function") dashAttnSync();
+}
+/* Client thread inside the chat drawer */
+async function chatOpenClient(projectId){
+  if(!CHAT.open) chatToggle();
+  CHAT.view="client"; CHAT.conv={client:projectId};
+  const {data:p}=await sb.from("projects").select("id,code,name,client_name,client_phone,portal_token,portal_enabled_at,consultant_id,designer_id,pm_id").eq("id",projectId).single();
+  if(!p){ toast("Project not found"); return chatRenderList(); }
+  $("#chatHeadTitle").textContent=(p.client_name||p.name)+" · "+(p.code||"client"); $("#chatBack").style.display="";
+  $("#chatBody").innerHTML=`<div style="flex:1;overflow:hidden;display:flex;flex-direction:column"><div id="chatClientHost" style="flex:1;overflow-y:auto;padding:10px 12px"></div>
+    <div style="padding:6px 12px;border-top:1px solid var(--line-2);font-size:11px;color:var(--ink-soft)"><a href="#" id="chatClientOpen" style="color:var(--brass-deep)">Open project →</a></div></div>`;
+  await portalPanel(p,"#chatClientHost");
+  $("#chatClientOpen").onclick=(e)=>{ e.preventDefault(); chatToggle(); activeProject=p.id; projectTab="overview"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(p.id),60); };
+  chatRefreshInbox();
+}
 function chatPaintBadge(){ const b=document.querySelector("#chatFab .cbadge"); if(!b) return;
   const n=chatTotalUnread(); b.style.display=n?"block":"none"; b.textContent=n>99?"99+":n; }
 
@@ -9329,7 +9364,12 @@ function chatRenderList(){
   CHAT.view="list"; CHAT.conv=null;
   $("#chatHeadTitle").textContent="Team chat"; $("#chatBack").style.display="none";
   const un=k=>Number(CHAT.unread[k]||0);
+  const inbox=CHAT.inbox||[]; const mineId=myMemberId();
   $("#chatBody").innerHTML=`<div class="chat-list">
+    ${inbox.length?`<div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;letter-spacing:.5px;color:#A33C3C;text-transform:uppercase">Clients waiting · portal</div>`+inbox.map(r=>`<div class="chat-conv" data-client="${r.project_id}" style="background:#FFF8F6">
+        <div class="cav" style="background:#A33C3C;color:#fff">${esc(String(r.client_name||r.name||"?").split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase())}</div>
+        <div class="cnm">${esc(r.client_name||r.name)}<small>${esc(r.code||"")}${r.last_to_member_id?" · to "+esc(staffName(r.last_to_member_id)):""}${mineId&&Number(r.last_to_member_id)===Number(mineId)?" · <b style='color:#A33C3C'>for you</b>":""} — “${esc(String(r.last_body||"").slice(0,60))}”</small></div>
+        <span class="cun">${r.unread}</span></div>`).join("")+`<div style="padding:8px 14px 4px;font-size:10.5px;font-weight:700;letter-spacing:.5px;color:var(--ink-soft);text-transform:uppercase">Team</div>`:""}
     <div class="chat-conv" data-conv="team"><div class="cav">LT</div>
       <div class="cnm"># Lintel Team<small>everyone at Lintel</small></div>
       ${un("team")?`<span class="cun">${un("team")}</span>`:""}</div>
@@ -9339,6 +9379,7 @@ function chatRenderList(){
         ${un(k)?`<span class="cun">${un(k)}</span>`:""}</div>`; }).join("")}
   </div>`;
   $("#chatBody").querySelectorAll("[data-conv]").forEach(el=>el.onclick=()=>chatOpenConv(el.dataset.conv, el.dataset.peer||null));
+  $("#chatBody").querySelectorAll("[data-client]").forEach(el=>el.onclick=()=>chatOpenClient(Number(el.dataset.client)));
 }
 async function chatOpenConv(key, peerId){
   CHAT.view="thread"; CHAT.conv={key, peer:peerId};
@@ -9428,7 +9469,19 @@ function chatRealtime(){
           CHAT.unread[m.conv_key]=(Number(CHAT.unread[m.conv_key])||0)+1; chatPaintBadge();
           if(CHAT.open&&CHAT.view==="list") chatRenderList();
         }
-      }).subscribe();
+      })
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"client_messages"},payload=>{
+        const m=payload.new||{};
+        if(m.sender!=="client") return;
+        const mine=myMemberId(); const forMe=m.to_member_id&&mine&&Number(m.to_member_id)===Number(mine);
+        sb.from("projects").select("code,client_name,name").eq("id",m.project_id).single().then(({data:p})=>{
+          const who=p?(p.client_name||p.name):"A client";
+          toast(`💬 ${who}${forMe?" asked YOU":m.to_member_id?" asked "+staffName(m.to_member_id):""}: “${String(m.body||"").slice(0,80)}” — open 💬 to reply`, 9000);
+        });
+        if(CHAT.open&&CHAT.view==="client"&&CHAT.conv&&Number(CHAT.conv.client)===Number(m.project_id)) chatOpenClient(m.project_id);
+        chatRefreshInbox();
+      })
+      .subscribe();
   }catch(e){ /* realtime unavailable -> the 25s poll still covers it */ }
 }
 (function chatBoot(){
@@ -9447,11 +9500,11 @@ function chatRealtime(){
        </div>`);
     $("#chatFab").onclick=chatToggle;
     $("#chatClose").onclick=chatToggle;
-    $("#chatBack").onclick=()=>chatRenderList();
+    $("#chatBack").onclick=()=>{ chatRenderList(); chatRefreshInbox(); };
     await chatLoadPeople();
-    chatRefreshUnread();
+    chatRefreshUnread(); chatRefreshInbox();
     chatRealtime();
-    setInterval(chatRefreshUnread, 60000);   // badge keeps up even with the panel closed
+    setInterval(()=>{ chatRefreshUnread(); chatRefreshInbox(); }, 60000);   // badge keeps up even with the panel closed
   },800);
 })();
 
@@ -10667,7 +10720,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b33 · 21 Aug 2026";
+const APP_BUILD = "b34 · 21 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
