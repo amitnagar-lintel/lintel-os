@@ -733,6 +733,45 @@
     border:none;background:var(--navy);color:var(--brass);font-size:20px;box-shadow:var(--shadow);
     display:flex;align-items:center;justify-content:center;transition:transform .15s}
   #assistFab:hover{transform:scale(1.06)}
+  /* ===== Projects command centre ===== */
+  .pj-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .pj-controls input[type=search]{flex:1;min-width:160px;max-width:280px;border:1px solid var(--line-2);border-radius:9px;padding:8px 12px;font:inherit;font-size:13px;background:#fff;outline:none}
+  .pj-controls input[type=search]:focus{border-color:var(--brass)}
+  .pj-chip{border:1px solid var(--line-2);border-radius:20px;padding:6px 13px;background:#fff;font:600 12px Inter;color:var(--ink-soft);cursor:pointer}
+  .pj-chip.on{background:var(--navy);color:var(--brass);border-color:var(--navy)}
+  .pj-controls select{border:1px solid var(--line-2);border-radius:9px;padding:7px 9px;font:inherit;font-size:12.5px;background:#fff;color:var(--ink)}
+  .pj-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .pj-stat{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line-2);border-radius:11px;padding:9px 14px;font-size:12.5px;color:var(--ink-soft);cursor:pointer}
+  .pj-stat b{font-size:16px;color:var(--ink)}
+  .pj-stat .hd{width:9px;height:9px;border-radius:50%}
+  .pj-stat.sel{border-color:var(--brass);background:#FFF9EA}
+  .pj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+  .pjc{background:#fff;border:1px solid var(--line-2);border-left:4px solid var(--line-2);border-radius:13px;padding:14px 16px;cursor:pointer;transition:box-shadow .15s,transform .15s;display:flex;flex-direction:column;gap:9px}
+  .pjc:hover{box-shadow:0 10px 30px -14px rgba(13,13,39,.28);transform:translateY(-1px)}
+  .pjc.h-green{border-left-color:#4f7d52}.pjc.h-amber{border-left-color:#DFB05E}.pjc.h-red{border-left-color:#B4453A}
+  .pjc-top{display:flex;align-items:center;gap:8px}
+  .pjc-code{font:600 11px ui-monospace,monospace;color:var(--ink-soft);letter-spacing:.5px}
+  .pjc-health{margin-left:auto;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px}
+  .pjc-health.h-green{background:#EEF6EF;color:#2E7D5B}.pjc-health.h-amber{background:#FFF6E2;color:#946F33}.pjc-health.h-red{background:#FBEFEE;color:#B4453A}
+  .pjc-name{font-size:15.5px;font-weight:700;color:var(--ink);line-height:1.25}
+  .pjc-sub{font-size:11.5px;color:var(--ink-soft)}
+  .pjc-steps{display:flex;gap:4px;align-items:center}
+  .pjc-steps i{flex:1;height:5px;border-radius:3px;background:#EFEAE0}
+  .pjc-steps i.done{background:#4f7d52}.pjc-steps i.cur{background:var(--brass)}
+  .pjc-steps span{font-size:10.5px;color:var(--ink-soft);white-space:nowrap;margin-left:4px}
+  .pjc-money{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--ink-soft)}
+  .pjc-money b{font-size:13px;color:var(--ink)}
+  .pjc-bar{flex:1;height:6px;border-radius:4px;background:#EFEAE0;overflow:hidden}
+  .pjc-bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--brass),#C89440)}
+  .pjc-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-height:22px}
+  .pjb{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:7px;background:var(--paper);border:1px solid var(--line);color:var(--ink-soft)}
+  .pjb.warn{background:#FFF6E2;border-color:#E8CD9A;color:#946F33}
+  .pjb.bad{background:#FBEFEE;border-color:#E4B6B0;color:#B4453A}
+  .pjc-foot{display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding-top:9px;margin-top:auto}
+  .pjc-avs{display:flex}
+  .pjc-avs .av2{width:26px;height:26px;border-radius:50%;background:var(--navy);color:var(--brass);display:flex;align-items:center;justify-content:center;font:700 10px Inter;border:2px solid #fff;margin-left:-6px}
+  .pjc-avs .av2:first-child{margin-left:0}
+  .pjc-foot .sp{flex:1}
   /* ===== Team chat ===== */
   #chatFab{position:fixed;right:20px;bottom:84px;z-index:600;width:52px;height:52px;border-radius:50%;
     border:none;background:var(--paper);color:var(--navy);font-size:21px;border:1px solid var(--line-2);
@@ -3875,67 +3914,153 @@ function warrantyPill(p){
 
 async function renderProjects(){
   if(activeProject) return renderProjectWorkspace(activeProject);
+  await ensureStaff();
   const m=$("#main");
+  const view=localStorage.getItem("lsa_projview")||"cards";
   m.innerHTML=`<div class="view-head"><div><h2 class="display">Projects</h2>
-    <div class="sub">Click a project to open its workspace</div></div>
-    ${canWrite()?`<button class="primary" id="newProjBtn">+ Create a New project</button>`:""}</div>
+    <div class="sub">Your delivery command centre — reds first, then ambers.</div></div>
+    ${canWrite()?`<button class="primary" id="newProjBtn">+ New project</button>`:""}</div>
+    <div class="pj-stats" id="pjStats"></div>
+    <div class="pj-controls">
+      <input type="search" id="pjQ" placeholder="Search project, client, code…" value="${esc(renderProjects._q||"")}">
+      <button class="pj-chip ${renderProjects._mine?"on":""}" id="pjMine" title="Only projects where you are consultant, designer or PM">My projects</button>
+      <select id="pjWho"><option value="">Everyone</option>${STAFF.filter(s=>s.designation!=="Internal Admin").map(s=>`<option value="${s.id}" ${String(renderProjects._who||"")===String(s.id)?"selected":""}>${esc(s.full_name||s.email)}</option>`).join("")}</select>
+      <span style="flex:1"></span>
+      <button class="pj-chip ${view==="cards"?"on":""}" data-vw="cards">▦ Cards</button>
+      <button class="pj-chip ${view==="list"?"on":""}" data-vw="list">☰ List</button>
+    </div>
     <div class="viewtoggle" id="projTabs" style="margin-bottom:14px"></div>
     <div id="projWrap">Loading…</div>`;
   if(canWrite()) $("#newProjBtn").onclick=()=>newProjectForm();
-  const [{data:projects,error},{data:pays}]=await Promise.all([
-    sb.from("projects").select("*").order("created_at",{ascending:false}),
-    sb.from("project_payments").select("project_id,amount")
-  ]);
-  if(error){$("#projWrap").innerHTML=esc(error.message);return;}
-  const all=projects||[];
-  const paid={};
-  (pays||[]).forEach(r=>{ paid[r.project_id]=(paid[r.project_id]||0)+Number(r.amount||0); });
-  const pctOf=p=>{ const inv=Number(p.invoiced_total)||Number(p.contract_value)||0; return inv?Math.round((paid[p.id]||0)/inv*100):0; };
+  $("#pjQ").oninput=()=>{ renderProjects._q=$("#pjQ").value; drawProjBoard(); };
+  $("#pjMine").onclick=()=>{ renderProjects._mine=!renderProjects._mine; renderProjects(); };
+  $("#pjWho").onchange=()=>{ renderProjects._who=$("#pjWho").value; drawProjBoard(); };
+  document.querySelectorAll("[data-vw]").forEach(b=>b.onclick=()=>{ localStorage.setItem("lsa_projview",b.dataset.vw); renderProjects(); });
+
+  const {data:board,error}=await sb.rpc("projects_board");
+  if(error){ $("#projWrap").innerHTML=esc(error.message); return; }
+  renderProjects._rows=Array.isArray(board)?board:[];
+  drawProjBoard();
+}
+
+/* draw the board from the cached rows (filters/search redraw without refetching) */
+function drawProjBoard(){
+  const wrap=$("#projWrap"); if(!wrap) return;
+  const view=localStorage.getItem("lsa_projview")||"cards";
+  const all=renderProjects._rows||[];
+  const mineId=typeof myMemberId==="function"?myMemberId():null;
+
+  // summary strip (active projects only)
+  const act=all.filter(p=>p.status==="active");
+  const red=act.filter(p=>p.health==="red").length, amber=act.filter(p=>p.health==="amber").length;
+  const collected=act.reduce((s,p)=>s+Number(p.paid_total||0),0);
+  const outstanding=act.reduce((s,p)=>s+Math.max(0,Number(p.contract_value||0)-Number(p.paid_total||0)),0);
+  const hf=renderProjects._health||"";
+  $("#pjStats").innerHTML=`
+    <div class="pj-stat"><b>${act.length}</b> active</div>
+    <div class="pj-stat ${hf==="red"?"sel":""}" data-hf="red"><span class="hd" style="background:#B4453A"></span><b>${red}</b> at risk</div>
+    <div class="pj-stat ${hf==="amber"?"sel":""}" data-hf="amber"><span class="hd" style="background:#DFB05E"></span><b>${amber}</b> need attention</div>
+    <div class="pj-stat ${hf==="green"?"sel":""}" data-hf="green"><span class="hd" style="background:#4f7d52"></span><b>${act.length-red-amber}</b> on track</div>
+    <div class="pj-stat"><b>${fmt(collected)}</b> collected</div>
+    <div class="pj-stat"><b>${fmt(outstanding)}</b> outstanding</div>`;
+  $("#pjStats").querySelectorAll("[data-hf]").forEach(el=>el.onclick=()=>{ renderProjects._health=renderProjects._health===el.dataset.hf?"":el.dataset.hf; drawProjBoard(); });
+
+  // lifecycle lanes
   const counts={all:all.length,design:0,execution:0,closed:0};
   all.forEach(p=>counts[projPhase(p)]++);
   $("#projTabs").innerHTML=PROJ_LIST_TABS.map(t=>`<button data-pt="${t[0]}" class="${projListTab===t[0]?'on':''}">${t[1]} · ${counts[t[0]]}</button>`).join("");
-  $("#projTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ projListTab=b.dataset.pt; renderProjects(); });
-  if(!all.length){$("#projWrap").innerHTML=emptyState("No projects yet","Convert a won lead from the Leads board to start one.");return;}
-  const rows=projListTab==="all"?all:all.filter(p=>projPhase(p)===projListTab);
-  if(!rows.length){
-    const hints={design:"Projects land here after conversion, while design is in progress.",
-      execution:"Move a design-complete project here once 50% is collected.",
-      closed:"Snag-free handovers you close will appear here."};
-    $("#projWrap").innerHTML=emptyState("Nothing in this tab yet",hints[projListTab]||"");return;
-  }
+  $("#projTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{ projListTab=b.dataset.pt; drawProjBoard(); });
+
+  // filters
+  const q=(renderProjects._q||"").toLowerCase().trim();
+  let rows=projListTab==="all"?all.slice():all.filter(p=>projPhase(p)===projListTab);
+  if(q) rows=rows.filter(p=>`${p.code||""} ${p.name||""} ${p.client_name||""} ${p.site_area||""} ${p.site_city||""}`.toLowerCase().includes(q));
+  if(renderProjects._mine&&mineId) rows=rows.filter(p=>[p.consultant_id,p.designer_id,p.pm_id].map(Number).includes(Number(mineId)));
+  if(renderProjects._who) rows=rows.filter(p=>[p.consultant_id,p.designer_id,p.pm_id].map(String).includes(String(renderProjects._who)));
+  if(renderProjects._health) rows=rows.filter(p=>p.health===renderProjects._health);
+  const hrank={red:0,amber:1,green:2};
+  rows.sort((a,b)=>(hrank[a.health]??3)-(hrank[b.health]??3)||Number(b.id)-Number(a.id));
+  if(!rows.length){ wrap.innerHTML=emptyState("Nothing here","Adjust the filters, or convert a won lead to start a project."); return; }
+
+  const HN={green:"On track",amber:"Attention",red:"At risk"};
   const w=canWrite();
-  $("#projWrap").innerHTML=`<table><thead><tr><th>Code</th><th>Project</th><th>Stage</th>
-    <th>Status</th><th class="num">Contract value</th><th>Collected</th>${w?"<th></th>":""}</tr></thead><tbody>
-    ${rows.map(p=>{
-      const pct=pctOf(p), ph=projPhase(p);
-      let act="";
-      if(w&&ph==="design") act=`<button class="linkbtn" data-exec="${p.id}" title="Needs 50% collected (10% advance + 40% design sign-off)">→ Execution</button>`;
-      else if(w&&ph==="execution"){
-        if(p.current_stage!=="Handover") act=`<button class="linkbtn" data-hand="${p.id}" title="Needs 100% collected">Mark handover</button>`;
-        else if(p.handover_status!=="clear") act=`<button class="linkbtn" data-snag="${p.id}">Snags cleared</button>`;
-        else act=`<button class="linkbtn" data-close="${p.id}">Close project</button>`;
-      }
-      const stageCell=isBoqAdmin()
-        ?`<select class="tl2-sel" data-stg="${p.id}" title="Admin: correct a wrongly mapped stage" onclick="event.stopPropagation()">${STAGE_FLOW.map(s=>`<option ${s===p.current_stage?"selected":""}>${s}</option>`).join("")}</select> ${handoverPill(p)}`
-        :`${esc(p.current_stage||"—")} ${handoverPill(p)}`;
-      return `<tr class="clickable" data-id="${p.id}"><td class="mono">${esc(p.code||"—")}</td>
-      <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc(p.site_address||"")}</div></td>
-      <td>${stageCell}</td>
-      <td><span class="pill ${p.status}">${p.status}</span></td>
-      <td class="num">${fmt(p.contract_value)}</td>
-      <td style="min-width:110px"><div class="mono" style="font-size:12px">${pct}%</div><div class="ov-bar"><div style="width:${Math.min(100,pct)}%"></div></div></td>
-      ${w?`<td style="white-space:nowrap" onclick="event.stopPropagation()">${act}</td>`:""}</tr>`;
-    }).join("")}
-    </tbody></table>`;
-  $("#projWrap").querySelectorAll("tr[data-id]").forEach(tr=>{
-    tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; cutView=false; cutState=null; renderProjectWorkspace(activeProject); };
-  });
-  const byId=id=>all.find(p=>String(p.id)===String(id));
-  $("#projWrap").querySelectorAll("[data-stg]").forEach(sel=>sel.onchange=()=>projSetStage(byId(sel.dataset.stg),sel.value));
-  $("#projWrap").querySelectorAll("[data-exec]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.exec); projMoveToExecution(p,pctOf(p));});
-  $("#projWrap").querySelectorAll("[data-hand]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.hand); projMarkHandover(p,pctOf(p));});
-  $("#projWrap").querySelectorAll("[data-snag]").forEach(b=>b.onclick=()=>projClearSnags(byId(b.dataset.snag)));
-  $("#projWrap").querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>projCloseProject(byId(b.dataset.close)));
+  const dShort2=d=>d?new Date(String(d).length<=10?d+"T00:00:00":d).toLocaleDateString("en-IN",{day:"numeric",month:"short"}):"";
+  const actionFor=p=>{
+    if(!w) return "";
+    const ph=projPhase(p);
+    if(ph==="design") return `<button class="linkbtn" data-exec="${p.id}" title="Needs 50% collected">→ Execution</button>`;
+    if(ph==="execution"){
+      if(p.current_stage!=="Handover") return `<button class="linkbtn" data-hand="${p.id}" title="Needs 100% collected">Mark handover</button>`;
+      if(p.handover_status!=="clear") return `<button class="linkbtn" data-snag="${p.id}">Snags cleared</button>`;
+      return `<button class="linkbtn" data-close="${p.id}">Close project</button>`;
+    }
+    return "";
+  };
+  const badges=p=>{
+    const b=[];
+    if(Number(p.days_late)>0) b.push(`<span class="pjb bad">⏰ ${p.days_late}d late</span>`);
+    if(Number(p.unread_client_msgs)>0) b.push(`<span class="pjb bad">💬 ${p.unread_client_msgs} client</span>`);
+    if(Number(p.pending_approvals)>0) b.push(`<span class="pjb warn">✋ ${p.pending_approvals} approval</span>`);
+    if(Number(p.open_snags)>0) b.push(`<span class="pjb warn">🛠 ${p.open_snags} snag${p.open_snags>1?"s":""}</span>`);
+    if(Number(p.open_tickets)>0) b.push(`<span class="pjb warn">🎫 ${p.open_tickets} ticket${p.open_tickets>1?"s":""}</span>`);
+    if(p.due_label) b.push(`<span class="pjb warn">₹ ${esc(p.due_label)} due</span>`);
+    if(Number(p.wo_count)>0) b.push(`<span class="pjb">📦 ${p.wo_count} WO</span>`);
+    return b.join("");
+  };
+  const avatars=p=>{
+    const ids=[p.consultant_id,p.designer_id,p.pm_id].filter(Boolean);
+    const seen=new Set();
+    return ids.filter(id=>{const k=String(id); if(seen.has(k)) return false; seen.add(k); return true;})
+      .map(id=>`<span class="av2" title="${esc(staffName(id))}">${esc(initials(staffName(id)))}</span>`).join("");
+  };
+
+  if(view==="cards"){
+    wrap.innerHTML=`<div class="pj-grid">${rows.map(p=>{
+      const cur=STAGE_FLOW.indexOf(p.current_stage);
+      const pct=Number(p.contract_value)?Math.min(100,Math.round(Number(p.paid_total)/Number(p.contract_value)*100)):0;
+      return `<div class="pjc h-${p.health}" data-id="${p.id}">
+        <div class="pjc-top"><span class="pjc-code">${esc(p.code||"—")}</span>
+          <span class="pill ${p.status}" style="font-size:10px">${esc(p.current_stage||p.status)}</span>${handoverPill(p)}
+          <span class="pjc-health h-${p.health}">${HN[p.health]||""}</span></div>
+        <div><div class="pjc-name">${esc(p.name)}</div>
+        <div class="pjc-sub">${esc(p.client_name&&p.client_name!==p.name?p.client_name+" · ":"")}${esc([p.site_area,p.site_city].filter(Boolean).join(", "))}</div></div>
+        <div class="pjc-steps">${STAGE_FLOW.map((st,i)=>`<i class="${i<cur?"done":i===cur?"cur":""}"></i>`).join("")}<span>${esc(p.current_stage||"")}</span></div>
+        <div class="pjc-money"><b>${fmt(p.paid_total)}</b><div class="pjc-bar"><i style="width:${pct}%"></i></div><span>${pct}% of ${fmt(p.contract_value)}</span></div>
+        <div class="pjc-meta">${badges(p)||`<span class="pjb" style="border-style:dashed">✓ nothing pending</span>`}${p.target_end&&Number(p.days_late)===0&&p.status==="active"?`<span class="pjb">🎯 ${dShort2(p.target_end)}</span>`:""}</div>
+        <div class="pjc-foot"><span class="pjc-avs">${avatars(p)}</span><span class="sp"></span>
+          <span onclick="event.stopPropagation()">${actionFor(p)}</span>
+          <span class="linkbtn">Open →</span></div>
+      </div>`;
+    }).join("")}</div>`;
+    wrap.querySelectorAll(".pjc").forEach(c=>c.onclick=()=>{ activeProject=Number(c.dataset.id); projectTab="overview"; activePO=null; cutView=false; cutState=null; renderProjectWorkspace(activeProject); });
+  } else {
+    wrap.innerHTML=`<table><thead><tr><th></th><th>Code</th><th>Project</th><th>Stage</th><th>Signals</th><th class="num">Value</th><th>Collected</th>${w?"<th></th>":""}</tr></thead><tbody>
+      ${rows.map(p=>{
+        const pct=Number(p.contract_value)?Math.min(100,Math.round(Number(p.paid_total)/Number(p.contract_value)*100)):0;
+        const stageCell=isBoqAdmin()
+          ?`<select class="tl2-sel" data-stg="${p.id}" onclick="event.stopPropagation()">${STAGE_FLOW.map(st=>`<option ${st===p.current_stage?"selected":""}>${st}</option>`).join("")}</select> ${handoverPill(p)}`
+          :`${esc(p.current_stage||"—")} ${handoverPill(p)}`;
+        return `<tr class="clickable" data-id="${p.id}">
+          <td><span class="hd" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.health==="red"?"#B4453A":p.health==="amber"?"#DFB05E":"#4f7d52"}" title="${HN[p.health]}"></span></td>
+          <td class="mono">${esc(p.code||"—")}</td>
+          <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc([p.site_area,p.site_city].filter(Boolean).join(", "))}</div></td>
+          <td>${stageCell}</td>
+          <td>${badges(p)||'<span style="color:var(--ink-soft);font-size:11px">—</span>'}</td>
+          <td class="num">${fmt(p.contract_value)}</td>
+          <td style="min-width:110px"><div class="mono" style="font-size:12px">${pct}%</div><div class="ov-bar"><div style="width:${pct}%"></div></div></td>
+          ${w?`<td style="white-space:nowrap" onclick="event.stopPropagation()">${actionFor(p)}</td>`:""}</tr>`;
+      }).join("")}</tbody></table>`;
+    wrap.querySelectorAll("tr[data-id]").forEach(tr=>tr.onclick=()=>{ activeProject=Number(tr.dataset.id); projectTab="overview"; activePO=null; cutView=false; cutState=null; renderProjectWorkspace(activeProject); });
+  }
+
+  // phase actions need the full project row (board rows are aggregates)
+  const withFull=async(id,fn)=>{ const {data:p}=await sb.from("projects").select("*").eq("id",id).single(); if(!p) return toast("Project not found"); fn(p); };
+  const pctFull=p=>{ const row=(renderProjects._rows||[]).find(x=>Number(x.id)===Number(p.id))||{}; const inv=Number(p.invoiced_total)||Number(p.contract_value)||0; return inv?Math.round(Number(row.paid_total||0)/inv*100):0; };
+  wrap.querySelectorAll("[data-stg]").forEach(sel=>sel.onchange=()=>withFull(sel.dataset.stg,p=>projSetStage(p,sel.value)));
+  wrap.querySelectorAll("[data-exec]").forEach(b=>b.onclick=()=>withFull(b.dataset.exec,p=>projMoveToExecution(p,pctFull(p))));
+  wrap.querySelectorAll("[data-hand]").forEach(b=>b.onclick=()=>withFull(b.dataset.hand,p=>projMarkHandover(p,pctFull(p))));
+  wrap.querySelectorAll("[data-snag]").forEach(b=>b.onclick=()=>withFull(b.dataset.snag,p=>projClearSnags(p)));
+  wrap.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>withFull(b.dataset.close,p=>projCloseProject(p)));
 }
 
 /* Payment gate for phase moves. role="admin" (Amit) can override, mirroring the BOQ-lock rule. */
@@ -9253,6 +9378,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b37",date:"22 Aug 2026",title:"Projects: your delivery command centre",points:[
+    "The Projects tab is redesigned around <b>health</b>: every project is <b>red (at risk)</b>, <b>amber (needs attention)</b> or <b>green (on track)</b> — reds sort first, so you always know who to call. Schedule slip, waiting client messages, open snags/tickets, pending approvals and due payments all drive the colour.",
+    "Each <b>card</b> shows the stage stepper, money collected vs contract, the exact signals (⏰ days late, 💬 client messages, ✋ approvals, 🛠 snags, 🎫 tickets, ₹ payment due, 📦 work orders), the team, and the next action button (→ Execution / Mark handover / Snags cleared / Close).",
+    "Use the top strip to filter by health, <b>search</b> by client/code/area, press <b>My projects</b> for your own, pick a teammate to see their load, and switch <b>▦ Cards / ☰ List</b> (your choice is remembered).",
+    "Manoj Kumar (Operations Manager) is onboarded — manoj@lintelspace.com signs in and gets operations access automatically."]},
   {build:"b36",date:"22 Aug 2026",title:"Client portal: approvals, gallery, support & notifications",points:[
     "<b>Ask the client to approve a design</b>: Studio → Design files → <b>Ask client to approve</b> on any file. It appears on their portal with Approve / Request changes; you get an email with their decision and the file row shows ✅ / ✏️ / ⏳.",
     "<b>Clients are now notified</b> (email now, WhatsApp once Meta approves the template) whenever you reply on the portal, a support request changes status, or you request an approval.",
@@ -10746,7 +10876,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b36 · 22 Aug 2026";
+const APP_BUILD = "b37 · 22 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
