@@ -3961,8 +3961,8 @@ function drawProjBoard(){
     <div class="pj-stat ${hf==="red"?"sel":""}" data-hf="red"><span class="hd" style="background:#B4453A"></span><b>${red}</b> at risk</div>
     <div class="pj-stat ${hf==="amber"?"sel":""}" data-hf="amber"><span class="hd" style="background:#DFB05E"></span><b>${amber}</b> need attention</div>
     <div class="pj-stat ${hf==="green"?"sel":""}" data-hf="green"><span class="hd" style="background:#4f7d52"></span><b>${act.length-red-amber}</b> on track</div>
-    <div class="pj-stat"><b>${fmt(collected)}</b> collected</div>
-    <div class="pj-stat"><b>${fmt(outstanding)}</b> outstanding</div>`;
+    ${isBoqAdmin()?`<div class="pj-stat"><b>${fmt(collected)}</b> collected</div>
+    <div class="pj-stat"><b>${fmt(outstanding)}</b> outstanding</div>`:""}`;
   $("#pjStats").querySelectorAll("[data-hf]").forEach(el=>el.onclick=()=>{ renderProjects._health=renderProjects._health===el.dataset.hf?"":el.dataset.hf; drawProjBoard(); });
 
   // lifecycle lanes
@@ -10876,7 +10876,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b37 · 22 Aug 2026";
+const APP_BUILD = "b38 · 28 Aug 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
