@@ -3630,6 +3630,11 @@ async function convertLead(l){
       ${siteAddrFields(l,"cv_s")}
       ${(!composeSiteAddr(l) && (l.site_address||"").trim())?`<div class="s2l-hint">On file: ${esc(l.site_address)} — please structure it in the fields above.</div>`:""}
       <div class="rule"></div>
+      <div class="sec-label">Project schedule <span style="font-weight:400;font-size:11px;color:#A33C3C;text-transform:none;letter-spacing:0">— required; drives the delivery tracker &amp; client portal</span></div>
+      <div class="grid2">
+        <div class="field"><label>Start date</label><input id="cv_start" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div class="field"><label>Target finish date</label><input id="cv_finish" type="date"></div>
+      </div>
       <div class="grid2">
         <div class="field"><label>Assign designer (interior designer)</label><select id="cv_designer">${staffOpts(l.designer_id)}</select></div>
         <div class="field"><label>Project manager</label><select id="cv_pm">${staffOpts(l.pm_id)}</select></div>
@@ -3656,7 +3661,11 @@ async function convertLead(l){
     if(!email || !/.+@.+\..+/.test(email)) missing.push("a valid email");
     if(!sa.site_address) missing.push("site address"); else if(!sa.site_pincode) missing.push("site pincode");
     if(!pan) missing.push("PAN"); else if(!panValid(pan)) missing.push("a valid PAN (ABCDE1234F)");
+    const startD=$("#cv_start").value, finishD=$("#cv_finish").value;
+    if(!startD) missing.push("the start date");
+    if(!finishD) missing.push("the target finish date");
     if(missing.length) return toast("Can't convert yet — please add "+missing.join(", ")+".");
+    if(finishD<=startD) return toast("Target finish must be after the start date.");
     // ── 10% advance gate: no project without the client's commitment ──
     const adv=Number($("#cv_adv").value||0);
     const need=(Number(total)||0)*0.10;
@@ -3671,6 +3680,7 @@ async function convertLead(l){
       site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
       site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
       lead_id:l.id, contract_value:Number($("#cv_val").value||total||0),
+      start_date:startD, target_end:finishD,
       consultant_id:l.consultant_id||null, designer_id:designer, pm_id:pm||me.id, status:"active", current_stage:"Briefing",
       converted_at:new Date().toISOString()
     }).select().single();
@@ -9460,6 +9470,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b40",date:"01 Sep 2026",title:"Converting a lead now needs the project schedule",points:[
+    "The convert-to-project form asks for a <b>Start date</b> and <b>Target finish date</b> — both required, finish must be after start. The design consultant converting the lead sets them.",
+    "These dates drive the delivery command centre (a project turns <b>red</b> when it passes its target finish) and show on the client's portal — so agree them with the client before converting.",
+    "Full UI audit: all 40+ screens, tabs and sub-tabs were exercised with both full and brand-new (empty) projects on desktop and mobile — zero errors found."]},
   {build:"b39",date:"01 Sep 2026",title:"Project expenses — know every project's real profitability",points:[
     "Open a project → <b>Finance → Packages</b>: this is now the complete money-out tracker. <b>Budget</b> = BOQ cost × qty per trade, <b>Committed</b> = approved vendor POs, <b>Paid</b> = PO payments <b>plus direct expenses</b>.",
     "Press <b>+ Expense</b> (top of Packages, or +Exp on any trade/room row) to log non-PO spend in 15 seconds: amount, category (labour / transport / petty cash / spot materials / food & stay / tools / fees), trade, who was paid, via UPI/cash/bank. One rule: if the spend belongs to a vendor PO, record it as a payment on that PO — never as an expense (no double counting).",
@@ -10963,7 +10977,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b39 · 01 Sep 2026";
+const APP_BUILD = "b40 · 01 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
