@@ -733,6 +733,18 @@
     border:none;background:var(--navy);color:var(--brass);font-size:20px;box-shadow:var(--shadow);
     display:flex;align-items:center;justify-content:center;transition:transform .15s}
   #assistFab:hover{transform:scale(1.06)}
+  /* ===== Polish: skeletons · breadcrumbs · keyboard ===== */
+  .skel{position:relative;overflow:hidden;background:#EFEAE0;border-radius:10px}
+  .skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);animation:skm 1.2s infinite}
+  @keyframes skm{100%{transform:translateX(100%)}}
+  .skel-wrap{display:flex;flex-direction:column;gap:10px;padding:4px 0}
+  .crumb{background:none;border:none;font:600 12.5px Inter;color:var(--ink-soft);cursor:pointer;padding:4px 2px;letter-spacing:.2px}
+  .crumb:hover{color:var(--brass-deep);text-decoration:underline}
+  .crumb-sep{color:var(--line-2);font-size:13px;margin:0 2px}
+  kbd.kx{display:inline-block;min-width:20px;text-align:center;padding:2px 6px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:6px;background:#fff;font:600 11px ui-monospace,monospace;color:var(--ink)}
+  .kbd-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+  .kbd-row:first-of-type{border-top:none}
   /* ===== Projects command centre ===== */
   .pj-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
   .pj-controls input[type=search]{flex:1;min-width:160px;max-width:280px;border:1px solid var(--line-2);border-radius:9px;padding:8px 12px;font:inherit;font-size:13px;background:#fff;outline:none}
@@ -1846,11 +1858,11 @@ async function renderDashboard(){
     </section>
     <section class="pw-card" id="dashSales" style="margin-bottom:14px">
       <div class="sec-label">Monthly sales <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— booked value ex-GST, this financial year</span></div>
-      <div id="dashSalesBody"><div class="empty" style="padding:10px 0">Loading…</div></div>
+      <div id="dashSalesBody">${skel(1,150)}</div>
     </section>
     ${myRole==="admin"?`<section class="pw-card" id="dashIntel" style="margin-bottom:14px">
       <div class="sec-label">Founder Intel — weekly sales analysis</div>
-      <div id="dashIntelBody"><div class="empty" style="padding:10px 0">Loading…</div></div>
+      <div id="dashIntelBody">${skel(2,52)}</div>
     </section>`:""}
     <section class="dash-recent">
       <div class="dash-recent-head">
@@ -2114,7 +2126,7 @@ async function renderLeads(){
       <label class="lf-due" title="Filter every stage by the month the lead came in — blank = all months">Created in <input type="month" id="lf_cmonth" class="lf-sel" style="padding:5px 8px" value="${leadFilters.createdMonth}"></label>
       <label class="lf-due" title="Won & Lost show only leads closed in this month">Closed in <input type="month" id="lf_month" class="lf-sel" style="padding:5px 8px" value="${leadFilters.closeMonth||leadMonthNow()}"></label>
     </div>
-    <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">Loading…</div>`;
+    <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">${skel(4,120)}</div>`;
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
   $$(".viewtoggle button").forEach(b=>b.onclick=()=>{ window.leadView=b.dataset.lv; renderLeads(); });
   $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawLeadsView();};
@@ -2812,7 +2824,7 @@ async function renderLeadWorkspace(id){
   const m=$("#main");
   m.innerHTML=`
     <div class="pw-top">
-      <button class="ghost" id="lwBack">← All leads</button>
+      <span style="display:inline-flex;align-items:center"><button class="crumb" id="lwBack">Leads</button><span class="crumb-sep">›</span></span>
       <div class="pw-title">
         <span class="bant ${score>=60?"hi":score<35?"lo":""}">${score}</span>
         <h2 class="display">${esc(l.name)}</h2>
@@ -2829,7 +2841,7 @@ async function renderLeadWorkspace(id){
     <nav class="pw-tabs" id="lwTabs">
       ${LEAD_TABS.map(t=>`<button data-t="${t[0]}" class="${leadTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
-    <div id="lwBody">Loading…</div>`;
+    <div id="lwBody">${skel(3,90)}</div>`;
   $("#lwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(l,true); gStopAutosave(); } closeLead(); };
   $("#lwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
     if(leadTab==="boq" && b.dataset.t!=="boq" && typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(l,true); gStopAutosave(); }
@@ -3721,7 +3733,7 @@ async function renderBOQ(){
   m.innerHTML=`<div class="view-head"><div><h2 class="display">Bill of Quantities</h2>
     <div class="sub">Versioned quantity sheets linked to leads & projects</div></div>
     ${canWrite()?`<button class="primary" id="newBoq">+ New BOQ</button>`:""}</div>
-    <div class="boq-wrap"><div class="boq-side" id="boqList">Loading…</div><div id="boqSheet"></div></div>`;
+    <div class="boq-wrap"><div class="boq-side" id="boqList">${skel(5,38)}</div><div id="boqSheet"></div></div>`;
   if(canWrite()) $("#newBoq").onclick=()=>newBoqFor({});
   if(!rateLib.length){const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");rateLib=data||[];}
   const {data:versions}=await sb.from("boq_versions").select("*, leads(name), projects(code,name)").order("created_at",{ascending:false});
@@ -3940,7 +3952,7 @@ async function renderProjects(){
       <button class="pj-chip ${view==="list"?"on":""}" data-vw="list">☰ List</button>
     </div>
     <div class="viewtoggle" id="projTabs" style="margin-bottom:14px"></div>
-    <div id="projWrap">Loading…</div>`;
+    <div id="projWrap">${skel(3,140)}</div>`;
   if(canWrite()) $("#newProjBtn").onclick=()=>newProjectForm();
   $("#pjQ").oninput=()=>{ renderProjects._q=$("#pjQ").value; drawProjBoard(); };
   $("#pjMine").onclick=()=>{ renderProjects._mine=!renderProjects._mine; renderProjects(); };
@@ -4211,7 +4223,7 @@ async function renderProjectWorkspace(pid){
   if(error||!p){ activeProject=null; return renderProjects(); }
   m.innerHTML=`
     <div class="pw-top">
-      <button class="ghost" id="pwBack">← All projects</button>
+      <span style="display:inline-flex;align-items:center"><button class="crumb" id="pwBack">Projects</button><span class="crumb-sep">›</span></span>
       <div class="pw-title"><span class="mono pw-code">${esc(p.code||"")}</span>
         <h2 class="display">${esc(p.name)}</h2>
         <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)} ${warrantyPill(p)}</div>
@@ -4221,7 +4233,7 @@ async function renderProjectWorkspace(pid){
     <nav class="pw-tabs" id="pwTabs">
       ${projTabsFor().map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
-    <div id="pwBody">Loading…</div>`;
+    <div id="pwBody">${skel(3,110)}</div>`;
   $("#pwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); } activeProject=null; renderProjects(); };
   if($("#pwJourney")) $("#pwJourney").onclick=()=>pwJourneyPlan(p);
   $("#pwTabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
@@ -8389,7 +8401,7 @@ async function renderTeam(){
     <div class="sub">Staff directory · appears in assignment dropdowns everywhere</div></div>
     <button class="primary" id="addMember">+ Add member</button></div>
     <div class="banner">Adding someone here lists them across the app. To let them <b>log in</b>, they sign in once with their @lintelspace.com Google account, then an admin sets their role.</div>
-    <div id="teamWrap">Loading…</div>`;
+    <div id="teamWrap">${skel(4,60)}</div>`;
   $("#addMember").onclick=()=>memberForm();
   await loadTeamList();
 }
@@ -9470,6 +9482,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b41",date:"01 Sep 2026",title:"Faster hands: keyboard shortcuts, smoother loading, breadcrumbs",points:[
+    "<b>Keyboard shortcuts</b>: press <b>G</b> then <b>D / L / P / B / T</b> to jump to Dashboard / Leads / Projects / BOQ / Team. <b>/</b> jumps to search, <b>N</b> starts a new lead or project on that view, <b>C</b> opens team chat, <b>Esc</b> closes any popup. Press <b>?</b> anytime to see the list.",
+    "Pages now load with smooth placeholder blocks instead of 'Loading…' text, and inside a lead or project the header shows a <b>Projects ›</b> / <b>Leads ›</b> breadcrumb — click it to go back."]},
   {build:"b40",date:"01 Sep 2026",title:"Converting a lead now needs the project schedule",points:[
     "The convert-to-project form asks for a <b>Start date</b> and <b>Target finish date</b> — both required, finish must be after start. The design consultant converting the lead sets them.",
     "These dates drive the delivery command centre (a project turns <b>red</b> when it passes its target finish) and show on the client's portal — so agree them with the client before converting.",
@@ -9763,6 +9778,58 @@ function chatRealtime(){
     chatRealtime();
     setInterval(()=>{ chatRefreshUnread(); chatRefreshInbox(); }, 60000);   // badge keeps up even with the panel closed
   },800);
+})();
+
+/* ===== Polish: skeleton loaders + keyboard shortcuts ===== */
+function skel(n,h){ n=n||3; h=h||46; let out='<div class="skel-wrap">';
+  for(let i=0;i<n;i++) out+=`<div class="skel" style="height:${h}px;width:${100-(i%3)*4}%"></div>`;
+  return out+'</div>'; }
+
+function kbdHelp(){
+  openModal(`<div class="modal-h">Keyboard shortcuts</div><div class="modal-b">
+    <div class="kbd-row"><span>Go to Dashboard / Leads / Projects / BOQ / Team</span><span><kbd class="kx">G</kbd> then <kbd class="kx">D</kbd> <kbd class="kx">L</kbd> <kbd class="kx">P</kbd> <kbd class="kx">B</kbd> <kbd class="kx">T</kbd></span></div>
+    <div class="kbd-row"><span>Search (on Leads / Projects)</span><kbd class="kx">/</kbd></div>
+    <div class="kbd-row"><span>New lead / project (on that view)</span><kbd class="kx">N</kbd></div>
+    <div class="kbd-row"><span>Team chat</span><kbd class="kx">C</kbd></div>
+    <div class="kbd-row"><span>Close popup / chat</span><kbd class="kx">Esc</kbd></div>
+    <div class="kbd-row"><span>This help</span><kbd class="kx">?</kbd></div>
+  </div><div class="modal-f"><button class="primary" onclick="closeModal()">Got it</button></div>`);
+}
+(function kbdBoot(){
+  let chord=null, chordAt=0;
+  document.addEventListener("keydown",e=>{
+    if(typeof me==="undefined"||!me||!me.id) return;                    // signed out
+    const t=e.target, typing=t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable);
+    const modalOpen=()=>{const sc=document.querySelector("#scrim");return !!(sc&&sc.classList.contains("open"));};
+    if(e.key==="Escape"){
+      if(modalOpen()&&typeof closeModal==="function"){ closeModal(); return; }
+      if(typeof CHAT!=="undefined"&&CHAT.open){ chatToggle(); return; }
+      if(typing) t.blur();
+      return;
+    }
+    if(typing||e.metaKey||e.ctrlKey||e.altKey) return;
+    if(modalOpen()) return;                                            // modal open → let it own keys
+    const k=e.key.toLowerCase();
+    if(chord==="g"&&Date.now()-chordAt<900){
+      chord=null;
+      const map={d:"dashboard",l:"leads",p:"projects",b:"boq",t:"team"};
+      if(map[k]){ e.preventDefault(); activeLead=null; activeProject=null; gotoTab(map[k]); }
+      return;
+    }
+    if(k==="g"){ chord="g"; chordAt=Date.now(); return; }
+    if(e.key==="?"){ e.preventDefault(); kbdHelp(); return; }
+    if(k==="/"){
+      const inp=document.querySelector("#pjQ")||document.querySelector("#lf_search");
+      if(inp){ e.preventDefault(); inp.focus(); inp.select&&inp.select(); }
+      return;
+    }
+    if(k==="c"&&typeof chatToggle==="function"&&document.getElementById("chatFab")){ e.preventDefault(); chatToggle(); return; }
+    if(k==="n"&&typeof canWrite==="function"&&canWrite()){
+      if(document.querySelector("#pjQ")&&typeof newProjectForm==="function"){ e.preventDefault(); newProjectForm(); }
+      else if(document.querySelector("#lf_search")&&typeof leadForm==="function"){ e.preventDefault(); leadForm(); }
+      return;
+    }
+  });
 })();
 
 (function wnBoot(){
@@ -10977,7 +11044,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b40 · 01 Sep 2026";
+const APP_BUILD = "b41 · 01 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
