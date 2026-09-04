@@ -3637,7 +3637,7 @@ async function convertLead(l){
         <div class="field"><label>Contact number</label><input id="cv_phone" value="${esc(l.phone||"")}" placeholder="required"></div>
         <div class="field"><label>Email</label><input id="cv_email" value="${esc(l.email||"")}" placeholder="required"></div>
       </div>
-      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(ABCDE1234F)</span></label>${panInputHtml("cv_pan", l.pan, "required")}</div>
+      <div class="field"><label>PAN <span style="font-weight:400;color:var(--ink-soft)">(optional · ABCDE1234F)</span></label>${panInputHtml("cv_pan", l.pan, "optional")}</div>
       <div class="sec-label" style="margin-top:6px">Site address</div>
       ${siteAddrFields(l,"cv_s")}
       ${(!composeSiteAddr(l) && (l.site_address||"").trim())?`<div class="s2l-hint">On file: ${esc(l.site_address)} — please structure it in the fields above.</div>`:""}
@@ -3665,14 +3665,14 @@ async function convertLead(l){
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
   $("#cv_go").onclick=async()=>{
-    // ── client-data gate: no project without contact, email, site address, PAN ──
+    // ── client-data gate: no project without contact, email, site address (PAN optional) ──
     const phone=$("#cv_phone").value.trim(), email=$("#cv_email").value.trim(), pan=panResolve("cv_pan", l.pan);
     const sa=readSiteAddr("cv_s", l.site_address);
     const missing=[];
     if(!phone) missing.push("contact number");
     if(!email || !/.+@.+\..+/.test(email)) missing.push("a valid email");
     if(!sa.site_address) missing.push("site address"); else if(!sa.site_pincode) missing.push("site pincode");
-    if(!pan) missing.push("PAN"); else if(!panValid(pan)) missing.push("a valid PAN (ABCDE1234F)");
+    if(pan && !panValid(pan)) missing.push("a valid PAN (ABCDE1234F)");   // PAN optional — validated only when given
     const startD=$("#cv_start").value, finishD=$("#cv_finish").value;
     if(!startD) missing.push("the start date");
     if(!finishD) missing.push("the target finish date");
@@ -9482,6 +9482,8 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b42",date:"04 Sep 2026",title:"PAN is now optional at conversion",points:[
+    "Converting a lead to a project no longer requires the client's PAN — contact number, email, site address + pincode, schedule dates and the 10% advance are still mandatory. If a PAN is entered, the format is still checked."]},
   {build:"b41",date:"01 Sep 2026",title:"Faster hands: keyboard shortcuts, smoother loading, breadcrumbs",points:[
     "<b>Keyboard shortcuts</b>: press <b>G</b> then <b>D / L / P / B / T</b> to jump to Dashboard / Leads / Projects / BOQ / Team. <b>/</b> jumps to search, <b>N</b> starts a new lead or project on that view, <b>C</b> opens team chat, <b>Esc</b> closes any popup. Press <b>?</b> anytime to see the list.",
     "Pages now load with smooth placeholder blocks instead of 'Loading…' text, and inside a lead or project the header shows a <b>Projects ›</b> / <b>Leads ›</b> breadcrumb — click it to go back."]},
@@ -11044,7 +11046,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b41 · 01 Sep 2026";
+const APP_BUILD = "b42 · 04 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
