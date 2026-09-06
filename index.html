@@ -336,6 +336,8 @@
   .ds-task .ds-tt{font-weight:600;font-size:14px;flex:1}
   .ds-task .ds-meta{font-size:12.5px;color:var(--ink-soft);display:flex;gap:10px;align-items:center}
   .ds-stat{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px}
+  .ds-stat.warn{background:#FBE4E1;color:#B4453A}
+  .ds-meet.needs-close{border-left:3px solid #B4453A}
   .ds-stat.todo{background:var(--paper-2);color:var(--ink-soft)}
   .ds-stat.in_progress{background:#FFF6E5;color:#A9791E}
   .ds-stat.done{background:#EDF3EE;color:var(--green)}
@@ -1088,7 +1090,7 @@ const LOST_REASONS = [
   ["timeline_mismatch","Timeline mismatch"],
   ["scope_too_small","Scope too small / partial work only"],
   ["location","Outside service area"],
-  ["other","Other"]
+  ["not_a_fit","Not a fit for Lintel (scope / style / expectations)"]
 ];
 const OBJECTIONS = [
   ["price","Price"],["timeline","Timeline"],["competitor","Comparing quotes"],
@@ -1177,7 +1179,7 @@ function bantFromQual(l){
 const S2L = {
   SLA_MIN: 15,                          // 15-min first-call SLA (business hours)
   CADENCE_DAYS: [0,0,1,3,5,10],         // day-offset for touch 1..6, relative to lead_created_at
-  BIZ: { startMin:9*60+30, endMin:19*60, days:[1,2,3,4,5,6] }, // Mon–Sat 09:30–19:00 (browser local = IST)
+  BIZ: { startMin:10*60, endMin:19*60, days:[0,1,2,3,4,5,6] }, // 10:00–19:00 every day (Amit, 5 Sep 2026)
   OUTCOMES: [["connected","Connected"],["no_answer","No answer"],["busy","Busy"],["switched_off","Switched off"]],
   STATUS: [["","— Open —"],["meeting_done","Meeting done"],["possession_delay","Possession delay"],["not_responding","Not responding"]],
 };
@@ -1186,28 +1188,34 @@ function s2lBizOpen(d){
   const mins=d.getHours()*60+d.getMinutes();
   return mins>=S2L.BIZ.startMin && mins<S2L.BIZ.endMin;
 }
-// SLA deadline = lead_created_at + 15 min, only meaningful when the lead arrived in business hours
+// SLA deadline comes from the server (SLA-01: +15 min in hours, 11:00 next morning otherwise);
+// the local computation is only a fallback for rows that predate the column.
 function s2lSlaDeadline(l){
+  if(l.sla_due_at) return new Date(l.sla_due_at);
   if(!l.lead_created_at) return null;
   const created=new Date(l.lead_created_at);
-  if(!s2lBizOpen(created)) return null;   // arrived after hours → morning queue, no live countdown
+  if(!s2lBizOpen(created)) return null;
   return new Date(created.getTime()+S2L.SLA_MIN*60000);
 }
+// "done" = any human touch (call / WhatsApp / meeting) — the timer stops on contact, not on a call only
 function s2lSlaState(l){
-  if(l.first_call_at) return {state:"done"};
-  if(!l.lead_created_at) return {state:"none"};
+  if(l.first_touch_at||l.first_call_at) return {state:"done"};
+  if(l.stage==="won"||l.stage==="lost") return {state:"none"};
+  const born=new Date(l.lead_created_at||l.created_at||0).getTime();
+  if(!born || Date.now()-born>14*86400000) return {state:"none"};   // older than the queue window → hygiene metrics own it
   const dl=s2lSlaDeadline(l);
-  if(!dl) return {state:"queued"};
+  if(!dl) return {state:"none"};
   const ms=dl.getTime()-Date.now();
-  if(l.sla_breached || ms<=0) return {state:"red", ms};
-  if(ms<=10*60000) return {state:"amber", ms};
-  return {state:"green", ms};
+  if(ms<=0) return {state:"red", ms, dl};
+  if(ms>60*60000) return {state:"queued", ms, dl};   // arrived after hours → morning queue, cleared by 11:00
+  if(ms<=10*60000) return {state:"amber", ms, dl};
+  return {state:"green", ms, dl};
 }
 function s2lFmtMs(ms){ const s=Math.max(0,Math.floor(ms/1000)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
 function s2lSlaChipHtml(l){
   const st=s2lSlaState(l);
   if(st.state==="done"||st.state==="none") return "";
-  if(st.state==="queued") return `<span class="s2l-chip s2l-queued" title="Arrived outside business hours — in the 09:00 call queue">⏱ Queued 09:00</span>`;
+  if(st.state==="queued") return `<span class="s2l-chip s2l-queued" title="Arrived outside 10–7 — in the morning call queue, first call due by ${st.dl.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}">⏱ Morning queue · by ${st.dl.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</span>`;
   const cls=st.state==="red"?"s2l-red":st.state==="amber"?"s2l-amber":"s2l-green";
   const dl=s2lSlaDeadline(l);
   const label=st.state==="red"?"SLA breached":("Call due "+s2lFmtMs(st.ms));
@@ -1263,7 +1271,7 @@ async function s2lLogCall(l){
     if(uErr) return toast(uErr.message);
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Call",text:`Call logged · ${(S2L.OUTCOMES.find(o=>o[0]===outcome)||["",outcome])[1]}${note?" · "+note:""}`,by_user:me.id});
     Object.assign(l,upd);
-    closeModal(); toast("Call logged");
+    closeModal(); toast(outcome==="connected"?"Call logged":"Call logged · retry booked (2 h later in hours, else tomorrow morning)");
     if(activeLead===l.id) renderLeadWorkspace(l.id);
     else if($("#dashS2lCalls")) renderDashboard();
     else drawLeadsView();
@@ -1292,11 +1300,70 @@ function s2lPossessionDialog(l){
 // Monday (ISO) of the current week — matches SQL date_trunc('week', ...)
 function s2lMondayISO(){ const d=new Date(); const dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow); return d.toISOString().slice(0,10); }
 // 3 weekly KPI cards: median first response, SLA breaches, cost/meeting
+function s2lFmtMins(m){ m=Number(m)||0; if(m<60) return Math.round(m)+" min"; if(m<1440) return (m/60).toFixed(m<600?1:0)+" h"; return (m/1440).toFixed(1)+" d"; }
+/* SLA-01: unclaimed-lead queue — every lead with no human touch yet, deadline first.
+   Consultants see their own; admins / sales head see everyone's. */
+let _slaShowAll=false;
+function renderSlaQueue(rows){
+  const host=$("#dashSla"); if(!host) return;
+  const mine=typeof myMemberId==="function"?myMemberId():null;
+  const list=(isAdminLevel()?rows:rows.filter(r=>String(r.consultant_id)===String(mine)));
+  if(!list.length){ host.innerHTML=""; return; }
+  const row=r=>{
+    const due=new Date(r.sla_due_at), ms=due.getTime()-Date.now();
+    const over=ms<=0, queued=ms>60*60000;
+    const cls=over?"s2l-red":queued?"s2l-queued":ms<=10*60000?"s2l-amber":"s2l-green";
+    const lab=over?`${s2lFmtMins(-ms/60000)} overdue`:queued?`Morning queue · by ${due.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`:`Call due ${s2lFmtMs(ms)}`;
+    const tel=(r.phone||"").replace(/[^\d+]/g,"");
+    return `<div class="s2l-call" data-open="${r.id}">
+      <span class="s2l-chip ${cls}" ${(!over&&!queued)?`data-s2l-sla data-deadline="${due.getTime()}"`:""} style="${over?"animation:none":""}">⏱ ${lab}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(r.name||"—")}${r.l2?' <span class="s2l-chip s2l-red" style="animation:none;padding:1px 6px;font-size:10px">escalated to Amit</span>':r.l1?' <span class="s2l-chip s2l-amber" style="padding:1px 6px;font-size:10px">escalated</span>':""}</div>
+        <div class="s2l-call-sub">${[esc(r.locality||""),r.budget_band?esc(fmtBand(r.budget_band)):"",r.source?esc(r.source):"",r.consultant_id?esc(staffName(r.consultant_id)):'<b style="color:#B4453A">unassigned</b>',"arrived "+new Date(r.lead_created_at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})].filter(Boolean).join(" · ")}</div></div>
+      ${tel?`<a class="s2l-call-btn" href="tel:${esc(tel)}" onclick="event.stopPropagation()">${icn("phone")} Call</a>`:""}
+      <button class="s2l-call-btn log" data-logcall="${r.id}">Log</button>
+    </div>`;
+  };
+  const shown=_slaShowAll?list:list.slice(0,6);
+  const overdue=list.filter(r=>new Date(r.sla_due_at).getTime()<=Date.now()).length;
+  host.innerHTML=`<div style="margin-bottom:14px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${overdue?"#B4453A":"var(--ink-soft)"};font-weight:600;margin-bottom:10px">Speed to lead <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink-soft)">— ${list.length} unclaimed${overdue?` · <b style="color:#B4453A">${overdue} past the 15-minute deadline</b>`:""} · the timer stops when a call or WhatsApp is logged</span></div>
+    <div class="s2l-call-list">${shown.map(row).join("")}</div>
+    ${list.length>6?`<button class="linkbtn" id="slaToggle" style="margin-top:10px">${_slaShowAll?"Show top 6 only":`View all ${list.length} →`}</button>`:""}
+  </div>`;
+  const tog=$("#slaToggle"); if(tog) tog.onclick=()=>{ _slaShowAll=!_slaShowAll; renderSlaQueue(rows); };
+  host.querySelectorAll("[data-open]").forEach(el=>el.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(el.dataset.open)),40); });
+  host.querySelectorAll("[data-logcall]").forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); const {data:l}=await sb.from("leads").select("*").eq("id",Number(b.dataset.logcall)).single(); if(l) s2lLogCall(l); });
+  s2lStartTicker();
+}
+/* SLA-01: meetings whose time has passed with no outcome — must be closed out (Held / No-show / Rescheduled). */
+let _closeShowAll=false;
+function renderCloseoutStrip(rows){
+  const host=$("#dashCloseout"); if(!host) return;
+  const mine=typeof myMemberId==="function"?myMemberId():null;
+  const list=(isAdminLevel()?rows:rows.filter(r=>String(r.consultant_id)===String(mine)));
+  if(!list.length){ host.innerHTML=""; return; }
+  const shown=_closeShowAll?list:list.slice(0,4);
+  host.innerHTML=`<div style="margin-bottom:14px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#B4453A;font-weight:600;margin-bottom:10px">Meetings to close out <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink-soft)">— ${list.length} past meeting${list.length===1?"":"s"} with no outcome · 30 seconds each: held, no-show or rescheduled</span></div>
+    <div class="s2l-call-list">${shown.map(r=>`<div class="s2l-call" data-mc="${r.id}">
+      <span class="s2l-chip s2l-amber" style="animation:none">${r.days_open>0?r.days_open+"d ago":"today"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(r.who||"—")} <span style="font-weight:400;color:var(--ink-soft)">· ${esc(r.title||"Meeting")}</span></div>
+        <div class="s2l-call-sub">${new Date(r.scheduled_at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}${r.consultant_id?" · "+esc(staffName(r.consultant_id)):""}${r.lead_id?" · lead":" · project"}</div></div>
+      <button class="s2l-call-btn log" data-mc-btn="${r.id}">Close out</button>
+    </div>`).join("")}</div>
+    ${list.length>4?`<button class="linkbtn" id="closeToggle" style="margin-top:10px">${_closeShowAll?"Show 4 only":`View all ${list.length} →`}</button>`:""}
+  </div>`;
+  const tog=$("#closeToggle"); if(tog) tog.onclick=()=>{ _closeShowAll=!_closeShowAll; renderCloseoutStrip(rows); };
+  const open=async id=>{ const {data:mt}=await sb.from("design_meetings").select("*").eq("id",id).single(); if(mt) meetCloseoutModal(mt,()=>renderDashboard()); };
+  host.querySelectorAll("[data-mc-btn]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); open(Number(b.dataset.mcBtn)); });
+  host.querySelectorAll("[data-mc]").forEach(el=>el.onclick=()=>open(Number(el.dataset.mc)));
+}
 function s2lRenderDashKpis(s){
   const host=$("#dashS2lKpis"); if(!host) return;
-  const mfr=s.median_first_response_min;
-  const mfrTxt=(mfr==null)?"—":(mfr<1?Math.round(mfr*60)+"s":mfr+"m");
-  const mfrAccent=(mfr==null)?"#7c8da0":(mfr<10?"#4f7d52":"#a4503e");
+  const mfr=s.median_first_touch_min;
+  const mfrTxt=(mfr==null)?"—":s2lFmtMins(mfr);
+  const mfrAccent=(mfr==null)?"#7c8da0":(mfr<=15?"#4f7d52":mfr<=120?"#B08433":"#a4503e");
+  const pct=s.in_sla_pct; const pctAccent=pct==null?"#7c8da0":pct>=80?"#4f7d52":pct>=50?"#B08433":"#a4503e";
   const br=Number(s.sla_breaches_week)||0;
   const brAccent=br===0?"#4f7d52":"#a4503e";
   const cpm=s.cost_per_meeting||[];
@@ -1305,8 +1372,9 @@ function s2lRenderDashKpis(s){
   const blended=totMeet>0?Math.round(totSpend/totMeet):null;
   const cpmTxt=blended!=null?fmt(blended):(totSpend>0?"—":"Add spend");
   host.innerHTML=
-      `<div class="kpi" style="--kc:${mfrAccent}"><div class="kpi-val">${mfrTxt}</div><div class="kpi-lbl">Median 1st response · wk<span style="display:block;font-size:10px;opacity:.65">target &lt;10 min</span></div></div>`
-    + `<div class="kpi" style="--kc:${brAccent}"><div class="kpi-val">${br}</div><div class="kpi-lbl">SLA breaches · wk<span style="display:block;font-size:10px;opacity:.65">target 0</span></div></div>`
+      `<div class="kpi" style="--kc:${pctAccent}"><div class="kpi-val">${pct==null?"—":pct+"%"}</div><div class="kpi-lbl">Called within SLA · wk<span style="display:block;font-size:10px;opacity:.65">15 min in hours · by 11:00 after · target 80%</span></div></div>`
+    + `<div class="kpi" style="--kc:${mfrAccent}"><div class="kpi-val">${mfrTxt}</div><div class="kpi-lbl">Median 1st human call · wk<span style="display:block;font-size:10px;opacity:.65">Priya's instant ack not counted</span></div></div>`
+    + `<div class="kpi" style="--kc:${brAccent}"><div class="kpi-val">${br}</div><div class="kpi-lbl">SLA breaches · wk<span style="display:block;font-size:10px;opacity:.65">${s.unclaimed_now?s.unclaimed_now+" unclaimed right now":"target 0"}</span></div></div>`
     + `<div class="kpi" id="dashCpm" style="--kc:#B08433;cursor:pointer"><div class="kpi-val">${cpmTxt}</div><div class="kpi-lbl">Cost / meeting · wk<span style="display:block;font-size:10px;opacity:.65">${cpm.length?(cpm.length+" campaign"+(cpm.length>1?"s":"")+" · tap"):"tap to add spend"}</span></div></div>`;
   const cpmCard=$("#dashCpm"); if(cpmCard) cpmCard.onclick=()=>s2lSpendDialog(cpm);
 }
@@ -1714,8 +1782,8 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal"), sq=$("#dashSla"), mc=$("#dashCloseout");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim())||(sq&&sq.innerHTML.trim())||(mc&&mc.innerHTML.trim()))?"":"none";
 }
 /* CSAT on the dashboard: KPI tile (avg ★ this month) + low-score watchlist strip */
 /* Monthly sales — booked (converted) value ex-GST per month, FY-to-date from April.
@@ -1845,6 +1913,8 @@ async function renderDashboard(){
     </section>
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
+      <div id="dashSla"></div>
+      <div id="dashCloseout"></div>
       <div id="dashClientReplies"></div>
       <div id="dashClientPortal"></div>
       <div id="dashCsatLow"></div>
@@ -1879,14 +1949,20 @@ async function renderDashboard(){
     $("#dashRecentBody").style.display=b.dataset.k==="recent"?"":"none";
     $("#dashTeam").style.display=b.dataset.k==="team"?"":"none";
   });
-  const [{data:stats,error:sErr},{data:leads,error},{data:s2l},{data:calls}]=await Promise.all([
+  const [{data:stats,error:sErr},{data:leads,error},{data:s2l},{data:calls},{data:slaQ},{data:toClose},{data:score}]=await Promise.all([
     sb.rpc("dashboard_stats"),
     sb.from("leads").select("*").order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(8),
     sb.rpc("s2l_dashboard_stats"),
-    sb.rpc("s2l_today_calls")
+    sb.rpc("s2l_today_calls"),
+    sb.rpc("sla_queue"),
+    sb.rpc("meetings_to_close"),
+    sb.rpc("sla_scorecard",{p_days:7})
   ]);
   if(sErr) toast("Couldn't load dashboard stats");
   const S = stats||{}; const L = leads||[];
+  renderSlaQueue(Array.isArray(slaQ)?slaQ:[]);
+  renderCloseoutStrip(Array.isArray(toClose)?toClose:[]);
+  const SC=(score&&score.rows)||[];
 
   const kpi=(label,val,view,accent)=>`
     <div class="kpi" data-goto="${view||""}" style="--kc:${accent}">
@@ -1916,17 +1992,21 @@ async function renderDashboard(){
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— added / meetings / quotes / converted / value (ex-GST, from the agreed BOQ) are this month · assigned is current pipeline</span></div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
         <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px">
-          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value · ex-GST (mo)</th></tr></thead>
-        <tbody>${bp.map(r=>`<tr style="border-top:1px solid var(--line-2)">
+          <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num" title="New leads in the last 7 days called within the 15-minute SLA (morning queue: by 11:00)">Called in SLA · 7d</th><th style="padding:5px 8px" class="num" title="Median minutes from lead arrival to first human touch, last 7 days">1st call · median</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value · ex-GST (mo)</th></tr></thead>
+        <tbody>${bp.map(r=>{ const sc=SC.find(x=>String(x.cid)===String(r.cid))||{}; const pct=sc.in_sla_pct; const pc=pct==null?"var(--ink-soft)":pct>=80?"#4f7d52":pct>=50?"#B08433":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
           <td style="padding:6px 8px">${r.cid?`<a href="#" data-cid="${r.cid}" data-name="${esc(r.name)}" style="color:var(--brass);text-decoration:none;font-weight:600">${esc(r.name)}</a>`:`<span style="color:var(--ink-soft)">${esc(r.name)}</span>`}</td>
+          <td style="padding:6px 8px" class="num" style="white-space:nowrap"><b style="color:${pc}">${pct==null?"—":pct+"%"}</b>${sc.leads?` <span style="color:var(--ink-soft);font-size:11px">of ${sc.leads}</span>`:""}${sc.unclaimed?` <span class="s2l-chip s2l-red" style="padding:1px 6px;font-size:10px;animation:none">${sc.unclaimed} unclaimed</span>`:""}</td>
+          <td style="padding:6px 8px" class="num">${sc.med_mins==null?"—":s2lFmtMins(sc.med_mins)}</td>
           <td style="padding:6px 8px" class="num">${r.leads_assigned}</td>
           <td style="padding:6px 8px" class="num">${r.leads_added}</td>
           <td style="padding:6px 8px" class="num">${r.meetings}</td>
           <td style="padding:6px 8px" class="num">${r.quotes}</td>
           <td style="padding:6px 8px" class="num">${r.converted}</td>
-          <td style="padding:6px 8px" class="num mono">${fmt(r.project_value)}</td></tr>`).join("")}
+          <td style="padding:6px 8px" class="num mono">${fmt(r.project_value)}</td></tr>`;}).join("")}
           <tr style="border-top:2px solid var(--line-2);font-weight:600">
             <td style="padding:6px 8px">Total</td>
+            <td class="num" style="padding:6px 8px">${score&&score.team&&score.team.in_sla_pct!=null?score.team.in_sla_pct+"%":"—"}</td>
+            <td class="num" style="padding:6px 8px">${score&&score.team&&score.team.med_mins!=null?s2lFmtMins(score.team.med_mins):"—"}</td>
             <td class="num" style="padding:6px 8px">${tot('leads_assigned')}</td>
             <td class="num" style="padding:6px 8px">${S.leads_added_month||0}</td>
             <td class="num" style="padding:6px 8px">${S.meetings_month||0}</td>
@@ -2754,8 +2834,8 @@ function lostReasonModal(l){
           </select></div>
         <div class="field" id="lr_detail_wrap" style="display:none"><label>Who did they go with?</label>
           <input id="lr_detail" placeholder="e.g. Livspace, HomeLane, local contractor's name"></div>
-        <div class="field"><label>Note (optional)</label><input id="lr_note" placeholder="Anything worth remembering about why"></div>
-        <div class="s2l-hint">The weekly sales analysis runs on this — one honest reason per lost lead.</div>
+        <div class="field"><label>One sentence on what happened <span style="color:var(--bad,#B4453A)">*</span></label><input id="lr_note" placeholder="e.g. Got a quote 20% lower from a local carpenter and chose that"></div>
+        <div class="s2l-hint">${(Number(l.rnr_count)||0)>=3?`${l.rnr_count} unanswered call attempts logged — "Went unresponsive" is allowed.`:`"Went unresponsive" needs 3 logged call attempts (${Number(l.rnr_count)||0} so far). Every other reason needs at least one logged call or WhatsApp.`}</div>
       </div>
       <div class="modal-f"><button class="ghost" id="lr_cancel">Cancel</button><button class="primary" id="lr_save">Mark lost</button></div>`);
     $("#lr_reason").onchange=()=>{
@@ -2766,6 +2846,9 @@ function lostReasonModal(l){
     $("#lr_save").onclick=()=>{
       const reason=$("#lr_reason").value;
       if(!reason) return toast("Pick a reason first");
+      if($("#lr_note").value.trim().length<8) return toast("Write one sentence on what happened — the team learns from it");
+      if(reason==="unresponsive" && (Number(l.rnr_count)||0)<3) return toast(`"Went unresponsive" needs 3 logged call attempts (${Number(l.rnr_count)||0} so far) — log the calls first`);
+      if(reason!=="unresponsive" && !l.first_touch_at) return toast("Log the call or WhatsApp that led here before marking the lead lost");
       // Read BEFORE closeModal() — it wipes #scrim, so reads after it throw and the
       // resolve never ran: "Mark lost" closed the modal but silently did nothing.
       const detail=$("#lr_detail").value.trim(), note=$("#lr_note").value.trim();
@@ -2988,6 +3071,7 @@ async function lwMeetList(l,body,w){
     if(mt) meetEditModal(mt,rerender);
   });
   body.querySelectorAll("[data-mdel]").forEach(b=>b.onclick=()=>meetDelete(b.dataset.mdel,rerender));
+  bindMeetCloseout(body,rerender);
   body.querySelectorAll("[data-mlink]").forEach(b=>b.onclick=async()=>{
     const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mlink).single();
     openModal(`<div class="modal-h">Google Meet link</div>
@@ -3135,11 +3219,32 @@ function lwBriefing(l,body){
 }
 
 /* ---- Activity: the timeline centerpiece, full width ---- */
+/* System rows (BOQ autosave, stage bookkeeping, Priya/CSAT plumbing) never count as client work.
+   The feed defaults to client touches so what the team sees is what actually moves a lead. */
+const ACT_SYS_RE=/^(BOQ |New BOQ|Stage:|Stage corrected|Moved to |Next follow-up|Follow-up (set|cleared)|Design consultant|Lead status|Meeting scheduled|CSAT |Priya |Payment receipt|Proposal (sent|emailed|shared)|Converted to project|SLA breached|Still unclaimed|Client notified|Lead imported|Possession delay|Quotation)/i;
+function isHumanTouch(a){ return !!a.by_user && ["Call","WhatsApp","Meeting","Email","Site Visit","Quote"].includes(a.type); }
+function isClientAct(a){
+  if(isHumanTouch(a)) return true;
+  const t=a.text||"";
+  if(a.type==="Note" && a.by_user && !ACT_SYS_RE.test(t)) return true;
+  if(/^Marked lost|^Meeting (held|no-show|rescheduled)/i.test(t)) return true;
+  if(!a.by_user && /^Client (replied|rescheduled|confirmed|asked)/i.test(t)) return true;
+  return false;
+}
 async function lwActivity(l,body){
   body.innerHTML=`<div class="panel" style="max-width:760px"><h3>Activity & client notes</h3><div id="actInner">Loading…</div></div>`;
-  const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",l.id).order("created_at",{ascending:false});
+  const {data:allActs}=await sb.from("lead_activities").select("*").eq("lead_id",l.id).order("created_at",{ascending:false});
   const w=canWrite();
+  let actMode="client"; try{ actMode=localStorage.getItem("actFilter")||"client"; }catch(e){}
+  const clientActs=(allActs||[]).filter(isClientAct);
+  const acts=actMode==="all"?(allActs||[]):clientActs;
+  const touches=(allActs||[]).filter(isHumanTouch).length, rnr=(allActs||[]).filter(a=>a.type==="Call"&&/no answer|busy|switched off|rnr|not reachable/i.test(a.text||"")).length;
+  const firstCall=l.first_call_at?new Date(l.first_call_at):null;
   $("#actInner").innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <div class="viewtoggle" id="actFilter"><button data-k="client" class="${actMode==="client"?"on":""}">Client touches (${clientActs.length})</button><button data-k="all" class="${actMode==="all"?"on":""}">Everything (${(allActs||[]).length})</button></div>
+      <div style="font-size:12px;color:var(--ink-soft)">${touches} touch${touches===1?"":"es"}${rnr?` · ${rnr} unanswered`:""}${firstCall?` · first call ${firstCall.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})} ${firstCall.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`:" · <b style=\"color:#B4453A\">no call logged yet</b>"}</div>
+    </div>
     ${w?`<div class="actadd">
       <select id="act_type"><option value="Note">Client note</option><option value="Call">Call</option><option value="WhatsApp">WhatsApp</option><option value="Meeting">Meeting</option><option value="Email">Email</option><option value="Site Visit">Site visit</option><option value="Quote">Quote</option></select>
       <input id="act_text" placeholder="What did the client say? Record the note…">
@@ -3159,7 +3264,8 @@ async function lwActivity(l,body){
           <div class="tl-text2">${esc(a.text||"")}</div>
           ${(a.objections&&a.objections.length)?`<div class="tagrow" style="margin-top:4px">${a.objections.map(o=>`<span class="qchip">⚑ ${esc((OBJECTIONS.find(x=>x[0]===o)||["",o])[1])}</span>`).join("")}</div>`:""}
           ${who?`<div class="tl-who">— ${esc(who)}</div>`:""}</div></div>`;
-      }).join("")||`<div class="tl-empty">No notes yet. Every call and client conversation logged here builds the lead's history.</div>`}</div>`;
+      }).join("")||`<div class="tl-empty">${actMode==="client"&&(allActs||[]).length?"No client touches yet — only system activity. Log the first call above.":"No notes yet. Every call and client conversation logged here builds the lead's history."}</div>`}</div>`;
+  document.querySelectorAll("#actFilter button").forEach(b=>b.onclick=()=>{ try{ localStorage.setItem("actFilter",b.dataset.k); }catch(e){} lwActivity(l,body); });
   if(w){
     const objPicked=new Set();
     document.querySelectorAll("#objRow .tgopt").forEach(el=>el.onclick=()=>{
@@ -3363,8 +3469,8 @@ function bindLeadCommon(l){
       sd.value=l.stage;
       const lr=await lostReasonModal(l);
       if(!lr) return;
-      const {error}=await sb.from("leads").update({stage:"lost",lost_reason:lr.reason,updated_at:new Date().toISOString()}).eq("id",l.id);
-      if(error) return toast(error.message);
+      const {error}=await sb.from("leads").update({stage:"lost",lost_reason:lr.reason,lost_note:[lr.detail,lr.note].filter(Boolean).join(" · ")||null,updated_at:new Date().toISOString()}).eq("id",l.id);
+      if(error) return toast(error.message.replace(/^[^:]*: /,""), 6000);
       await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:lostReasonText(lr),by_user:me.id});
       l.stage="lost"; l.lost_reason=lr.reason; toast("Marked lost"); renderLeadWorkspace(l.id);
       return;
@@ -6985,10 +7091,13 @@ function meetsHtml(meets,w){
     const day=dt?dt.toLocaleDateString("en-IN",{day:"2-digit"}):"–";
     const mo=dt?dt.toLocaleDateString("en-IN",{month:"short"}):"";
     const time=dt?dt.toLocaleString("en-IN",{hour:"2-digit",minute:"2-digit",weekday:"short"}):"";
-    return `<div class="ds-meet">
+    const OC={held:["Held","done"],no_show:["No-show","todo"],rescheduled:["Rescheduled","todo"],cancelled:["Cancelled","todo"]}[mt.outcome];
+    const needsClose=w && !mt.outcome && (mt.status||"scheduled")==="scheduled" && dt && dt.getTime()+(mt.duration_min||30)*60000<Date.now();
+    return `<div class="ds-meet${needsClose?" needs-close":""}">
       <div class="dm-date"><div class="d">${day}</div><div class="mo">${mo}</div></div>
       <div class="dm-main">
-        <div class="dm-t">${esc(mt.title)} ${mt.status==="done"?'<span class="ds-stat done">done</span>':mt.status==="cancelled"?'<span class="ds-stat todo">cancelled</span>':""}</div>
+        <div class="dm-t">${esc(mt.title)} ${OC?`<span class="ds-stat ${OC[1]}">${OC[0]}</span>`:mt.status==="done"?'<span class="ds-stat done">done</span>':mt.status==="cancelled"?'<span class="ds-stat todo">cancelled</span>':needsClose?'<span class="ds-stat warn">Close out</span>':""}</div>
+        ${mt.outcome==="held"&&mt.mom_next?`<div class="dm-sub">→ ${esc(mt.mom_next)}${mt.mom_next_date?" · by "+mt.mom_next_date:""}</div>`:""}
         <div class="dm-sub">${time}${mt.duration_min?" · "+mt.duration_min+" min":""}${mt.client_email?" · "+esc(mt.client_email):""}${mt.gcal_event_id?' · <span title="Synced to Google Calendar — edits and cancellations notify guests">📆 synced</span>':""}</div>
         ${mt.agenda?`<div class="dm-sub">📋 ${esc(mt.agenda)}</div>`:""}
       </div>
@@ -6999,9 +7108,10 @@ function meetsHtml(meets,w){
           :(w&&gcalConn.connected
             ?`<button class="ghost" data-msync="${mt.id}">📅 Add to Google Calendar</button>`
             :`<button class="ghost" data-gcal="${mt.id}">📅 Calendar + Meet</button>`)}
-        ${w?`<button class="ghost" data-medit="${mt.id}">✎ Edit</button>
+        ${w?`${needsClose?`<button class="primary" data-mclose="${mt.id}">Close out</button>`:""}
+            <button class="ghost" data-medit="${mt.id}">✎ Edit</button>
             ${mt.gcal_event_id?"":`<button class="ghost" data-mlink="${mt.id}">${mt.meet_link?"Edit link":"+ Meet link"}</button>`}
-            <button class="primary" data-mom="${mt.id}" data-momtitle="${esc(mt.title)}">Write MoM</button>
+            <button class="${needsClose?"ghost":"primary"}" data-mom="${mt.id}" data-momtitle="${esc(mt.title)}">Write MoM</button>
             <button class="linkbtn del" data-mdel="${mt.id}">✕</button>`:""}
       </div>
     </div>`;
@@ -7155,6 +7265,88 @@ function bindMeetActions(p,body){
     };
   });
   body.querySelectorAll("[data-mom]").forEach(b=>b.onclick=()=>momForm("project",p,{meeting_id:Number(b.dataset.mom),title:"MoM · "+b.dataset.momtitle},body));
+  bindMeetCloseout(body,()=>dsMeetings(p,body));
+}
+
+/* ---- SLA-01: meeting close-out. A past meeting must end as Held (3-line MoM), No-show or Rescheduled. ---- */
+function bindMeetCloseout(body,rerender){
+  body.querySelectorAll("[data-mclose]").forEach(b=>b.onclick=async()=>{
+    const {data:mt}=await sb.from("design_meetings").select("*").eq("id",b.dataset.mclose).single();
+    if(mt) meetCloseoutModal(mt,rerender);
+  });
+}
+function meetCloseoutModal(mt,rerender){
+  const when=mt.scheduled_at?new Date(mt.scheduled_at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+  const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+  openModal(`<div class="modal-h">Close out · ${esc(mt.title||"Meeting")} <span style="font-weight:400;color:var(--ink-soft);font-size:13px">· ${when}</span></div>
+    <div class="modal-b">
+      <div class="viewtoggle" id="mc_outcome" style="margin-bottom:14px"><button data-k="held" class="on">Held</button><button data-k="no_show">No-show</button><button data-k="rescheduled">Rescheduled</button></div>
+      <div id="mc_held">
+        <div class="field"><label>What do they want? <span style="color:#B4453A">*</span></label><input id="mc_wants" placeholder="e.g. 3BHK full home, modern minimal, kitchen is the priority"></div>
+        <div class="field"><label>What worries them? <span style="color:#B4453A">*</span></label><input id="mc_concerns" placeholder="e.g. Budget ceiling ₹12 L, comparing with Livspace, possession in Nov"></div>
+        <div class="grid2">
+          <div class="field"><label>Next step <span style="color:#B4453A">*</span></label><input id="mc_next" placeholder="e.g. Share concept + BOQ v1"></div>
+          <div class="field"><label>By when <span style="color:#B4453A">*</span></label><input type="date" id="mc_next_date" value="${tomorrow}"></div>
+        </div>
+      </div>
+      <div id="mc_noshow" style="display:none">
+        <div class="banner">The lead's follow-up moves to tomorrow and Priya re-books the meeting over WhatsApp. Two no-shows in a row is a signal — note it.</div>
+        <div class="field"><label>Note (optional)</label><input id="mc_ns_note" placeholder="e.g. Didn't answer at meeting time; WhatsApp read, no reply"></div>
+      </div>
+      <div id="mc_resched" style="display:none">
+        <div class="grid2">
+          <div class="field"><label>New date & time <span style="color:#B4453A">*</span></label><input type="datetime-local" id="mc_when"></div>
+          <div class="field"><label>Reason (optional)</label><input id="mc_rs_note" placeholder="e.g. Client travelling till Tuesday"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="mc_save">Save close-out</button></div>`);
+  let outcome="held";
+  document.querySelectorAll("#mc_outcome button").forEach(b=>b.onclick=()=>{
+    outcome=b.dataset.k; document.querySelectorAll("#mc_outcome button").forEach(x=>x.classList.toggle("on",x===b));
+    $("#mc_held").style.display=outcome==="held"?"":"none"; $("#mc_noshow").style.display=outcome==="no_show"?"":"none"; $("#mc_resched").style.display=outcome==="rescheduled"?"":"none";
+  });
+  $("#mc_save").onclick=async()=>{
+    const isLead=!!mt.lead_id&&!mt.project_id, scope=isLead?{lead_id:mt.lead_id}:{project_id:mt.project_id};
+    const now=new Date().toISOString();
+    if(outcome==="held"){
+      const wants=$("#mc_wants").value.trim(), concerns=$("#mc_concerns").value.trim(), next=$("#mc_next").value.trim(), nd=$("#mc_next_date").value;
+      if(!wants||!concerns||!next||!nd) return toast("All three lines + a date are needed — that is the whole MoM");
+      const {error}=await sb.from("design_meetings").update({outcome:"held",status:"done",closed_at:now,closed_by:me.id,mom_wants:wants,mom_concerns:concerns,mom_next:next,mom_next_date:nd}).eq("id",mt.id);
+      if(error) return toast(error.message);
+      await sb.from("design_moms").insert(Object.assign({meeting_id:mt.id,title:"MoM · "+(mt.title||"Meeting"),summary:`Wants: ${wants}\nConcerns: ${concerns}\nNext: ${next} (by ${nd})`,created_by:me.id},scope));
+      if(isLead){
+        await sb.from("lead_activities").insert({lead_id:mt.lead_id,type:"Meeting",text:`Meeting held · ${mt.title||"Meeting"} · next: ${next} by ${nd}`,by_user:me.id});
+        await sb.from("leads").update({next_follow_up:nd,updated_at:now}).eq("id",mt.lead_id);
+        csatTrigger("first_meeting",{lead_id:mt.lead_id});
+      } else {
+        await sb.from("project_activities").insert({project_id:mt.project_id,type:"Meeting",text:`Meeting held · ${mt.title||"Meeting"} · next: ${next} by ${nd}`,by_user:me.id}).then(()=>{},()=>{});
+      }
+      closeModal(); toast("Meeting closed out · MoM saved · follow-up set for "+nd);
+    } else if(outcome==="no_show"){
+      const note=$("#mc_ns_note").value.trim();
+      const {error}=await sb.from("design_meetings").update({outcome:"no_show",status:"cancelled",closed_at:now,closed_by:me.id,mom_concerns:note||null}).eq("id",mt.id);
+      if(error) return toast(error.message);
+      if(isLead){
+        await sb.from("leads").update({next_follow_up:tomorrow,updated_at:now}).eq("id",mt.lead_id);
+        await sb.from("lead_activities").insert({lead_id:mt.lead_id,type:"Note",text:`Meeting no-show · ${mt.title||"Meeting"}${note?" · "+note:""} · Priya will re-book`,by_user:me.id});
+      }
+      closeModal(); toast("No-show recorded · Priya will re-book tomorrow");
+    } else {
+      const w2=$("#mc_when").value; if(!w2) return toast("Pick the new date and time");
+      const note=$("#mc_rs_note").value.trim();
+      const {error}=await sb.from("design_meetings").update({outcome:"rescheduled",status:"cancelled",closed_at:now,closed_by:me.id,mom_concerns:note||null}).eq("id",mt.id);
+      if(error) return toast(error.message);
+      const {error:e2}=await sb.from("design_meetings").insert(Object.assign({title:mt.title,scheduled_at:new Date(w2).toISOString(),duration_min:mt.duration_min||30,client_email:mt.client_email||null,agenda:mt.agenda||null,status:"scheduled",created_by:me.id},scope));
+      if(e2) return toast(e2.message);
+      if(isLead){
+        await sb.from("leads").update({next_follow_up:w2.slice(0,10),updated_at:now}).eq("id",mt.lead_id);
+        await sb.from("lead_activities").insert({lead_id:mt.lead_id,type:"Note",text:`Meeting rescheduled · ${mt.title||"Meeting"} → ${new Date(w2).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}${note?" · "+note:""}`,by_user:me.id});
+      }
+      closeModal(); toast("Rescheduled · new meeting created");
+    }
+    if(typeof rerender==="function") rerender();
+  };
 }
 
 /* ---- Minutes of Meeting (unified: works for project + lead) ---- */
@@ -9482,6 +9674,13 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b43",date:"05 Sep 2026",title:"Speed-to-lead SLA, honest activity, meeting close-out",points:[
+    "<b>15-minute first-call SLA.</b> Every new lead now carries a live countdown (business hours are <b>10 AM – 7 PM, every day</b>); leads arriving after hours join the morning queue, due by 11:00. Unclaimed at the deadline → the consultant and Rafiya are alerted; 30 minutes later → Amit. The timer stops the moment a call or WhatsApp is logged.",
+    "<b>Dashboard → Speed to lead</b>: the unclaimed queue with Call / Log buttons, plus 'Called within SLA' and 'Median 1st human call' KPIs (Priya's instant ack no longer counts as a response). Team performance now shows each consultant's SLA % and median first call.",
+    "<b>Activity tab</b> defaults to <b>Client touches</b> — BOQ autosaves, stage moves and Priya plumbing are hidden unless you switch to Everything. Touch counts now count only real client contact.",
+    "<b>Unanswered calls book their own retry</b> (2 hours later in hours, next morning otherwise) and are counted — 'Went unresponsive' needs 3 logged attempts.",
+    "<b>Marking a lead lost</b> needs a real reason ('Other' is gone) and one sentence on what happened; you can't lose a lead you never called.",
+    "<b>Meetings must be closed out</b>: once a meeting's time passes it turns red until marked Held (3-line MoM: wants / worries / next step + date), No-show (Priya re-books) or Rescheduled. Past meetings needing this appear on the dashboard."]},
   {build:"b42",date:"04 Sep 2026",title:"PAN is now optional at conversion",points:[
     "Converting a lead to a project no longer requires the client's PAN — contact number, email, site address + pincode, schedule dates and the 10% advance are still mandatory. If a PAN is entered, the format is still checked."]},
   {build:"b41",date:"01 Sep 2026",title:"Faster hands: keyboard shortcuts, smoother loading, breadcrumbs",points:[
@@ -11046,7 +11245,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b42 · 04 Sep 2026";
+const APP_BUILD = "b43 · 05 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
