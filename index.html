@@ -1200,7 +1200,7 @@ function s2lSlaDeadline(l){
 // "done" = any human touch (call / WhatsApp / meeting) — the timer stops on contact, not on a call only
 function s2lSlaState(l){
   if(l.first_touch_at||l.first_call_at) return {state:"done"};
-  if(l.stage==="won"||l.stage==="lost") return {state:"none"};
+  if(l.stage==="won"||l.stage==="lost"||l.nurture_status==="priya") return {state:"none"};
   const born=new Date(l.lead_created_at||l.created_at||0).getTime();
   if(!born || Date.now()-born>14*86400000) return {state:"none"};   // older than the queue window → hygiene metrics own it
   const dl=s2lSlaDeadline(l);
@@ -1228,6 +1228,15 @@ function s2lTouchDotsHtml(l){
 }
 function s2lDupBadgeHtml(l){
   return l.is_duplicate?`<span class="s2l-dup" title="Agency duplicate — excluded from conversion metrics">Agency duplicate</span>`:"";
+}
+function coldChipHtml(l){
+  return l.nurture_status==="priya"?`<span class="s2l-chip s2l-queued" title="Cold-source lead with nothing known yet — Priya nurtures it on WhatsApp. It is assigned and the 15-minute timer starts the moment they reply, or when a consultant takes it.">🤖 Priya nurture</span>`:"";
+}
+async function claimColdLead(l){
+  const {data,error}=await sb.rpc("claim_cold_lead",{p_lead_id:l.id});
+  if(error) return toast(error.message);
+  if(data&&data.ok===false) return toast(data.why||"Couldn't claim");
+  toast("It's yours — 15-minute first-call timer started"); renderLeadWorkspace(l.id);
 }
 // next_touch_due after advancing to `count` completed touches (null once cadence is done)
 function s2lNextTouchDue(l,count){
@@ -1375,6 +1384,7 @@ function s2lRenderDashKpis(s){
       `<div class="kpi" style="--kc:${pctAccent}"><div class="kpi-val">${pct==null?"—":pct+"%"}</div><div class="kpi-lbl">Called within SLA · wk<span style="display:block;font-size:10px;opacity:.65">15 min in hours · by 11:00 after · target 80%</span></div></div>`
     + `<div class="kpi" style="--kc:${mfrAccent}"><div class="kpi-val">${mfrTxt}</div><div class="kpi-lbl">Median 1st human call · wk<span style="display:block;font-size:10px;opacity:.65">Priya's instant ack not counted</span></div></div>`
     + `<div class="kpi" style="--kc:${brAccent}"><div class="kpi-val">${br}</div><div class="kpi-lbl">SLA breaches · wk<span style="display:block;font-size:10px;opacity:.65">${s.unclaimed_now?s.unclaimed_now+" unclaimed right now":"target 0"}</span></div></div>`
+    + `<div class="kpi" style="--kc:#5b86b3"><div class="kpi-val">${Number(s.cold_now)||0}</div><div class="kpi-lbl">In Priya nurture<span style="display:block;font-size:10px;opacity:.65">${Number(s.warmed_week)||0} warmed up this week · cold-source leads until they reply</span></div></div>`
     + `<div class="kpi" id="dashCpm" style="--kc:#B08433;cursor:pointer"><div class="kpi-val">${cpmTxt}</div><div class="kpi-lbl">Cost / meeting · wk<span style="display:block;font-size:10px;opacity:.65">${cpm.length?(cpm.length+" campaign"+(cpm.length>1?"s":"")+" · tap"):"tap to add spend"}</span></div></div>`;
   const cpmCard=$("#dashCpm"); if(cpmCard) cpmCard.onclick=()=>s2lSpendDialog(cpm);
 }
@@ -1930,6 +1940,10 @@ async function renderDashboard(){
       <div class="sec-label">Monthly sales <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— booked value ex-GST, this financial year</span></div>
       <div id="dashSalesBody">${skel(1,150)}</div>
     </section>
+    ${isAdminLevel()?`<section class="pw-card" id="dashRoi" style="margin-bottom:14px">
+      <div class="sec-label">Source ROI <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— this financial year · won value ex-GST · spend from the weekly campaign entry</span></div>
+      <div id="dashRoiBody">${skel(3,40)}</div>
+    </section>`:""}
     ${myRole==="admin"?`<section class="pw-card" id="dashIntel" style="margin-bottom:14px">
       <div class="sec-label">Founder Intel — weekly sales analysis</div>
       <div id="dashIntelBody">${skel(2,52)}</div>
@@ -1981,6 +1995,7 @@ async function renderDashboard(){
   renderDeliveryRadar("#dashDelivery");
   renderCsatDash();
   renderMonthlySales();
+  if(isAdminLevel()) renderSourceRoi();
   if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
@@ -2061,6 +2076,20 @@ async function renderDashboard(){
     tr.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(tr.dataset.open)),40); };
   });
   const av=$("#dashAllLeads"); if(av) av.onclick=()=>gotoTab("leads");
+}
+/* SOURCE-01: where the money comes from — per source, FY to date */
+async function renderSourceRoi(){
+  const host=$("#dashRoiBody"); if(!host) return;
+  const {data,error}=await sb.rpc("source_roi");
+  if(error||!data){ host.innerHTML=`<div class="empty" style="padding:10px 0">Couldn't load source ROI.</div>`; return; }
+  const rows=data.rows||[]; if(!rows.length){ host.innerHTML=`<div class="empty" style="padding:10px 0">No leads this financial year yet.</div>`; return; }
+  const c=v=>v==null?"—":v;
+  host.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:720px">
+    <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Source</th><th class="num" style="padding:5px 8px">Leads</th><th class="num" style="padding:5px 8px" title="Cold-source leads currently in Priya nurture">Cold</th><th class="num" style="padding:5px 8px" title="BANT ≥ 40 or 4+ answers">Qualified</th><th class="num" style="padding:5px 8px">Meetings</th><th class="num" style="padding:5px 8px">Proposals</th><th class="num" style="padding:5px 8px">Won</th><th class="num" style="padding:5px 8px">Conv.</th><th class="num" style="padding:5px 8px">Won value</th><th class="num" style="padding:5px 8px">Spend</th><th class="num" style="padding:5px 8px">₹ / lead</th><th class="num" style="padding:5px 8px">₹ / win</th></tr></thead>
+    <tbody>${rows.map(r=>{const cv=Number(r.conv_pct); const cc=isNaN(cv)?"var(--ink-soft)":cv>=15?"#4f7d52":cv>=5?"#B08433":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
+      <td style="padding:6px 8px;font-weight:600">${esc(r.source)}</td><td class="num" style="padding:6px 8px">${r.leads}</td><td class="num" style="padding:6px 8px">${r.cold||""}</td><td class="num" style="padding:6px 8px">${r.qualified}</td><td class="num" style="padding:6px 8px">${r.meetings}</td><td class="num" style="padding:6px 8px">${r.proposals}</td><td class="num" style="padding:6px 8px;font-weight:600">${r.won}</td>
+      <td class="num" style="padding:6px 8px;color:${cc};font-weight:600">${c(r.conv_pct)}${r.conv_pct!=null?"%":""}</td><td class="num mono" style="padding:6px 8px">${r.won_value?fmt(r.won_value):"—"}</td><td class="num mono" style="padding:6px 8px">${r.spend?fmt(r.spend):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpl?fmt(r.cpl):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpw?fmt(r.cpw):"—"}</td></tr>`;}).join("")}</tbody></table></div>
+    <div class="s2l-hint" style="margin-top:8px">Spend is per campaign (Dashboard → Cost / meeting tile → add weekly spend); it rolls up to the source of the leads that carry that campaign name. Organic sources show no spend by design.</div>`;
 }
 /* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
 const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
@@ -2623,7 +2652,7 @@ async function drawBoard(){
       c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
         <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`,leadAvailBadge(l)].filter(Boolean).join(" · ")}</div>
         <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>
-        ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
+        ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l)||coldChipHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${coldChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
         <span class="val">${leadPipelineValue(l)?fmt(leadPipelineValue(l)):""}</span></div>
@@ -2894,20 +2923,21 @@ function lostReasonText(lr){
 }
 /* ---- INTEL-01: soft gate — warn before moving an unqualified lead to proposal/negotiation.
    Resolves true = move anyway, false = user chose to fill qualification (opens the lead form). ---- */
+function bantAnswered(l){ return Object.keys(QUAL).filter(k=>l&&l[k]).length; }
 function bantGateModal(l){
-  return new Promise(resolve=>{
-    openModal(`
-      <div class="modal-h">Qualification is empty</div>
-      <div class="modal-b">
-        <div style="font-size:13px;color:var(--ink-soft)">This lead has no BANT qualification yet. Proposals to unqualified leads are where most pipeline value leaks — two minutes of qualification makes the weekly analysis (and the close rate) sharper.</div>
-      </div>
-      <div class="modal-f">
-        <button class="ghost" id="bg_anyway">Move anyway</button>
-        <button class="primary" id="bg_fill">Fill qualification</button>
-      </div>`);
-    $("#bg_anyway").onclick=()=>{ closeModal(); resolve(true); };
-    $("#bg_fill").onclick=()=>{ closeModal(); resolve(false); leadForm(l); };
-  });
+  const n=bantAnswered(l);
+  const missing=Object.keys(QUAL).filter(k=>!l[k]).map(k=>QUAL_LABELS[k]);
+  openModal(`
+    <div class="modal-h">Qualify before you propose</div>
+    <div class="modal-b">
+      <div style="font-size:13px;color:var(--ink-soft)"><b>${n} of 7</b> BANT answers filled — <b>4 are needed</b> before a lead can move to Proposal. Leads with a real qualification close at 29%; unqualified ones at 2%. Two minutes now saves a BOQ nobody buys.</div>
+      <div class="tagrow" style="margin-top:10px">${missing.map(x=>`<span class="tg">${esc(x)}</span>`).join("")}</div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Not now</button>
+      <button class="primary" id="bg_fill">Fill qualification</button>
+    </div>`);
+  $("#bg_fill").onclick=()=>{ closeModal(); leadForm(l); };
 }
 
 async function saveLeadRow(row,lead){
@@ -2946,6 +2976,7 @@ async function renderLeadWorkspace(id){
       </div>
       <div class="lw-pills">
         ${s2lSlaChipHtml(l)}
+        ${coldChipHtml(l)}${l.nurture_status==="priya"&&canWrite()?`<button class="primary sm" id="lwClaim" style="margin-left:4px">Take this lead</button>`:""}
         ${s2lDupBadgeHtml(l)}
         ${channelChipHtml(l,true)}
         ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
@@ -3506,10 +3537,9 @@ function bindLeadCommon(l){
       l.stage="lost"; l.lost_reason=lr.reason; toast("Marked lost"); renderLeadWorkspace(l.id);
       return;
     }
-    // Proposal/negotiation with no qualification → soft gate (INTEL-01)
-    if((newStage==="proposal"||newStage==="negotiation") && !(Number(l.bant_score)||bantFromQual(l))){
-      const go=await bantGateModal(l);
-      if(!go){ sd.value=l.stage; return; }
+    // Proposal/negotiation needs ≥4 of 7 BANT answers (SOURCE-01 — enforced in the database too)
+    if((newStage==="proposal"||newStage==="negotiation") && !["proposal","negotiation","won"].includes(l.stage) && bantAnswered(l)<4){
+      sd.value=l.stage; bantGateModal(l); return;
     }
     const {error}=await sb.from("leads").update({stage:newStage,updated_at:new Date().toISOString()}).eq("id",l.id);
     if(error){ sd.value=l.stage; return toast(error.message); }
@@ -3557,6 +3587,7 @@ function bindLeadCommon(l){
       logAct(l.id,"WhatsApp","WhatsApp opened · custom message"); };
   };
   const lc=$("#s2l_logcall"); if(lc) lc.onclick=()=>s2lLogCall(l);
+  const cl=$("#lwClaim"); if(cl) cl.onclick=()=>claimColdLead(l);
   const ls=$("#ld_lead_status");
   if(ls) ls.onchange=async()=>{
     const v=ls.value||null;
@@ -3893,6 +3924,13 @@ async function newBoqFor(seed){
   if(newBoqFor._busy) return null;
   newBoqFor._busy=true;
   try{
+    if(seed.lead_id && _leadBoqCtx && _leadBoqCtx.l && String(_leadBoqCtx.l.id)===String(seed.lead_id)){
+      const L=_leadBoqCtx.l;
+      if(!L.budget_band || !L.q_possession){
+        toast("Before a BOQ: record the client's budget band and possession status (Edit lead)");
+        leadForm(L); return null;
+      }
+    }
     for(let attempt=0;attempt<2;attempt++){
       // version number per lead/project
       let q=sb.from("boq_versions").select("version").order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
@@ -9705,6 +9743,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b45",date:"05 Sep 2026",title:"Qualify before you propose · cold leads go to Priya · Source ROI",points:[
+    "<b>BANT gate is now hard</b>: a lead needs 4 of 7 qualification answers before it can move to Proposal or Negotiation (the 'Move anyway' button is gone; the database enforces it too). A lead BOQ also needs the budget band and possession status recorded first.",
+    "<b>Cold-source leads go to Priya, not to your queue.</b> Instagram / Meta / Website / WhatsApp leads with nothing known yet show a <b>🤖 Priya nurture</b> chip: no consultant, no 15-minute timer. The moment they reply to Priya they are assigned round-robin and the timer starts — or open the lead and press <b>Take this lead</b>.",
+    "<b>Source ROI</b> on the admin dashboard: leads → qualified → meetings → proposals → won and won value per source, with cost per lead / per win once weekly campaign spend is entered."]},
   {build:"b44",date:"05 Sep 2026",title:"Consultant Scorecard · Priya logs your work · 18:30 check-in",points:[
     "<b>Consultant Scorecard</b> on Dashboard → Team performance: one 0–100 score per person from six dimensions — Speed 25, Persistence 15, Progression 25, Hygiene 15, Truth 10, Client voice 10. Tap a row for the working. The same league table is emailed to everyone every Monday 09:00.",
     "<b>Log by WhatsApp</b>: message Priya what you did — 'Called Ilam – RNR, retry 5pm', 'Met Neha: wants…, worried about…, next…', 'WhatsApp Ajit – sent catalogue' — and it is logged on the lead as you (counts for SLA, touches, retries, meeting close-out). Send <b>help</b> to Priya for the formats.",
@@ -11281,7 +11323,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b44 · 05 Sep 2026";
+const APP_BUILD = "b45 · 05 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
