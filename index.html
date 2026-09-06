@@ -1949,14 +1949,15 @@ async function renderDashboard(){
     $("#dashRecentBody").style.display=b.dataset.k==="recent"?"":"none";
     $("#dashTeam").style.display=b.dataset.k==="team"?"":"none";
   });
-  const [{data:stats,error:sErr},{data:leads,error},{data:s2l},{data:calls},{data:slaQ},{data:toClose},{data:score}]=await Promise.all([
+  const [{data:stats,error:sErr},{data:leads,error},{data:s2l},{data:calls},{data:slaQ},{data:toClose},{data:score},{data:card}]=await Promise.all([
     sb.rpc("dashboard_stats"),
     sb.from("leads").select("*").order("updated_at",{ascending:false}).order("id",{ascending:false}).limit(8),
     sb.rpc("s2l_dashboard_stats"),
     sb.rpc("s2l_today_calls"),
     sb.rpc("sla_queue"),
     sb.rpc("meetings_to_close"),
-    sb.rpc("sla_scorecard",{p_days:7})
+    sb.rpc("sla_scorecard",{p_days:7}),
+    sb.rpc("consultant_scorecard",{p_days:7})
   ]);
   if(sErr) toast("Couldn't load dashboard stats");
   const S = stats||{}; const L = leads||[];
@@ -1987,7 +1988,7 @@ async function renderDashboard(){
   // name-wise team performance (this month for activity; assigned & value are current totals)
   const bp = S.by_person||[];
   const tot=k=>bp.reduce((a,r)=>a+(Number(r[k])||0),0);
-  $("#dashTeam").innerHTML = bp.length ? `
+  $("#dashTeam").innerHTML = (card&&card.rows&&card.rows.length?scorecardHtml(card):"") + (bp.length ? `
     <div>
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:8px">Team performance <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— added / meetings / quotes / converted / value (ex-GST, from the agreed BOQ) are this month · assigned is current pipeline</span></div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
@@ -2014,8 +2015,9 @@ async function renderDashboard(){
             <td class="num" style="padding:6px 8px">${S.converted_month||0}</td>
             <td class="num mono" style="padding:6px 8px">${fmt(S.project_value_month||0)}</td></tr>
         </tbody></table></div>
-    </div>` : "";
+    </div>` : "");
   $("#dashTeam").querySelectorAll("[data-cid]").forEach(a=>a.onclick=e=>{ e.preventDefault(); dashConsultantProjects(Number(a.dataset.cid), a.dataset.name); });
+  $("#dashTeam").querySelectorAll("[data-sc]").forEach(tr=>tr.onclick=()=>{ const r=(card.rows||[]).find(x=>String(x.cid)===tr.dataset.sc); if(r) scorecardDetail(r); });
   $("#dashKpis").querySelectorAll(".kpi[data-goto]").forEach(c=>{
     if(c.dataset.goto) c.onclick=()=>gotoTab(c.dataset.goto);
   });
@@ -2059,6 +2061,35 @@ async function renderDashboard(){
     tr.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(tr.dataset.open)),40); };
   });
   const av=$("#dashAllLeads"); if(av) av.onclick=()=>gotoTab("leads");
+}
+/* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
+const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
+function scPct(v,max){ if(v==null) return "var(--ink-soft)"; const p=v/max; return p>=.8?"#4f7d52":p>=.5?"#B08433":"#B4453A"; }
+function scorecardHtml(card){
+  const rows=card.rows||[];
+  return `<div style="margin-bottom:18px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin-bottom:8px">Consultant scorecard <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— last ${card.days} days · Speed 25 · Persistence 15 · Progression 25 · Hygiene 15 · Truth 10 · Client voice 10 · tap a row for the working</span></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">#</th><th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num">Score</th>${SC_DIMS.map(d=>`<th style="padding:5px 8px" class="num">${d[1]} <span style="font-weight:400">/${d[2]}</span></th>`).join("")}</tr></thead>
+      <tbody>${rows.map((r,i)=>`<tr data-sc="${r.cid}" style="border-top:1px solid var(--line-2);cursor:pointer">
+        <td style="padding:7px 8px;color:var(--ink-soft)">${i+1}</td>
+        <td style="padding:7px 8px;font-weight:600">${esc(r.name)}</td>
+        <td style="padding:7px 8px;font-size:16px;font-weight:700" class="num mono">${r.total==null?"—":Math.round(r.total)}</td>
+        ${SC_DIMS.map(d=>{const v=r[d[0]]&&r[d[0]].score; return `<td style="padding:7px 8px" class="num mono"><span style="color:${scPct(v,d[2])};font-weight:600">${v==null?"—":v}</span></td>`;}).join("")}
+      </tr>`).join("")}</tbody></table></div></div>`;
+}
+function scorecardDetail(r){
+  const s=r.speed||{},p=r.persistence||{},g=r.progression||{},h=r.hygiene||{},t=r.truth||{},v=r.voice||{}; const n=x=>x==null?"—":x;
+  const row=(label,score,max,text)=>`<div style="display:grid;grid-template-columns:110px 60px 1fr;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:13px;align-items:baseline"><b>${label}</b><span class="mono" style="color:${scPct(score,max)};font-weight:700">${n(score)}<span style="color:var(--ink-soft);font-weight:400">/${max}</span></span><span style="color:var(--ink-2,var(--ink))">${text}</span></div>`;
+  openModal(`<div class="modal-h">${esc(r.name)} · ${Math.round(r.total||0)}/100</div><div class="modal-b">
+    ${row("Speed",s.score,25,`${n(s.in_sla)} of ${n(s.leads)} new leads called within SLA · median first call ${s.med_mins==null?"—":s2lFmtMins(s.med_mins)}`)}
+    ${row("Persistence",p.score,15,`${n(p.retried)} of ${n(p.rnr)} unanswered calls retried within 24 h · ${n(p.acked)} of ${n(p.alerts)} alerts acted on · ${n(p.idle3)} leads at 3+ RNR left idle`)}
+    ${row("Progression",g.score,25,`30-day cohort: touched ${n(g.touched)} → meetings ${n(g.met)} → proposals ${n(g.prop)} → won ${n(g.won)}`)}
+    ${row("Hygiene",h.score,15,`${n(h.overdue)} overdue follow-ups · ${n(h.stale)} untouched 14 d · ${n(h.unclosed)} meetings not closed out · of ${n(h.open)} open`)}
+    ${row("Truth",t.score,10,`${n(t.journey)} of ${n(t.won)} wins have a logged journey · ${n(t.burst_minutes)} burst-logging minutes · ${n(t.ghost)} leads moved stage with no contact`)}
+    ${row("Client voice",v.score,10,v.avg==null?"no CSAT responses yet (neutral 5)":`CSAT ${v.avg}★ from ${n(v.resp)} of ${n(v.sent)} surveys`)}
+    <div class="s2l-hint" style="margin-top:12px">The same table is emailed to everyone on Monday 09:00. Scores move only through the work — log calls via Priya or the OS, close meetings out, retry unanswered calls the same day.</div>
+  </div><div class="modal-f"><button class="primary" onclick="closeModal()">Close</button></div>`);
 }
 // drill-down: a consultant's projects (from the team-performance table)
 async function dashConsultantProjects(cid, name){
@@ -9674,6 +9705,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b44",date:"05 Sep 2026",title:"Consultant Scorecard · Priya logs your work · 18:30 check-in",points:[
+    "<b>Consultant Scorecard</b> on Dashboard → Team performance: one 0–100 score per person from six dimensions — Speed 25, Persistence 15, Progression 25, Hygiene 15, Truth 10, Client voice 10. Tap a row for the working. The same league table is emailed to everyone every Monday 09:00.",
+    "<b>Log by WhatsApp</b>: message Priya what you did — 'Called Ilam – RNR, retry 5pm', 'Met Neha: wants…, worried about…, next…', 'WhatsApp Ajit – sent catalogue' — and it is logged on the lead as you (counts for SLA, touches, retries, meeting close-out). Send <b>help</b> to Priya for the formats.",
+    "<b>18:30 check-in</b>: Priya asks for your day in one line ('6 calls, 1 meeting, stuck: …') and tells you how many of those calls are actually logged.",
+    "Priya now opens with a question (which stage is your home at?), follows up twice if there is no reply, books consultation slots directly, and sends a 09:15 personal digest instead of the old activity nudges."]},
   {build:"b43",date:"05 Sep 2026",title:"Speed-to-lead SLA, honest activity, meeting close-out",points:[
     "<b>15-minute first-call SLA.</b> Every new lead now carries a live countdown (business hours are <b>10 AM – 7 PM, every day</b>); leads arriving after hours join the morning queue, due by 11:00. Unclaimed at the deadline → the consultant and Rafiya are alerted; 30 minutes later → Amit. The timer stops the moment a call or WhatsApp is logged.",
     "<b>Dashboard → Speed to lead</b>: the unclaimed queue with Call / Log buttons, plus 'Called within SLA' and 'Median 1st human call' KPIs (Priya's instant ack no longer counts as a response). Team performance now shows each consultant's SLA % and median first call.",
@@ -11245,7 +11281,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b43 · 05 Sep 2026";
+const APP_BUILD = "b44 · 05 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
