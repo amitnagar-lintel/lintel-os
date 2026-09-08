@@ -1921,6 +1921,7 @@ async function renderDashboard(){
       <div class="dash-greet2 display">${g[0]}, ${esc(firstName)}</div>
       <div class="dash-date">${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"})}</div>
     </section>
+    <section class="pw-card" id="dashDirectives" style="display:none;margin-bottom:14px"></section>
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashSla"></div>
@@ -1977,6 +1978,7 @@ async function renderDashboard(){
   const S = stats||{}; const L = leads||[];
   renderSlaQueue(Array.isArray(slaQ)?slaQ:[]);
   renderCloseoutStrip(Array.isArray(toClose)?toClose:[]);
+  renderDirectives();
   const SC=(score&&score.rows)||[];
 
   const kpi=(label,val,view,accent)=>`
@@ -2076,6 +2078,68 @@ async function renderDashboard(){
     tr.onclick=()=>{ gotoTab("leads"); setTimeout(()=>openLead(Number(tr.dataset.open)),40); };
   });
   const av=$("#dashAllLeads"); if(av) av.onclick=()=>gotoTab("leads");
+}
+/* DIRECTIVES-01: the founder's task board for the sales team. Everyone sees it; only Amit edits
+   (row-level security enforces this — the UI just hides the buttons); the assignee can mark done. */
+function isFounder(){ return String(me&&me.email||"").toLowerCase()==="amit@lintelspace.com"; }
+let _dirShowDone=false;
+async function renderDirectives(){
+  const host=$("#dashDirectives"); if(!host) return;
+  const {data,error}=await sb.from("sales_directives").select("*").order("status").order("due_date",{ascending:true,nullsFirst:false}).order("priority");
+  if(error){ host.style.display="none"; return; }
+  const all=data||[], open=all.filter(d=>d.status==="open"), done=all.filter(d=>d.status!=="open");
+  const founder=isFounder(), mine=typeof myMemberId==="function"?myMemberId():null;
+  if(!open.length && !founder && !_dirShowDone){ host.style.display="none"; return; }
+  host.style.display="";
+  const today=todayISO();
+  const row=d=>{
+    const over=d.status==="open"&&d.due_date&&d.due_date<today, dueToday=d.status==="open"&&d.due_date===today;
+    const who=d.owner_staff_id?esc(staffName(d.owner_staff_id)):"Whole sales team";
+    const canDone=d.status==="open"&&(founder||!d.owner_staff_id||String(d.owner_staff_id)===String(mine));
+    return `<div class="s2l-call" style="cursor:default;${d.status!=="open"?"opacity:.55":""}">
+      <span class="s2l-chip ${over?"s2l-red":dueToday?"s2l-amber":d.priority==="high"?"s2l-amber":"s2l-queued"}" style="animation:none;min-width:86px;justify-content:center">${d.status!=="open"?"✓ done":over?"overdue":dueToday?"due today":d.due_date?"due "+d.due_date.slice(5):"no date"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(d.title)}${d.priority==="high"&&d.status==="open"?' <span class="s2l-chip s2l-red" style="animation:none;padding:1px 6px;font-size:10px">high</span>':""}</div>
+        <div class="s2l-call-sub">${who}${d.detail?" · "+esc(d.detail):""}${d.remind_on&&d.status==="open"?" · Priya reminds "+d.remind_on:""}</div></div>
+      ${canDone?`<button class="s2l-call-btn log" data-ddone="${d.id}">Mark done</button>`:""}
+      ${founder?`<button class="ghost sm" data-dedit="${d.id}">✎</button>${d.status!=="open"?`<button class="ghost sm" data-dreopen="${d.id}">Reopen</button>`:""}<button class="linkbtn del" data-ddel="${d.id}">✕</button>`:""}
+    </div>`;
+  };
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="sec-label" style="border:none;padding:0;margin:0">From Amit · directives <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— ${open.length} open${done.length?` · <a href="#" id="dirToggleDone" style="color:var(--brass)">${_dirShowDone?"hide":"show"} ${done.length} done</a>`:""}</span></div>
+      ${founder?`<button class="primary sm" id="dirNew">+ New directive</button>`:""}
+    </div>
+    <div class="s2l-call-list">${(open.length?open.map(row).join(""):`<div class="empty" style="padding:8px 0">Nothing open.</div>`)}${_dirShowDone?done.map(row).join(""):""}</div>`;
+  const tg=$("#dirToggleDone"); if(tg) tg.onclick=e=>{ e.preventDefault(); _dirShowDone=!_dirShowDone; renderDirectives(); };
+  const nb=$("#dirNew"); if(nb) nb.onclick=()=>directiveForm(null);
+  host.querySelectorAll("[data-dedit]").forEach(b=>b.onclick=()=>directiveForm(all.find(d=>String(d.id)===b.dataset.dedit)));
+  host.querySelectorAll("[data-ddone]").forEach(b=>b.onclick=async()=>{ const {data:r,error}=await sb.rpc("directive_mark_done",{p_id:Number(b.dataset.ddone),p_done:true}); if(error) return toast(error.message); if(r&&r.ok===false) return toast(r.why); toast("Marked done"); renderDirectives(); });
+  host.querySelectorAll("[data-dreopen]").forEach(b=>b.onclick=async()=>{ const {error}=await sb.from("sales_directives").update({status:"open"}).eq("id",Number(b.dataset.dreopen)); if(error) return toast(error.message); renderDirectives(); });
+  host.querySelectorAll("[data-ddel]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this directive?")) return; const {error}=await sb.from("sales_directives").delete().eq("id",Number(b.dataset.ddel)); if(error) return toast(error.message); toast("Deleted"); renderDirectives(); });
+}
+function directiveForm(d){
+  d=d||{};
+  const sales=(STAFF||[]).filter(x=>x.is_active!==false);
+  openModal(`<div class="modal-h">${d.id?"Edit directive":"New directive"}</div><div class="modal-b">
+    <div class="field"><label>What needs to happen <span style="color:#B4453A">*</span></label><input id="dr_title" value="${esc(d.title||"")}" placeholder="e.g. Close out every past meeting before Friday"></div>
+    <div class="field"><label>Detail (optional)</label><textarea id="dr_detail" rows="2" style="width:100%" placeholder="Why, and what good looks like">${esc(d.detail||"")}</textarea></div>
+    <div class="grid2">
+      <div class="field"><label>For</label><select id="dr_owner" class="lf-sel" style="width:100%"><option value="">Whole sales team</option>${sales.map(x=>`<option value="${x.id}" ${String(d.owner_staff_id)===String(x.id)?"selected":""}>${esc(x.full_name)}</option>`).join("")}</select></div>
+      <div class="field"><label>Priority</label><select id="dr_prio" class="lf-sel" style="width:100%">${["normal","high","low"].map(p=>`<option ${(d.priority||"normal")===p?"selected":""}>${p}</option>`).join("")}</select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Due date</label><input type="date" id="dr_due" value="${d.due_date||""}"></div>
+      <div class="field"><label>Priya reminds on</label><input type="date" id="dr_remind" value="${d.remind_on||""}" placeholder="defaults to due date"></div>
+    </div>
+    <div class="s2l-hint">Visible to everyone on the dashboard. Only you can edit or delete it; the person it is for can mark it done. Priya includes it in their 09:15 digest on the reminder date (and every day it is overdue).</div>
+  </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="dr_save">${d.id?"Save":"Post directive"}</button></div>`);
+  $("#dr_save").onclick=async()=>{
+    const title=$("#dr_title").value.trim(); if(!title) return toast("Write what needs to happen");
+    const row={title,detail:$("#dr_detail").value.trim()||null,owner_staff_id:$("#dr_owner").value?Number($("#dr_owner").value):null,priority:$("#dr_prio").value,due_date:$("#dr_due").value||null,remind_on:$("#dr_remind").value||null};
+    if(!d.id) row.created_by=me.id;
+    const res=d.id?await sb.from("sales_directives").update(row).eq("id",d.id):await sb.from("sales_directives").insert(row);
+    if(res.error) return toast(res.error.message);
+    closeModal(); toast(d.id?"Directive updated":"Directive posted — visible to the team now"); renderDirectives();
+  };
 }
 /* SOURCE-01: where the money comes from — per source, FY to date */
 async function renderSourceRoi(){
@@ -9743,6 +9807,8 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b46",date:"08 Sep 2026",title:"Directives from Amit on your dashboard",points:[
+    "A new <b>From Amit · directives</b> card sits at the top of everyone's dashboard: tasks for the whole sales team or for one person, with a due date and priority. Only Amit can add, edit or delete them; the person it is for can mark it done. Priya includes open directives in the 09:15 digest on the reminder date and every day they are overdue."]},
   {build:"b45",date:"05 Sep 2026",title:"Qualify before you propose · cold leads go to Priya · Source ROI",points:[
     "<b>BANT gate is now hard</b>: a lead needs 4 of 7 qualification answers before it can move to Proposal or Negotiation (the 'Move anyway' button is gone; the database enforces it too). A lead BOQ also needs the budget band and possession status recorded first.",
     "<b>Cold-source leads go to Priya, not to your queue.</b> Instagram / Meta / Website / WhatsApp leads with nothing known yet show a <b>🤖 Priya nurture</b> chip: no consultant, no 15-minute timer. The moment they reply to Priya they are assigned round-robin and the timer starts — or open the lead and press <b>Take this lead</b>.",
@@ -11323,7 +11389,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b45 · 05 Sep 2026";
+const APP_BUILD = "b46 · 08 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
