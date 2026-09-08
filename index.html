@@ -3990,8 +3990,10 @@ async function newBoqFor(seed){
   try{
     if(seed.lead_id && _leadBoqCtx && _leadBoqCtx.l && String(_leadBoqCtx.l.id)===String(seed.lead_id)){
       const L=_leadBoqCtx.l;
-      if(!L.budget_band || !L.q_possession){
-        toast("Before a BOQ: record the client's budget band and possession status (Edit lead)");
+      // budget = any of: budget band, expected value, or the BANT budget answer; possession = BANT possession answer
+      const hasBudget=!!(L.budget_band||Number(L.expected_value)>0||L.q_budget_status);
+      if(!hasBudget || !L.q_possession){
+        toast("Before a BOQ: record the client's "+(!hasBudget?"budget (band, expected value or BANT budget answer)":"")+(!hasBudget&&!L.q_possession?" and ":"")+(!L.q_possession?"possession status":"")+" — Edit lead");
         leadForm(L); return null;
       }
     }
@@ -11389,7 +11391,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b46 · 08 Sep 2026";
+const APP_BUILD = "b47 · 08 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
