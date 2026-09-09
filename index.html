@@ -8735,22 +8735,53 @@ async function spAgent(force){
 function spOnline(a){ return !!(a && a.last_seen && (Date.now()-new Date(a.last_seen).getTime())<90000); }
 function spAgo(ts){ const m=Math.round((Date.now()-new Date(ts).getTime())/60000); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"; }
 function spWho(uid){ const s=(STAFF||[]).find(x=>String(x.linked_user_id||"")===String(uid)); return s?(s.full_name||s.email):"Colleague"; }
-/* opts: {title, doc_kind, project_id, lead_id, blob: async()=>Blob} */
+/* Count pages in a jsPDF/html2pdf blob (each page object carries "/Type /Page"). */
+async function spPdfPages(blob){
+  try{ const t=await blob.text(); const m=t.match(/\/Type\s*\/Page(?![s\w])/g); return m?m.length:0; }catch(e){ return 0; }
+}
+/* "1-3, 5" → normalised "1-3,5" or throws when out of 1..pages. */
+function spPageRange(txt,pages){
+  const s=String(txt||"").replace(/\s+/g,""); if(!s) return null;
+  if(!/^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(s)) throw new Error("Pages should look like 1-3, 5");
+  for(const part of s.split(",")){ const [a,b]=part.split("-").map(Number); const hi=b==null?a:b;
+    if(a<1||hi<a||(pages&&hi>pages)) throw new Error(`Page range ${part} is outside 1–${pages||"?"}`); }
+  return s;
+}
+/* opts: {title, doc_kind, project_id, lead_id, blob: async()=>Blob} — a print
+   dialog like any printer's: colour / B&W, quality, copies, page range. The
+   document is built first so the dialog can show the real page count. */
 async function studioPrint(opts){
   if(!canWrite()) return toast("Your role can't send prints");
+  toast("Preparing the document…");
+  let blob, pages=0;
+  try{ blob=await opts.blob(); if(!blob||blob.size<1000) throw new Error("The PDF came out empty — try again from a desktop browser"); pages=await spPdfPages(blob); }
+  catch(e){ return toast(e.message||"Could not build the PDF"); }
   const a=await spAgent(true), on=spOnline(a);
+  const radio=(name,val,label,chk)=>`<label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;cursor:pointer"><input type="radio" name="${name}" value="${val}" ${chk?"checked":""}> ${label}</label>`;
   openModal(`<div class="modal-h">Print at studio</div><div class="modal-b">
     <div class="banner">${on?`🟢 Studio printer online · agent seen ${spAgo(a.last_seen)}`
                           :`🟠 The studio print agent is offline${a?" · last seen "+spAgo(a.last_seen):""}. Your job will wait in the queue and print as soon as the studio Mac is back.`}</div>
-    <div class="field"><label>Document</label><input id="sp_title" value="${esc(opts.title||"Document")}"></div>
-    <div class="field"><label>Copies</label><select id="sp_copies" class="lf-sel">${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join("")}</select></div>
-    <div style="font-size:12px;color:var(--ink-soft)">Prints A4 colour on the Canon E470 in the studio. Track or cancel it from the <b>Studio printer</b> card on your dashboard.</div>
-  </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="sp_go">🖨 Send to studio</button></div>`);
+    <div class="field"><label>Document</label><input id="sp_title" value="${esc(opts.title||"Document")}">
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">${pages?pages+(pages===1?" page":" pages"):"Page count unavailable"} · A4 · ${Math.max(1,Math.round(blob.size/1024))} KB</div></div>
+    <div class="grid2">
+      <div class="field"><label>Colour</label><div>${radio("sp_mode","color","Colour",true)}${radio("sp_mode","mono","Black &amp; white",false)}</div></div>
+      <div class="field"><label>Copies</label><select id="sp_copies" class="lf-sel">${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join("")}</select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Quality</label><select id="sp_quality" class="lf-sel"><option value="standard">Standard</option><option value="draft">Draft (fast, less ink)</option><option value="high">High</option></select></div>
+      <div class="field"><label>Pages</label><div>${radio("sp_pg","all","All",true)}${radio("sp_pg","range","Range",false)}</div>
+        <input id="sp_range" placeholder="e.g. 1-2, 4" style="margin-top:6px" disabled></div>
+    </div>
+    <div style="font-size:12px;color:var(--ink-soft)">Prints on the Canon E470 in the studio. Track or cancel it from the <b>Studio printer</b> card on your dashboard.</div>
+  </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="sp_go">🖨 Print</button></div>`);
+  document.querySelectorAll('input[name="sp_pg"]').forEach(r=>r.onchange=()=>{ const rng=$("#sp_range"); rng.disabled=r.value!=="range"||!r.checked; if(!rng.disabled) rng.focus(); });
   $("#sp_go").onclick=async()=>{
-    const btn=$("#sp_go"); btn.disabled=true; btn.textContent="Building PDF…";
+    const btn=$("#sp_go"); btn.disabled=true;
     try{
-      const blob=await opts.blob();
-      if(!blob||blob.size<1000) throw new Error("The PDF came out empty — try again from a desktop browser");
+      const mode=(document.querySelector('input[name="sp_mode"]:checked')||{}).value||"color";
+      const wantRange=(document.querySelector('input[name="sp_pg"]:checked')||{}).value==="range";
+      const page_range=wantRange?spPageRange($("#sp_range").value,pages):null;
+      if(wantRange&&!page_range) throw new Error("Enter the pages to print, e.g. 1-2");
       btn.textContent="Uploading…";
       const title=($("#sp_title").value.trim()||opts.title||"Document").slice(0,140);
       const safe=title.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,60)||"document";
@@ -8759,11 +8790,12 @@ async function studioPrint(opts){
       if(upErr) throw new Error("Upload failed: "+upErr.message);
       const {error}=await sb.from("print_jobs").insert({title, doc_kind:opts.doc_kind||"other",
         project_id:opts.project_id||null, lead_id:opts.lead_id||null,
-        storage_path:path, size_bytes:blob.size, copies:Number($("#sp_copies").value)||1});
+        storage_path:path, size_bytes:blob.size, pages:pages||null,
+        copies:Number($("#sp_copies").value)||1, mode, quality:$("#sp_quality").value||"standard", page_range});
       if(error) throw new Error(error.message);
       closeModal(); toast(on?"Sent to the studio printer":"Queued — prints when the studio Mac is back");
       if($("#dashPrintQueue")) renderPrintQueue();
-    }catch(e){ toast(e.message||"Could not send"); btn.disabled=false; btn.textContent="🖨 Send to studio"; }
+    }catch(e){ toast(e.message||"Could not send"); btn.disabled=false; btn.textContent="🖨 Print"; }
   };
 }
 const SP_STATUS={queued:["s2l-queued","Queued"],printing:["s2l-amber","Printing…"],printed:["s2l-green","Printed"],failed:["s2l-red","Failed"],cancelled:["s2l-queued","Cancelled"]};
@@ -8782,7 +8814,7 @@ async function renderPrintQueue(){
   const row=j=>{ const st=SP_STATUS[j.status]||SP_STATUS.queued, mine=String(j.created_by)===String(me.id), canAct=mine||admin;
     return `<div class="s2l-call" style="cursor:default;${(j.status==="printed"||j.status==="cancelled")?"opacity:.6":""}">
       <span class="s2l-chip ${st[0]}" style="animation:none;min-width:86px;justify-content:center">${st[1]}</span>
-      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(j.title)}${j.copies>1?" ×"+j.copies:""}</div>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(j.title)}${j.copies>1?" ×"+j.copies:""}<span style="font-weight:400;color:var(--ink-soft);font-size:12px"> · ${j.mode==="mono"?"B&amp;W":"colour"}${j.page_range?" · p."+esc(j.page_range):j.pages?" · "+j.pages+" pp":""}${j.quality&&j.quality!=="standard"?" · "+j.quality:""}</span></div>
         <div class="s2l-call-sub">${admin&&!mine?esc(spWho(j.created_by))+" · ":""}${spAgo(j.created_at)}${j.error?` · <span style="color:#B4453A">${esc(j.error)}</span>`:""}</div></div>
       ${canAct&&(j.status==="queued"||j.status==="failed")?`<button class="ghost sm" data-spcancel="${j.id}">Cancel</button>`:""}
       ${canAct&&(j.status==="failed"||j.status==="cancelled")?`<button class="s2l-call-btn log" data-spretry="${j.id}">Retry</button>`:""}
@@ -9924,6 +9956,8 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b49",date:"09 Sep 2026",title:"Print at studio now asks like a real print dialog",points:[
+    "Before sending, pick <b>Colour or Black &amp; white</b>, <b>quality</b> (Draft saves ink), <b>copies</b> and a <b>page range</b> — the dialog shows the real page count of the document first."]},
   {build:"b48",date:"09 Sep 2026",title:"Print at studio — from any device, no printer setup",points:[
     "Open a proposal, receipt, work order, purchase order or cutting plan and click <b>🖨 Print at studio</b>. Lintel OS builds the PDF and sends it to the Canon printer in the studio — from your phone, from site, from home. No driver, no Wi-Fi printer setup on your device.",
     "Track it on your dashboard: the <b>Studio printer</b> card shows each job as Queued → Printing → Printed, tells you if the studio Mac is offline (jobs wait and print when it's back), and lets you cancel or retry."]},
@@ -11509,7 +11543,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b48 · 09 Sep 2026";
+const APP_BUILD = "b49 · 09 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
