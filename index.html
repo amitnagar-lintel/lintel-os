@@ -1922,6 +1922,7 @@ async function renderDashboard(){
       <div class="dash-date">${new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"})}</div>
     </section>
     <section class="pw-card" id="dashDirectives" style="display:none;margin-bottom:14px"></section>
+    <section class="pw-card" id="dashPrintQueue" style="display:none;margin-bottom:14px"></section>
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashSla"></div>
@@ -1979,6 +1980,7 @@ async function renderDashboard(){
   renderSlaQueue(Array.isArray(slaQ)?slaQ:[]);
   renderCloseoutStrip(Array.isArray(toClose)?toClose:[]);
   renderDirectives();
+  renderPrintQueue();
   const SC=(score&&score.rows)||[];
 
   const kpi=(label,val,view,accent)=>`
@@ -5620,6 +5622,7 @@ async function paymentReceipt(p, pay, body){
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px" class="noprint">
     <button class="ghost" id="rcBack">← Back to payments</button>
     <button class="primary" id="rcPrint">Save / Print PDF</button>
+    ${canWrite()?`<button class="ghost" id="rcStudio" title="Send this receipt to the Canon printer in the studio">🖨 Print at studio</button>`:''}
     ${p.client_phone?`<button class="ghost" id="rcWA">Share on WhatsApp</button>`:''}
     <button class="primary" id="rcMail">✉ Email to client</button>
   </div>
@@ -5667,6 +5670,7 @@ async function paymentReceipt(p, pay, body){
   </div>`;
   $("#rcBack").onclick=()=>pwPayments(p,body);
   $("#rcPrint").onclick=()=>{ const s=document.getElementById("rcpt-sheet"); s.classList.add("printing"); window.print(); setTimeout(()=>s.classList.remove("printing"),500); };
+  if($("#rcStudio")) $("#rcStudio").onclick=()=>studioPrint({title:"Receipt · "+(p.code||p.name||"")+(pay.amount?" · "+fmt(pay.amount):""), doc_kind:"receipt", project_id:p.id, blob:()=>sheetPdfBlob($("#rcpt-sheet"))});
   const ackMsg=`Dear ${p.client_name||'Client'},\n\nWe acknowledge receipt of ${fmt(pay.amount)} towards your project${p.code?` (${p.code})`:''} with Lintel Space Atelier${pay.stage?` — ${pay.stage}`:''}.\n\nReceipt No: ${rno}\nPaid on: ${dF(pay.paid_on)} · ${pay.mode||''}${pay.reference?`\nReference: ${pay.reference}`:''}\n\nReceived to date: ${fmt(received)}${invoiced?`\nBalance: ${fmt(balance)}`:''}\n\nThank you!\n— Team Lintel`;
   if(p.client_phone && $("#rcWA")) $("#rcWA").onclick=()=>waOpen(p.client_phone,ackMsg);
   // Email to client: sends directly from contact@lintelspace.com, CC the project team.
@@ -5874,7 +5878,7 @@ async function poDetail(p,body,poId){
   const items=Array.isArray(o.items)?o.items:[];
   body.innerHTML=`
     <div class="gbar"><button class="ghost" id="poBack">← All POs</button>
-      <div class="gact">${ro?'':`<button class="ghost" id="poSave">Save</button>`}<button class="primary" id="poPrint">Print / PDF</button></div></div>
+      <div class="gact">${ro?'':`<button class="ghost" id="poSave">Save</button>`}${canWrite()?`<button class="ghost" id="poStudio" title="Send this work order to the Canon printer in the studio">🖨 Print at studio</button>`:''}<button class="primary" id="poPrint">Print / PDF</button></div></div>
     ${ro?'':`<div class="pw-card">
       <div class="grid4">
         <div class="field"><label>Assigned to</label><select id="po_assignee">${staffOpts(o.assignee_id)}</select></div>
@@ -5926,6 +5930,7 @@ async function poDetail(p,body,poId){
     </div>`;
   $("#poBack").onclick=()=>{ activePO=null; pwOrders(p,body); };
   $("#poPrint").onclick=()=>{ const s=document.getElementById("po-sheet"); s.classList.add("printing"); window.print(); setTimeout(()=>s.classList.remove("printing"),500); };
+  if($("#poStudio")) $("#poStudio").onclick=()=>studioPrint({title:"Work order "+(o.po_number||("#"+o.id))+" · "+(p.code||p.name||""), doc_kind:"work_order", project_id:p.id, blob:()=>sheetPdfBlob($("#po-sheet"))});
   if(!ro && $("#poSave")) $("#poSave").onclick=async()=>{
     const patch={
       assignee_id:$("#po_assignee").value?Number($("#po_assignee").value):null,
@@ -6069,7 +6074,7 @@ function renderCutting(p,body){
   }).join('');
   body.innerHTML=`
   <div class="gbar"><button class="ghost" id="cutBack">← Work orders</button>
-    <div class="gact"><button class="ghost" id="cutCsv">Export CSV</button><button class="primary" id="cutPrint">Print / PDF</button></div></div>
+    <div class="gact"><button class="ghost" id="cutCsv">Export CSV</button>${canWrite()?`<button class="ghost" id="cutStudio" title="Send this cutting plan to the Canon printer in the studio">🖨 Print at studio</button>`:''}<button class="primary" id="cutPrint">Print / PDF</button></div></div>
   <div class="cut-wrap">
     <div class="pw-card">
       <div class="sec-label" style="border:none;padding:0">Board &amp; blade</div>
@@ -6097,6 +6102,7 @@ function renderCutting(p,body){
   </div>`;
   $("#cutBack").onclick=()=>{ cutView=false; pwOrders(p,body); };
   $("#cutPrint").onclick=()=>{ const el=$("#cut-sheet"); el.classList.add("printing"); window.print(); setTimeout(()=>el.classList.remove("printing"),500); };
+  if($("#cutStudio")) $("#cutStudio").onclick=()=>studioPrint({title:"Cutting plan · "+(p.code||p.name||""), doc_kind:"cutting", project_id:p.id, blob:()=>sheetPdfBlob($("#cut-sheet"))});
   $("#cutCsv").onclick=()=>cutExportCSV(p,outs,board);
   if(!ro){
     const commit=()=>{ s.bw=$("#cut_bw").value; s.bh=$("#cut_bh").value; s.kerf=$("#cut_kerf").value; s.rotate=$("#cut_rot").checked; };
@@ -6335,7 +6341,7 @@ async function vpoDetail(p,body,id){
   if(VPO_COMMITTED.includes(o.status)&&_pm&&_pm.phone) actions+=`<button class="ghost" id="vpoPingPM">Notify PM</button>`;
   body.innerHTML=`
     <div class="gbar"><button class="ghost" id="vpoBack">← Procurement</button>
-      <div class="gact">${actions}<button class="ghost" id="vpoPrint">Print / PDF</button></div></div>
+      <div class="gact">${actions}${canWrite()?`<button class="ghost" id="vpoStudio" title="Send this purchase order to the Canon printer in the studio">🖨 Print at studio</button>`:''}<button class="ghost" id="vpoPrint">Print / PDF</button></div></div>
     <div class="pw-card">
       <div class="grid4">
         <div><div class="cpl">Status</div><div class="cpv">${vpoStatusPill(o.status)}</div></div>
@@ -6438,6 +6444,7 @@ async function vpoDetail(p,body,id){
     </div>`;
   $("#vpoBack").onclick=()=>{ activeVPO=null; pwProcurement(p,body); };
   $("#vpoPrint").onclick=()=>{ const s=document.getElementById("vpo-sheet"); s.classList.add("printing"); window.print(); setTimeout(()=>s.classList.remove("printing"),500); };
+  if($("#vpoStudio")) $("#vpoStudio").onclick=()=>studioPrint({title:"PO "+(o.po_number||("#"+o.id))+" · "+(p.code||p.name||""), doc_kind:"vendor_po", project_id:p.id, blob:()=>sheetPdfBlob($("#vpo-sheet"))});
   const setStatus=async(patch,msg)=>{
     const {error}=await sb.from("vendor_pos").update(patch).eq("id",o.id);
     if(error) return toast(error.message);
@@ -8687,6 +8694,111 @@ function vtReport(){
 }
 /* ================= end VASTU CONSULTANT ================= */
 
+/* ================= STUDIO PRINTER (PRINT-01) =================
+   "Print at studio" from any device with zero printer setup. The browser
+   renders the sheet to a PDF (same html2pdf path as proposal email / chat
+   share), uploads it to the private print-jobs bucket and inserts a
+   print_jobs row. A launchd agent on the studio Mac (scripts/print-agent/)
+   prints it on the Canon E470 and flips the row to printed / failed.
+   The dashboard "Studio printer" card shows your recent jobs and whether the
+   agent is online (heartbeat in print_agents). Owners cancel/retry via the
+   print_job_set RPC; admin-level sees everyone's jobs. */
+const SP_BUCKET="print-jobs";
+/* Rasterise a rendered sheet (receipt / PO / cutting plan) to an A4 PDF blob. */
+async function sheetPdfBlob(el){
+  if(!el) throw new Error("Nothing to print on this screen");
+  await gLoadLib(GPDF_LIB);
+  const host=document.createElement("div");
+  host.style.cssText="position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1";
+  const clone=el.cloneNode(true);
+  clone.classList.remove("printing");
+  clone.style.width="794px"; clone.style.maxWidth="none"; clone.style.margin="0"; clone.style.boxShadow="none";
+  clone.querySelectorAll(".noprint").forEach(n=>n.remove());
+  const css=document.createElement("style");
+  css.textContent="*{box-sizing:border-box}table{width:100%!important;border-collapse:collapse}tr,td,th{page-break-inside:avoid!important;break-inside:avoid!important}thead{display:table-header-group}";
+  host.appendChild(css); host.appendChild(clone); document.body.appendChild(host);
+  try{
+    return await window.html2pdf().from(clone)
+      .set({margin:[8,8,10,8], pagebreak:{mode:["css","legacy"]},
+            jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+            html2canvas:{scale:2,useCORS:true,backgroundColor:"#ffffff",windowWidth:Math.max(window.innerWidth||0,1024)}})
+      .outputPdf("blob");
+  } finally { host.remove(); }
+}
+let SP_AGENT=null, SP_AGENT_AT=0;
+async function spAgent(force){
+  if(!force && Date.now()-SP_AGENT_AT<20000) return SP_AGENT;
+  try{ const {data}=await sb.from("print_agents").select("*").eq("printer","studio").order("last_seen",{ascending:false}).limit(1); SP_AGENT=(data&&data[0])||null; }
+  catch(e){ SP_AGENT=null; }
+  SP_AGENT_AT=Date.now(); return SP_AGENT;
+}
+function spOnline(a){ return !!(a && a.last_seen && (Date.now()-new Date(a.last_seen).getTime())<90000); }
+function spAgo(ts){ const m=Math.round((Date.now()-new Date(ts).getTime())/60000); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"; }
+function spWho(uid){ const s=(STAFF||[]).find(x=>String(x.linked_user_id||"")===String(uid)); return s?(s.full_name||s.email):"Colleague"; }
+/* opts: {title, doc_kind, project_id, lead_id, blob: async()=>Blob} */
+async function studioPrint(opts){
+  if(!canWrite()) return toast("Your role can't send prints");
+  const a=await spAgent(true), on=spOnline(a);
+  openModal(`<div class="modal-h">Print at studio</div><div class="modal-b">
+    <div class="banner">${on?`🟢 Studio printer online · agent seen ${spAgo(a.last_seen)}`
+                          :`🟠 The studio print agent is offline${a?" · last seen "+spAgo(a.last_seen):""}. Your job will wait in the queue and print as soon as the studio Mac is back.`}</div>
+    <div class="field"><label>Document</label><input id="sp_title" value="${esc(opts.title||"Document")}"></div>
+    <div class="field"><label>Copies</label><select id="sp_copies" class="lf-sel">${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join("")}</select></div>
+    <div style="font-size:12px;color:var(--ink-soft)">Prints A4 colour on the Canon E470 in the studio. Track or cancel it from the <b>Studio printer</b> card on your dashboard.</div>
+  </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="sp_go">🖨 Send to studio</button></div>`);
+  $("#sp_go").onclick=async()=>{
+    const btn=$("#sp_go"); btn.disabled=true; btn.textContent="Building PDF…";
+    try{
+      const blob=await opts.blob();
+      if(!blob||blob.size<1000) throw new Error("The PDF came out empty — try again from a desktop browser");
+      btn.textContent="Uploading…";
+      const title=($("#sp_title").value.trim()||opts.title||"Document").slice(0,140);
+      const safe=title.replace(/[^A-Za-z0-9._-]+/g,"_").slice(0,60)||"document";
+      const path=me.id+"/"+Date.now()+"_"+safe+".pdf";
+      const {error:upErr}=await sb.storage.from(SP_BUCKET).upload(path, blob, {contentType:"application/pdf"});
+      if(upErr) throw new Error("Upload failed: "+upErr.message);
+      const {error}=await sb.from("print_jobs").insert({title, doc_kind:opts.doc_kind||"other",
+        project_id:opts.project_id||null, lead_id:opts.lead_id||null,
+        storage_path:path, size_bytes:blob.size, copies:Number($("#sp_copies").value)||1});
+      if(error) throw new Error(error.message);
+      closeModal(); toast(on?"Sent to the studio printer":"Queued — prints when the studio Mac is back");
+      if($("#dashPrintQueue")) renderPrintQueue();
+    }catch(e){ toast(e.message||"Could not send"); btn.disabled=false; btn.textContent="🖨 Send to studio"; }
+  };
+}
+const SP_STATUS={queued:["s2l-queued","Queued"],printing:["s2l-amber","Printing…"],printed:["s2l-green","Printed"],failed:["s2l-red","Failed"],cancelled:["s2l-queued","Cancelled"]};
+async function renderPrintQueue(){
+  const host=$("#dashPrintQueue"); if(!host||!me) return;
+  const admin=isAdminLevel();
+  let q=sb.from("print_jobs").select("*").order("created_at",{ascending:false}).limit(admin?12:6);
+  if(!admin) q=q.eq("created_by",me.id);
+  const [{data,error},a]=await Promise.all([q, spAgent(true)]);
+  if(error){ host.style.display="none"; return; }          // table not there yet (PRINT-01 pending)
+  const jobs=data||[], since=Date.now()-3*86400000;
+  const live=jobs.filter(j=>["queued","printing","failed"].includes(j.status)||new Date(j.created_at).getTime()>since);
+  if(!live.length && !admin){ host.style.display="none"; return; }
+  host.style.display="";
+  const on=spOnline(a);
+  const row=j=>{ const st=SP_STATUS[j.status]||SP_STATUS.queued, mine=String(j.created_by)===String(me.id), canAct=mine||admin;
+    return `<div class="s2l-call" style="cursor:default;${(j.status==="printed"||j.status==="cancelled")?"opacity:.6":""}">
+      <span class="s2l-chip ${st[0]}" style="animation:none;min-width:86px;justify-content:center">${st[1]}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(j.title)}${j.copies>1?" ×"+j.copies:""}</div>
+        <div class="s2l-call-sub">${admin&&!mine?esc(spWho(j.created_by))+" · ":""}${spAgo(j.created_at)}${j.error?` · <span style="color:#B4453A">${esc(j.error)}</span>`:""}</div></div>
+      ${canAct&&(j.status==="queued"||j.status==="failed")?`<button class="ghost sm" data-spcancel="${j.id}">Cancel</button>`:""}
+      ${canAct&&(j.status==="failed"||j.status==="cancelled")?`<button class="s2l-call-btn log" data-spretry="${j.id}">Retry</button>`:""}
+    </div>`; };
+  host.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="sec-label" style="border:none;padding:0;margin:0">Studio printer <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— ${on?"🟢 online":"🟠 agent offline"+(a?" · seen "+spAgo(a.last_seen):"")}${a&&a.note&&/unable|not responding|missing/i.test(a.note)?" · "+esc(a.note.slice(0,80)):""}</span></div>
+      <button class="ghost sm" id="spRefresh" title="Refresh">↻</button></div>
+    <div class="s2l-call-list">${live.length?live.map(row).join(""):`<div class="empty" style="padding:8px 0">Nothing sent recently. Use <b>🖨 Print at studio</b> on any proposal, receipt, work order, PO or cutting plan.</div>`}</div>`;
+  $("#spRefresh").onclick=()=>renderPrintQueue();
+  host.querySelectorAll("[data-spcancel]").forEach(b=>b.onclick=async()=>{ const {error}=await sb.rpc("print_job_set",{p_id:Number(b.dataset.spcancel),p_action:"cancel"}); if(error) return toast(error.message); toast("Cancelled"); renderPrintQueue(); });
+  host.querySelectorAll("[data-spretry]").forEach(b=>b.onclick=async()=>{ const {error}=await sb.rpc("print_job_set",{p_id:Number(b.dataset.spretry),p_action:"retry"}); if(error) return toast(error.message); toast("Queued again"); renderPrintQueue(); });
+  clearTimeout(renderPrintQueue._t);
+  if(live.some(j=>j.status==="queued"||j.status==="printing")) renderPrintQueue._t=setTimeout(()=>{ if($("#dashPrintQueue")) renderPrintQueue(); },15000);
+}
+/* ================= end STUDIO PRINTER ================= */
+
 /* ---- Project Team ---- */
 async function pwTeam(p,body){
   const {data:members}=await sb.from("project_members").select("*").eq("project_id",p.id);
@@ -8998,6 +9110,7 @@ function gRender(p, body){
       <button class="ghost" id="gCsv">Export CSV</button>
       <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
       <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
+      ${canWrite()?`<button class="ghost" id="gStudio" title="Send the client quotation to the Canon printer in the studio">🖨 Print at studio</button>`:''}
       <button class="primary" id="gPrint">Print / PDF</button>
     </div>
   </div>
@@ -9013,6 +9126,8 @@ function gRender(p, body){
   if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
   if($("#gChat")) $("#gChat").onclick=()=>gSendToChat(p);
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
+  if($("#gStudio")) $("#gStudio").onclick=()=>studioPrint({title:gPdfName().replace(/\.pdf$/,"").replace(/-/g," "), doc_kind:"proposal",
+      project_id:(G.ver&&G.ver.project_id)||null, lead_id:(G.ver&&G.ver.lead_id)||null, blob:()=>gPdfBlob(p)});
   if(!ro) gStartAutosave(p); // autosave every 5s while editing this BOQ
   else gStopAutosave();      // locked (or read-only): never autosave
 }
@@ -9809,6 +9924,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b48",date:"09 Sep 2026",title:"Print at studio — from any device, no printer setup",points:[
+    "Open a proposal, receipt, work order, purchase order or cutting plan and click <b>🖨 Print at studio</b>. Lintel OS builds the PDF and sends it to the Canon printer in the studio — from your phone, from site, from home. No driver, no Wi-Fi printer setup on your device.",
+    "Track it on your dashboard: the <b>Studio printer</b> card shows each job as Queued → Printing → Printed, tells you if the studio Mac is offline (jobs wait and print when it's back), and lets you cancel or retry."]},
   {build:"b46",date:"08 Sep 2026",title:"Directives from Amit on your dashboard",points:[
     "A new <b>From Amit · directives</b> card sits at the top of everyone's dashboard: tasks for the whole sales team or for one person, with a due date and priority. Only Amit can add, edit or delete them; the person it is for can mark it done. Priya includes open directives in the 09:15 digest on the reminder date and every day they are overdue."]},
   {build:"b45",date:"05 Sep 2026",title:"Qualify before you propose · cold leads go to Priya · Source ROI",points:[
@@ -11391,7 +11509,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b47 · 08 Sep 2026";
+const APP_BUILD = "b48 · 09 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
