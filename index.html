@@ -4163,6 +4163,16 @@ function newProjectForm(){
     if(error) return toast(error.message);
     // seed the 6 standard milestones
     await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
+    // seed the 10/40/40/10 payment schedule (all pending — a manually created project records no advance here)
+    const npCval=Number($("#np_val").value||0);
+    if(npCval>0){
+      const SPLIT=[["Booking advance",10],["Design sign-off",40],["Production & material",40],["Pre-handover",10]];
+      let acc=0;
+      const pmRows=SPLIT.map((sp,i)=>{ const amt=(i<SPLIT.length-1)?Math.round(npCval*sp[1]/100):(npCval-acc); acc+=amt;
+        return {project_id:proj.id,label:`${sp[0]} (${sp[1]}%)`,percent:sp[1],amount:amt,sort_idx:i,status:"pending"}; });
+      const {error:pmErr}=await sb.from("payment_milestones").insert(pmRows);
+      if(pmErr) toast("Project created, but the payment schedule couldn't be seeded: "+pmErr.message);
+    }
     closeModal(); toast(`Project ${code} created`);
     activeProject=proj.id; projectTab="overview"; renderProjectWorkspace(proj.id);
   };
@@ -9975,7 +9985,7 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
   {build:"b50",date:"12 Sep 2026",title:"Payment schedule is ready the moment you convert",points:[
-    "Converting a lead now auto-creates the 10 / 40 / 40 / 10 payment schedule (Booking advance · Design sign-off · Production & material · Pre-handover). Open the new project → Payments tab and the milestones are already there — hit <b>Create link</b> for a Razorpay link or <b>Generate PI</b> for the proforma, per milestone.",
+    "Creating a project — by converting a lead or from <b>+ New project</b> — now auto-creates the 10 / 40 / 40 / 10 payment schedule (Booking advance · Design sign-off · Production & material · Pre-handover). Open the project → Payments tab and the milestones are already there — hit <b>Create link</b> for a Razorpay link or <b>Generate PI</b> for the proforma, per milestone.",
     "The 10% advance you recorded at conversion is applied to the Booking milestone automatically, so it shows as paid on day one. Amounts come from the contract value; edit the split anytime with <b>Edit schedule</b>."]},
   {build:"b49",date:"09 Sep 2026",title:"Print at studio now asks like a real print dialog",points:[
     "Before sending, pick <b>Colour or Black &amp; white</b>, <b>quality</b> (Draft saves ink), <b>copies</b> and a <b>page range</b> — the dialog shows the real page count of the document first."]},
