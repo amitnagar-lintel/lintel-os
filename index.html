@@ -3946,6 +3946,24 @@ async function convertLead(l){
     });
     if(payErr) toast("Project created, but the advance could not be saved: "+payErr.message);
     await sb.from("project_milestones").insert(STAGE_FLOW.map((s,i)=>({project_id:proj.id,stage:s,sort_idx:i,status:"todo"})));
+    // Auto-seed the payment schedule (10/40/40/10) so "Create link" / "Generate PI" are ready
+    // immediately on the Payments tab. The advance just recorded settles the booking milestone.
+    const cval=Number($("#cv_val").value||total||0);
+    if(cval>0){
+      const SPLIT=[["Booking advance",10],["Design sign-off",40],["Production & material",40],["Pre-handover",10]];
+      let acc=0;
+      const pmRows=SPLIT.map((sp,i)=>{ const amt=(i<SPLIT.length-1)?Math.round(cval*sp[1]/100):(cval-acc); acc+=amt;
+        return {project_id:proj.id,label:`${sp[0]} (${sp[1]}%)`,percent:sp[1],amount:amt,sort_idx:i,status:"pending"}; });
+      const {data:pmSaved,error:pmErr}=await sb.from("payment_milestones").insert(pmRows).select("id,sort_idx,amount");
+      if(pmErr){ toast("Project created, but the payment schedule couldn't be seeded: "+pmErr.message); }
+      else if(pmSaved){
+        const m1=pmSaved.find(r=>r.sort_idx===0);
+        if(m1){
+          await sb.from("payment_milestones").update({status:(adv>=m1.amount-0.5)?"paid":"part_paid"}).eq("id",m1.id);
+          await sb.from("project_payments").update({milestone_id:m1.id}).eq("project_id",proj.id).is("milestone_id",null);
+        }
+      }
+    }
     // write the confirmed client details back to the lead so lead & project stay in sync
     await sb.from("leads").update({stage:"won",designer_id:designer,phone,email,pan,
       site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
@@ -9956,6 +9974,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b50",date:"12 Sep 2026",title:"Payment schedule is ready the moment you convert",points:[
+    "Converting a lead now auto-creates the 10 / 40 / 40 / 10 payment schedule (Booking advance · Design sign-off · Production & material · Pre-handover). Open the new project → Payments tab and the milestones are already there — hit <b>Create link</b> for a Razorpay link or <b>Generate PI</b> for the proforma, per milestone.",
+    "The 10% advance you recorded at conversion is applied to the Booking milestone automatically, so it shows as paid on day one. Amounts come from the contract value; edit the split anytime with <b>Edit schedule</b>."]},
   {build:"b49",date:"09 Sep 2026",title:"Print at studio now asks like a real print dialog",points:[
     "Before sending, pick <b>Colour or Black &amp; white</b>, <b>quality</b> (Draft saves ink), <b>copies</b> and a <b>page range</b> — the dialog shows the real page count of the document first."]},
   {build:"b48",date:"09 Sep 2026",title:"Print at studio — from any device, no printer setup",points:[
@@ -11543,7 +11564,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b49 · 09 Sep 2026";
+const APP_BUILD = "b50 · 12 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
