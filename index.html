@@ -1792,8 +1792,8 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal"), sq=$("#dashSla"), mc=$("#dashCloseout");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim())||(sq&&sq.innerHTML.trim())||(mc&&mc.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal"), sq=$("#dashSla"), mc=$("#dashCloseout"), lt=$("#dashLeadTasks");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim())||(sq&&sq.innerHTML.trim())||(mc&&mc.innerHTML.trim())||(lt&&lt.innerHTML.trim()))?"":"none";
 }
 /* CSAT on the dashboard: KPI tile (avg ★ this month) + low-score watchlist strip */
 /* Monthly sales — booked (converted) value ex-GST per month, FY-to-date from April.
@@ -1926,6 +1926,7 @@ async function renderDashboard(){
     <section class="pw-card dash-attn" id="dashAttn" style="display:none">
       <div class="sec-label">Needs attention</div>
       <div id="dashSla"></div>
+      <div id="dashLeadTasks"></div>
       <div id="dashCloseout"></div>
       <div id="dashClientReplies"></div>
       <div id="dashClientPortal"></div>
@@ -1937,6 +1938,10 @@ async function renderDashboard(){
     <section class="dash-kpis" id="dashKpis">
       <span id="dashKpisCore" style="display:contents"><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div><div class="kpi kpi-skel"></div></span>
       <span id="dashS2lKpis" style="display:contents"></span>
+    </section>
+    <section class="pw-card" id="dashSources" style="margin-bottom:14px">
+      <div class="sec-label">Leads this month <span id="dashSourcesSub" style="font-weight:400;color:var(--ink-soft);font-size:12px"></span></div>
+      <div id="dashSourcesBody">${skel(1,56)}</div>
     </section>
     <section class="pw-card" id="dashSales" style="margin-bottom:14px">
       <div class="sec-label">Monthly sales <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— booked value ex-GST, this financial year</span></div>
@@ -1979,7 +1984,7 @@ async function renderDashboard(){
   const S = stats||{}; const L = leads||[];
   renderSlaQueue(Array.isArray(slaQ)?slaQ:[]);
   renderCloseoutStrip(Array.isArray(toClose)?toClose:[]);
-  renderDirectives();
+  renderDirectives(); renderLeadSources(); renderLeadTasksStrip();
   renderPrintQueue();
   const SC=(score&&score.rows)||[];
 
@@ -2143,6 +2148,42 @@ function directiveForm(d){
     closeModal(); toast(d.id?"Directive updated":"Directive posted — visible to the team now"); renderDirectives();
   };
 }
+/* REVIEW-01: leads received this month, split by source, vs last month */
+async function renderLeadSources(){
+  const host=$("#dashSourcesBody"); if(!host) return;
+  const {data,error}=await sb.rpc("leads_month_sources");
+  if(error||!data){ host.innerHTML=`<div class="empty" style="padding:6px 0">Couldn't load.</div>`; return; }
+  const rows=data.rows||[]; const sub=$("#dashSourcesSub");
+  const d=Number(data.total)-Number(data.prev_total);
+  if(sub) sub.textContent=`— ${data.month} · ${data.total} received${data.prev_total?` · ${d>=0?"+":""}${d} vs last month (${data.prev_total})`:""}`;
+  if(!rows.length){ host.innerHTML=`<div class="empty" style="padding:6px 0">No leads yet this month.</div>`; return; }
+  const max=Math.max(...rows.map(r=>Number(r.n)||0),1);
+  host.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${rows.map(r=>{ const n=Number(r.n)||0, p=Number(r.prev)||0, dd=n-p;
+    return `<div class="tile" data-src="${esc(r.source)}" style="padding:10px 12px;cursor:pointer" title="Open Leads filtered to ${esc(r.source)}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:12px;font-weight:600">${esc(r.source)}</span><span class="mono" style="font-size:20px;font-weight:700">${n}</span></div>
+      <div class="ov-bar" style="margin:6px 0 4px"><div style="width:${Math.round(n/max*100)}%"></div></div>
+      <div style="font-size:11px;color:${dd>0?"#4f7d52":dd<0?"#B4453A":"var(--ink-soft)"}">${p?`${dd>=0?"+":""}${dd} vs last month (${p})`:"new this month"}</div></div>`; }).join("")}</div>`;
+  host.querySelectorAll("[data-src]").forEach(el=>el.onclick=()=>{ try{ leadFilters.search=""; leadFilters.createdMonth=new Date().toISOString().slice(0,7); }catch(e){} gotoTab("leads"); setTimeout(()=>{ const q=document.querySelector("#lf_search"); if(q){ q.value=""; } },80); });
+}
+/* REVIEW-01: tasks assigned to me from lead reviews (admins see everyone's) */
+let _ltShowAll=false;
+async function renderLeadTasksStrip(){
+  const host=$("#dashLeadTasks"); if(!host) return;
+  const {data}=await sb.rpc("my_lead_tasks"); const list=Array.isArray(data)?data:[];
+  if(!list.length){ host.innerHTML=""; dashAttnSync(); return; }
+  const today=todayISO(), shown=_ltShowAll?list:list.slice(0,5), over=list.filter(t=>t.due_date&&t.due_date<today).length;
+  host.innerHTML=`<div style="margin-bottom:14px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${over?"#B4453A":"var(--ink-soft)"};font-weight:600;margin-bottom:10px">Tasks from lead reviews <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink-soft)">— ${list.length} open${over?` · <b style="color:#B4453A">${over} overdue</b>`:""}</span></div>
+    <div class="s2l-call-list">${shown.map(t=>`<div class="s2l-call" data-lt="${t.lead_id}">
+      <span class="s2l-chip ${t.due_date&&t.due_date<today?"s2l-red":t.due_date===today?"s2l-amber":"s2l-queued"}" style="animation:none;min-width:84px;justify-content:center">${t.due_date?(t.due_date<today?"overdue":t.due_date===today?"today":t.due_date.slice(5)):"no date"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(t.title)} <span style="font-weight:400;color:var(--ink-soft)">· ${esc(t.lead||"")}</span></div><div class="s2l-call-sub">${esc(t.assignee||"Unassigned")}${t.detail?" · "+esc(t.detail):""}</div></div>
+      <button class="s2l-call-btn log" data-ltdone="${t.id}">Done</button></div>`).join("")}</div>
+    ${list.length>5?`<button class="linkbtn" id="ltToggle" style="margin-top:10px">${_ltShowAll?"Show 5 only":`View all ${list.length} →`}</button>`:""}</div>`;
+  const tg=$("#ltToggle"); if(tg) tg.onclick=()=>{ _ltShowAll=!_ltShowAll; renderLeadTasksStrip(); };
+  host.querySelectorAll("[data-lt]").forEach(el=>el.onclick=()=>{ leadSubSel.journal="review"; gotoTab("leads"); setTimeout(()=>{ openLead(Number(el.dataset.lt)); setTimeout(()=>{ leadTab="journal"; drawLeadTab&&activeLead&&renderLeadWorkspace(activeLead); },200); },40); });
+  host.querySelectorAll("[data-ltdone]").forEach(b=>b.onclick=async e=>{ e.stopPropagation(); const {error}=await sb.from("lead_tasks").update({status:"done"}).eq("id",Number(b.dataset.ltdone)); if(error) return toast(error.message); toast("Task done"); renderLeadTasksStrip(); });
+  dashAttnSync();
+}
 /* SOURCE-01: where the money comes from — per source, FY to date */
 async function renderSourceRoi(){
   const host=$("#dashRoiBody"); if(!host) return;
@@ -2249,8 +2290,8 @@ const leadPipelineValue=l=>{ const q=leadQuoteTotals[l.id]; return q>0?q:Number(
 let activeLead = null, leadTab = "overview";
 const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["studio","Studio"],["journal","Activity & Notes"]];
 const LEAD_GROUPS={studio:[["presentations","Moodboard"],["vastu","Vastu"]]};
-const LEAD_SUB2GROUP={presentations:"studio",vastu:"studio",activity:"journal",notes:"journal"};
-let leadSubSel={studio:"presentations"};
+const LEAD_SUB2GROUP={presentations:"studio",vastu:"studio",activity:"journal",notes:"journal",review:"journal"};
+let leadSubSel={studio:"presentations",journal:"activity"};
 
 async function ensureStaff(){
   if(STAFF.length) return;
@@ -3046,6 +3087,7 @@ async function renderLeadWorkspace(id){
         ${s2lDupBadgeHtml(l)}
         ${channelChipHtml(l,true)}
         ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
+        ${l.expected_close_date&&l.stage!=="won"&&l.stage!=="lost"?`<span class="lw-pill ${l.expected_close_date<todayISO()?"due today":""}" title="Expected closure (from review)">🎯 Close by ${l.expected_close_date}${l.win_probability!=null?" · "+l.win_probability+"%":""}</span>`:""}
         ${l.expected_value?`<span class="lw-pill">${fmt(l.expected_value)}</span>`:""}
       </div>
     </div>
@@ -3080,8 +3122,17 @@ function drawLeadTab(l){
     return cur==="vastu"?vastuTab(l,sub,"lead"):lwPresentations(l,sub);
   }
   if(leadTab==="journal"){
-    body.innerHTML=`<div id="lwActBox"></div><div id="lwNotesBox" style="margin-top:16px"></div>`;
-    lwActivity(l,$("#lwActBox")); return lwNotes(l,$("#lwNotesBox"));
+    const cur=leadSubSel.journal||"activity";
+    body.innerHTML=`<div class="gsub" style="margin-bottom:14px" id="lwJSub">
+        <button data-s="activity" class="${cur==="activity"?"on":""}">Activity</button>
+        <button data-s="notes" class="${cur==="notes"?"on":""}">Notes</button>
+        <button data-s="review" class="${cur==="review"?"on":""}">Review</button></div>
+      <div id="lwJBody"></div>`;
+    body.querySelectorAll("#lwJSub button").forEach(b=>b.onclick=()=>{ leadSubSel.journal=b.dataset.s; drawLeadTab(l); });
+    const jb=$("#lwJBody");
+    if(cur==="notes") return lwNotes(l,jb);
+    if(cur==="review") return lwReview(l,jb);
+    return lwActivity(l,jb);
   }
 }
 
@@ -3416,6 +3467,110 @@ async function lwActivity(l,body){
       lwActivity(l,body);
     };
   }
+}
+
+/* ---- REVIEW-01: founder / manager review of a lead — key dates, verdict, tasks ---- */
+const REVIEW_STEPS=[
+  ["received","Lead received"],["first_priya_msg","Priya reached out"],["client_replied","Client replied"],["first_call","First call"],
+  ["consultation_scheduled","Consultation booked"],["consultation_held","Consultation held"],["boq_created","BOQ started"],
+  ["proposal_sent","Proposal sent"],["advance_paid","Advance received"],["won","Won"]];
+function rvDate(iso){ if(!iso) return null; const d=new Date(iso); return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
+function rvGap(a,b){ if(!a||!b) return ""; const h=(new Date(b)-new Date(a))/3600000; if(h<0) return ""; return h<1?Math.round(h*60)+" min":h<48?h.toFixed(h<10?1:0)+" h":Math.round(h/24)+" d"; }
+async function lwReview(l,body){
+  body.innerHTML=`<div class="panel" style="max-width:860px">${skel(3,90)}</div>`;
+  const [{data:t},{data:reviews},{data:tasks}]=await Promise.all([
+    sb.rpc("lead_review_timeline",{p_lead_id:l.id}),
+    sb.from("lead_reviews").select("*").eq("lead_id",l.id).order("created_at",{ascending:false}),
+    sb.from("lead_tasks").select("*").eq("lead_id",l.id).order("status").order("due_date",{ascending:true,nullsFirst:false})
+  ]);
+  const T=t||{}, w=canWrite(), today=todayISO();
+  const flags=[];
+  if(T.stage!=="won"&&T.stage!=="lost"){
+    if(!T.first_touch) flags.push(["bad","Never called"+(T.sla_breached?" · SLA breached":"")]);
+    else if(T.sla_breached) flags.push(["warn","First call missed the 15-min SLA"]);
+    if(T.meetings_total>0&&!T.consultation_held) flags.push(["warn",T.meetings_no_show?"Client no-show ×"+T.meetings_no_show:"Meeting not closed out"]);
+    if(T.boq_created&&!T.proposal_sent) flags.push(["warn","BOQ built, proposal not sent"]);
+    if(T.proposal_sent&&!T.advance_paid){ const dd=Math.floor((Date.now()-new Date(T.proposal_sent))/86400000); if(dd>=7) flags.push(["bad","Proposal silent "+dd+" d"]); }
+    if(T.last_touch){ const dd=Math.floor((Date.now()-new Date(T.last_touch))/86400000); if(dd>=14) flags.push(["bad","Untouched "+dd+" days"]); else if(dd>=7) flags.push(["warn","No contact for "+dd+" days"]); }
+    if((T.rnr_count||0)>=3) flags.push(["warn",T.rnr_count+" unanswered calls"]);
+    if((T.bant_answered||0)<4) flags.push(["warn","Qualification "+T.bant_answered+"/7"]);
+    if(T.next_follow_up&&T.next_follow_up<today) flags.push(["bad","Follow-up overdue ("+T.next_follow_up+")"]);
+    if(T.expected_close_date&&T.expected_close_date<today) flags.push(["bad","Past expected closure ("+T.expected_close_date+")"]);
+  }
+  const stageDays=T.stage_since?Math.floor((Date.now()-new Date(T.stage_since))/86400000):null;
+  const tile=(label,val,sub,cls)=>`<div class="tile" style="padding:10px 12px"><div class="l" style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em">${label}</div><div class="${cls||""}" style="font-weight:600;font-size:14px">${val}</div>${sub?`<div class="s" style="font-size:11px;color:var(--ink-soft)">${sub}</div>`:""}</div>`;
+  // journey steps with gaps
+  let prev=null; const steps=REVIEW_STEPS.map(([k,label])=>{ const v=T[k]; const gap=v&&prev?rvGap(prev,v):""; if(v) prev=v;
+    return `<div class="tl-row ${v?"done":""}" style="padding:5px 0"><div class="tl-dot" style="width:18px;height:18px;font-size:10px">${v?"✓":""}</div><div class="tl-nm" style="font-size:13px">${label}</div><div class="tl-dt" style="font-family:ui-monospace,monospace">${v?rvDate(v):"—"}${gap?` <span style="color:var(--ink-soft)">· +${gap}</span>`:""}</div></div>`; }).join("");
+  const openTasks=(tasks||[]).filter(x=>x.status==="open"), doneTasks=(tasks||[]).filter(x=>x.status!=="open");
+  const taskRow=x=>`<div class="s2l-call" style="cursor:default;${x.status!=="open"?"opacity:.55":""}">
+      <span class="s2l-chip ${x.status!=="open"?"s2l-queued":x.due_date&&x.due_date<today?"s2l-red":x.due_date===today?"s2l-amber":x.priority==="high"?"s2l-amber":"s2l-queued"}" style="animation:none;min-width:84px;justify-content:center">${x.status!=="open"?"✓ done":x.due_date?(x.due_date<today?"overdue":x.due_date===today?"today":x.due_date.slice(5)):"no date"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(x.title)}${x.priority==="high"&&x.status==="open"?' <span class="s2l-chip s2l-red" style="animation:none;padding:1px 6px;font-size:10px">high</span>':""}</div>
+        <div class="s2l-call-sub">${x.assignee_staff_id?esc(staffName(x.assignee_staff_id)):"Unassigned"}${x.detail?" · "+esc(x.detail):""}${x.done_at?" · done "+x.done_at.slice(0,10):""}</div></div>
+      ${w&&x.status==="open"?`<button class="s2l-call-btn log" data-tdone="${x.id}">Done</button>`:""}${w?`<button class="linkbtn del" data-tdel="${x.id}">✕</button>`:""}
+    </div>`;
+  body.innerHTML=`
+    <div class="panel" style="max-width:860px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div><h3 style="margin:0">Review · ${esc(l.name||"")}</h3>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">${esc(T.consultant||"Unassigned")} · ${esc((STAGES.find(x=>x[0]===T.stage)||["",T.stage])[1])}${stageDays!=null?" for "+stageDays+" d":""} · open ${T.days_open??"—"} d · ${T.source?esc(T.source):"source unknown"}${T.last_reviewed_at?" · last reviewed "+rvDate(T.last_reviewed_at):" · <b>never reviewed</b>"}</div></div>
+        <div class="tagrow">${flags.length?flags.map(f=>`<span class="s2l-chip ${f[0]==="bad"?"s2l-red":"s2l-amber"}" style="animation:none">${esc(f[1])}</span>`).join(""):(T.stage==="won"?'<span class="s2l-chip s2l-green">Won</span>':T.stage==="lost"?'<span class="s2l-chip s2l-queued">Lost · '+esc(T.lost_reason||"")+'</span>':'<span class="s2l-chip s2l-green">No red flags</span>')}</div>
+      </div>
+      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0 6px">
+        ${tile("Time to first call",T.first_call?rvGap(T.received,T.first_call):"—",T.first_call?"":"not yet",T.first_call?(T.sla_breached?"":""):"")}
+        ${tile("Touches",T.touch_count||0,(T.rnr_count||0)+" unanswered")}
+        ${tile("Meetings",T.meetings_total||0,T.consultation_held?"held":T.meetings_total?"not closed out":"none")}
+        ${tile("BOQ",T.boq_versions?T.boq_versions+" version"+(T.boq_versions>1?"s":""):"—",T.boq_total?fmt(T.boq_total):"")}
+        ${tile("Qualification",(T.bant||0)+"/100",(T.bant_answered||0)+" of 7 answered")}
+        ${tile("Win probability",T.win_probability!=null?T.win_probability+"%":"—",T.expected_close_date?"close by "+T.expected_close_date:"no closure date")}
+        ${T.csat?tile("Client feedback",T.csat.rating+"★",esc(T.csat.comment||T.csat.stage||"")):""}
+      </div>
+      <div class="grid2" style="gap:18px;align-items:start">
+        <div><div class="sec-label" style="border:none;padding:0;margin:8px 0 6px">Journey</div><div>${steps}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px">Next follow-up: <b>${T.next_follow_up||"—"}</b>${T.next_touch_due?" · retry due "+rvDate(T.next_touch_due):""}</div></div>
+        <div>
+          ${w?`<div class="sec-label" style="border:none;padding:0;margin:8px 0 6px">Your review</div>
+          <div class="grid2">
+            <div class="field"><label>Expected closure</label><input type="date" id="rv_close" value="${T.expected_close_date||""}"></div>
+            <div class="field"><label>Win probability</label><select id="rv_win" class="lf-sel" style="width:100%"><option value="">—</option>${[10,25,50,75,90].map(p=>`<option value="${p}" ${T.win_probability===p?"selected":""}>${p}%</option>`).join("")}</select></div>
+          </div>
+          <div class="field"><label>What is blocking this deal?</label><input id="rv_block" value="${esc(T.review_blocker||"")}" placeholder="e.g. waiting on possession · comparing with Livspace · budget 20% apart"></div>
+          <div class="field"><label>Review note <span style="color:#B4453A">*</span></label><textarea id="rv_note" rows="3" style="width:100%" placeholder="What you saw, what was agreed, what changes now"></textarea></div>
+          <button class="primary" id="rv_save">Save review</button>`:""}
+          <div class="sec-label" style="border:none;padding:0;margin:18px 0 6px">Tasks <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— ${openTasks.length} open · assignee gets it in the 09:15 digest and on their dashboard</span></div>
+          ${w?`<div class="grid2" style="gap:8px"><div class="field" style="grid-column:1/-1"><input id="tk_title" placeholder="Task, e.g. Call client with revised BOQ"></div>
+            <div class="field"><select id="tk_who" class="lf-sel" style="width:100%"><option value="">Assign to…</option>${(STAFF||[]).filter(x=>x.is_active!==false).map(x=>`<option value="${x.id}" ${String(x.id)===String(l.consultant_id)?"selected":""}>${esc(x.full_name)}</option>`).join("")}</select></div>
+            <div class="field"><input type="date" id="tk_due" value="${new Date(Date.now()+86400000).toISOString().slice(0,10)}"></div>
+            <div class="field"><select id="tk_prio" class="lf-sel" style="width:100%"><option value="normal">normal</option><option value="high">high</option><option value="low">low</option></select></div>
+            <div class="field"><button class="ghost" id="tk_add" style="width:100%">+ Add task</button></div></div>`:""}
+          <div class="s2l-call-list" style="margin-top:6px">${openTasks.map(taskRow).join("")||`<div class="empty" style="padding:6px 0">No open tasks.</div>`}${doneTasks.length?`<details style="margin-top:6px"><summary style="font-size:12px;color:var(--ink-soft);cursor:pointer">${doneTasks.length} done</summary>${doneTasks.map(taskRow).join("")}</details>`:""}</div>
+        </div>
+      </div>
+      <div class="sec-label" style="border:none;padding:0;margin:18px 0 6px">Review history</div>
+      ${(reviews||[]).length?(reviews||[]).map(r=>`<div class="tl-item2" style="padding:8px 0;border-top:1px solid var(--line)"><div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(staffNameByProfile(r.by_user)||"—")}</span><span class="tl-when2 mono">${rvDate(r.created_at)}${r.expected_close_date?" · close "+r.expected_close_date:""}${r.win_probability!=null?" · "+r.win_probability+"%":""}</span></div><div class="tl-text2">${esc(r.note)}${r.blocker?`<div style="font-size:12px;color:var(--ink-soft)">Blocker: ${esc(r.blocker)}</div>`:""}</div></div></div>`).join(""):`<div class="empty" style="padding:6px 0">No reviews yet.</div>`}
+    </div>`;
+  if(!w) return;
+  $("#rv_save").onclick=async()=>{
+    const note=$("#rv_note").value.trim(); if(note.length<5) return toast("Write the review note — that is the record");
+    const close=$("#rv_close").value||null, win=$("#rv_win").value?Number($("#rv_win").value):null, block=$("#rv_block").value.trim()||null, now=new Date().toISOString();
+    const {error}=await sb.from("lead_reviews").insert({lead_id:l.id,note,expected_close_date:close,win_probability:win,blocker:block,by_user:me.id});
+    if(error) return toast(error.message);
+    const {error:e2}=await sb.from("leads").update({expected_close_date:close,win_probability:win,review_blocker:block,last_reviewed_at:now,last_reviewed_by:me.id,updated_at:now}).eq("id",l.id);
+    if(e2) return toast(e2.message);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Review: ${note}${close?" · close by "+close:""}${win!=null?" · "+win+"%":""}${block?" · blocker: "+block:""}`,by_user:me.id});
+    Object.assign(l,{expected_close_date:close,win_probability:win,review_blocker:block,last_reviewed_at:now});
+    toast("Review saved"); leadSubSel.journal="review"; renderLeadWorkspace(l.id);   // full re-render so the header 🎯 pill updates
+  };
+  $("#tk_add").onclick=async()=>{
+    const title=$("#tk_title").value.trim(); if(!title) return toast("Write the task");
+    const who=$("#tk_who").value?Number($("#tk_who").value):null; if(!who) return toast("Assign it to someone");
+    const {error}=await sb.from("lead_tasks").insert({lead_id:l.id,title,assignee_staff_id:who,due_date:$("#tk_due").value||null,priority:$("#tk_prio").value,created_by:me.id});
+    if(error) return toast(error.message);
+    await sb.from("lead_activities").insert({lead_id:l.id,type:"Note",text:`Task for ${staffName(who)}: ${title}${$("#tk_due").value?" · due "+$("#tk_due").value:""}`,by_user:me.id});
+    toast("Task assigned to "+staffName(who)); lwReview(l,body);
+  };
+  body.querySelectorAll("[data-tdone]").forEach(b=>b.onclick=async()=>{ const {error}=await sb.from("lead_tasks").update({status:"done"}).eq("id",Number(b.dataset.tdone)); if(error) return toast(error.message); toast("Task done"); lwReview(l,body); });
+  body.querySelectorAll("[data-tdel]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this task?")) return; const {error}=await sb.from("lead_tasks").delete().eq("id",Number(b.dataset.tdel)); if(error) return toast(error.message); lwReview(l,body); });
 }
 
 /* ---- Notes: free-form, editable ---- */
@@ -9984,6 +10139,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b51",date:"13 Sep 2026",title:"Lead Review tab · leads this month by source · tasks with owners",points:[
+    "<b>Review</b> — a third tab under a lead's Activity & Notes. The journey is derived automatically: lead received → Priya reached out → client replied → first call → consultation booked / held → BOQ started → proposal sent → advance → won, each with the time gap between steps. Red flags (never called, SLA missed, proposal silent, no-shows, untouched 14 d, low qualification, overdue closure) show at the top.",
+    "Record your verdict: <b>expected closure date</b>, <b>win probability</b>, what's blocking it, and a review note. Every review is kept as history; the closure date and % appear as a 🎯 pill in the lead header.",
+    "<b>Assign tasks</b> to anyone with a due date and priority. They land on that person's dashboard (Tasks from lead reviews), in their 09:15 Priya digest on the due date and every day overdue, and can be closed from either place.",
+    "<b>Dashboard → Leads this month</b>: how many leads came in this month by source (Instagram, Referral, WhatsApp…), each compared with last month."]},
   {build:"b50",date:"12 Sep 2026",title:"Payment schedule is ready the moment you convert",points:[
     "Creating a project — by converting a lead or from <b>+ New project</b> — now auto-creates the 10 / 40 / 40 / 10 payment schedule (Booking advance · Design sign-off · Production & material · Pre-handover). Open the project → Payments tab and the milestones are already there — hit <b>Create link</b> for a Razorpay link or <b>Generate PI</b> for the proforma, per milestone.",
     "The 10% advance you recorded at conversion is applied to the Booking milestone automatically, so it shows as paid on day one. Amounts come from the contract value; edit the split anytime with <b>Edit schedule</b>."]},
@@ -11574,7 +11734,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b50 · 12 Sep 2026";
+const APP_BUILD = "b51 · 13 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
