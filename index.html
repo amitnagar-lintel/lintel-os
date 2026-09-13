@@ -2173,14 +2173,17 @@ async function renderLeadTasksStrip(){
   if(!list.length){ host.innerHTML=""; dashAttnSync(); return; }
   const today=todayISO(), shown=_ltShowAll?list:list.slice(0,5), over=list.filter(t=>t.due_date&&t.due_date<today).length;
   host.innerHTML=`<div style="margin-bottom:14px">
-    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${over?"#B4453A":"var(--ink-soft)"};font-weight:600;margin-bottom:10px">Tasks from lead reviews <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink-soft)">— ${list.length} open${over?` · <b style="color:#B4453A">${over} overdue</b>`:""}</span></div>
-    <div class="s2l-call-list">${shown.map(t=>`<div class="s2l-call" data-lt="${t.lead_id}">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:${over?"#B4453A":"var(--ink-soft)"};font-weight:600;margin-bottom:10px">Tasks from reviews <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink-soft)">— ${list.length} open${over?` · <b style="color:#B4453A">${over} overdue</b>`:""}</span></div>
+    <div class="s2l-call-list">${shown.map(t=>`<div class="s2l-call" data-lt="${t.lead_id||0}" data-ltid="${t.id}">
       <span class="s2l-chip ${t.due_date&&t.due_date<today?"s2l-red":t.due_date===today?"s2l-amber":"s2l-queued"}" style="animation:none;min-width:84px;justify-content:center">${t.due_date?(t.due_date<today?"overdue":t.due_date===today?"today":t.due_date.slice(5)):"no date"}</span>
-      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(t.title)} <span style="font-weight:400;color:var(--ink-soft)">· ${esc(t.lead||"")}</span></div><div class="s2l-call-sub">${esc(t.assignee||"Unassigned")}${t.detail?" · "+esc(t.detail):""}</div></div>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(t.title)} <span style="font-weight:400;color:var(--ink-soft)">· ${t.kind==="project"?"🏗 ":""}${esc(t.lead||"")}</span></div><div class="s2l-call-sub">${esc(t.assignee||"Unassigned")}${t.detail?" · "+esc(t.detail):""}</div></div>
       <button class="s2l-call-btn log" data-ltdone="${t.id}">Done</button></div>`).join("")}</div>
     ${list.length>5?`<button class="linkbtn" id="ltToggle" style="margin-top:10px">${_ltShowAll?"Show 5 only":`View all ${list.length} →`}</button>`:""}</div>`;
   const tg=$("#ltToggle"); if(tg) tg.onclick=()=>{ _ltShowAll=!_ltShowAll; renderLeadTasksStrip(); };
-  host.querySelectorAll("[data-lt]").forEach(el=>el.onclick=()=>{ leadSubSel.journal="review"; gotoTab("leads"); setTimeout(()=>{ openLead(Number(el.dataset.lt)); setTimeout(()=>{ leadTab="journal"; drawLeadTab&&activeLead&&renderLeadWorkspace(activeLead); },200); },40); });
+  host.querySelectorAll("[data-lt]").forEach(el=>el.onclick=()=>{
+    const t=list.find(x=>String(x.id)===el.dataset.ltid);
+    if(t&&t.kind==="project"){ activeProject=Number(t.project_id); projectTab="review"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(activeProject),60); return; }
+    leadSubSel.journal="review"; gotoTab("leads"); setTimeout(()=>{ openLead(Number(el.dataset.lt)); setTimeout(()=>{ leadTab="journal"; drawLeadTab&&activeLead&&renderLeadWorkspace(activeLead); },200); },40); });
   host.querySelectorAll("[data-ltdone]").forEach(b=>b.onclick=async e=>{ e.stopPropagation(); const {error}=await sb.from("lead_tasks").update({status:"done"}).eq("id",Number(b.dataset.ltdone)); if(error) return toast(error.message); toast("Task done"); renderLeadTasksStrip(); });
   dashAttnSync();
 }
@@ -4613,7 +4616,7 @@ async function projCloseProject(p){
   projListTab="closed"; renderProjects();
 }
 
-const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["finance","Finance"],["studio","Studio"],["site","Site"],["support","Support"]];
+const PROJ_TABS=[["overview","Overview"],["client","Client"],["boq","BOQ"],["finance","Finance"],["studio","Studio"],["site","Site"],["support","Support"],["review","Review"]];
 // Post-sales / aftercare — Warranty Charter terms (mirror of postSalesEngine.js WARRANTY_TERMS)
 const WARRANTY_TERMS=[
   {key:"kitchen",     label:"Modular kitchen (cabinets, shutters, drawers, panels)", years:10, note:"100% free replacement"},
@@ -4652,7 +4655,7 @@ async function renderProjectWorkspace(pid){
       <span style="display:inline-flex;align-items:center"><button class="crumb" id="pwBack">Projects</button><span class="crumb-sep">›</span></span>
       <div class="pw-title"><span class="mono pw-code">${esc(p.code||"")}</span>
         <h2 class="display">${esc(p.name)}</h2>
-        <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)} ${warrantyPill(p)}</div>
+        <span class="pill ${p.status}">${p.status}</span> ${handoverPill(p)} ${warrantyPill(p)}${p.projected_handover&&p.status==="active"?` <span class="lw-pill ${p.target_end&&p.projected_handover>p.target_end?"due today":""}" title="Projected handover from the last review${p.target_end?" · committed "+p.target_end:""}">🎯 Handover ${p.projected_handover}${p.review_risk?" · "+p.review_risk+" risk":""}</span>`:""}</div>
       <div class="pw-val mono">${fmt(p.contract_value)}</div>
       ${canWrite()?`<button class="ghost" id="pwJourney" title="Generate the client's journey plan">📄 Journey plan</button>`:""}
     </div>
@@ -4679,6 +4682,7 @@ async function drawProjectTab(p){
   if(projectTab==="client")     return pwClient(p,body);
   if(projectTab==="boq")        return pwBoq(p,body);
   if(projectTab==="support")    return pwSupport(p,body);
+  if(projectTab==="review")     return pwReview(p,body);
   if(!PROJ_GROUPS[projectTab]) return;
   const subs=projGroupSubs(projectTab); if(!subs.length) return;
   let cur=projSubSel[projectTab]; if(!subs.some(s=>s[0]===cur)) cur=subs[0][0]; projSubSel[projectTab]=cur;
@@ -5344,6 +5348,110 @@ async function pwOverview(p,body){
 }
 
 /* ---- Payments / Client Wallet ---- */
+/* ---- REVIEW-02: founder / manager review of a project — delivery facts, verdict, tasks ---- */
+async function pwReview(p,body){
+  body.innerHTML=`<div class="panel" style="max-width:900px">${skel(3,90)}</div>`;
+  const [{data:t},{data:reviews},{data:tasks}]=await Promise.all([
+    sb.rpc("project_review_timeline",{p_project_id:p.id}),
+    sb.from("project_reviews").select("*").eq("project_id",p.id).order("created_at",{ascending:false}),
+    sb.from("lead_tasks").select("*").eq("project_id",p.id).order("status").order("due_date",{ascending:true,nullsFirst:false})
+  ]);
+  const T=t||{}, w=canWrite(), today=todayISO();
+  const M=T.milestones||{}, D=T.design_tasks||{}, MT=T.meetings||{}, S=T.snags||{};
+  const contract=Number(T.contract)||0, received=Number(T.received)||0, pct=contract?Math.round(received/contract*100):0;
+  const flags=[];
+  if(T.status==="active"){
+    if(T.days_to_target!=null&&T.days_to_target<0) flags.push(["bad","Past committed handover by "+(-T.days_to_target)+" d"]);
+    else if(T.days_to_target!=null&&T.days_to_target<=14&&(T.progress_pct||0)<80) flags.push(["warn",T.days_to_target+" d to handover, "+(T.progress_pct||0)+"% done"]);
+    if(T.projected_handover&&T.target_end&&T.projected_handover>T.target_end) flags.push(["warn","Projected handover slips "+Math.round((new Date(T.projected_handover)-new Date(T.target_end))/86400000)+" d"]);
+    if(!T.kickoff) flags.push(["warn","No kick-off meeting date"]);
+    if(!T.boq_locked) flags.push(["bad","BOQ not locked"]);
+    if(M.total===0) flags.push(["warn","No payment schedule"]);
+    if(["Production","Installation","Handover"].includes(T.stage)&&pct<50) flags.push(["bad","In execution with only "+pct+"% collected"]);
+    if(T.stage==="Handover"&&pct<100) flags.push(["bad","Handover with "+pct+"% collected"]);
+    if((MT.unclosed||0)>0) flags.push(["warn",MT.unclosed+" meeting"+(MT.unclosed>1?"s":"")+" not closed out"]);
+    if((D.overdue||0)>0) flags.push(["warn",D.overdue+" design task"+(D.overdue>1?"s":"")+" overdue"]);
+    if((S.open||0)>0) flags.push([T.stage==="Handover"?"bad":"warn",S.open+" snag"+(S.open>1?"s":"")+" open"]);
+    if((T.tickets_open||0)>0) flags.push(["warn",T.tickets_open+" support ticket"+(T.tickets_open>1?"s":"")+" open"]);
+    if((T.client_unread||0)>0) flags.push(["bad",T.client_unread+" client message"+(T.client_unread>1?"s":"")+" unanswered"]);
+    const lastUpd=T.last_client_update||T.progress_updated; if(lastUpd){ const dd=Math.floor((Date.now()-new Date(lastUpd))/86400000); if(dd>=7) flags.push(["warn","Client not updated for "+dd+" d"]); }
+    if(T.csat&&T.csat.rating&&T.csat.rating<=3) flags.push(["bad","Client rated "+T.csat.rating+"★"]);
+  }
+  const stageDays=T.stage_since?Math.floor((Date.now()-new Date(T.stage_since))/86400000):null;
+  const tile=(label,val,sub)=>`<div class="tile" style="padding:10px 12px"><div class="l" style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em">${label}</div><div style="font-weight:600;font-size:14px">${val}</div>${sub?`<div class="s" style="font-size:11px;color:var(--ink-soft)">${sub}</div>`:""}</div>`;
+  const STEPS=[["lead_received","Lead received"],["converted","Converted · advance"],["kickoff","Kick-off meeting"],["boq_locked","BOQ locked"],["first_pi","First invoice"],["first_payment","First payment"],["handover_signed","Handover signed"],["closed","Closed"]];
+  let prev=null; const steps=STEPS.map(([k,label])=>{ const v=T[k]; const gap=v&&prev?rvGap(prev,v):""; if(v) prev=v;
+    return `<div class="tl-row ${v?"done":""}" style="padding:5px 0"><div class="tl-dot" style="width:18px;height:18px;font-size:10px">${v?"✓":""}</div><div class="tl-nm" style="font-size:13px">${label}</div><div class="tl-dt" style="font-family:ui-monospace,monospace">${v?rvDate(v):"—"}${gap?` <span style="color:var(--ink-soft)">· +${gap}</span>`:""}</div></div>`; }).join("");
+  const stageRows=(T.stages||[]).map(x=>`<div class="tl-row ${x.status==="done"?"done":x.stage===T.stage?"now":""}" style="padding:4px 0"><div class="tl-dot" style="width:18px;height:18px;font-size:10px">${x.status==="done"?"✓":x.stage===T.stage?"●":""}</div><div class="tl-nm" style="font-size:13px">${esc(x.stage)}</div><div class="tl-dt" style="font-family:ui-monospace,monospace">${x.done?x.done:x.target?"target "+x.target:"—"}</div></div>`).join("");
+  const openTasks=(tasks||[]).filter(x=>x.status==="open"), doneTasks=(tasks||[]).filter(x=>x.status!=="open");
+  const taskRow=x=>`<div class="s2l-call" style="cursor:default;${x.status!=="open"?"opacity:.55":""}">
+      <span class="s2l-chip ${x.status!=="open"?"s2l-queued":x.due_date&&x.due_date<today?"s2l-red":x.due_date===today?"s2l-amber":x.priority==="high"?"s2l-amber":"s2l-queued"}" style="animation:none;min-width:84px;justify-content:center">${x.status!=="open"?"✓ done":x.due_date?(x.due_date<today?"overdue":x.due_date===today?"today":x.due_date.slice(5)):"no date"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(x.title)}${x.priority==="high"&&x.status==="open"?' <span class="s2l-chip s2l-red" style="animation:none;padding:1px 6px;font-size:10px">high</span>':""}</div>
+        <div class="s2l-call-sub">${x.assignee_staff_id?esc(staffName(x.assignee_staff_id)):"Unassigned"}${x.detail?" · "+esc(x.detail):""}${x.done_at?" · done "+x.done_at.slice(0,10):""}</div></div>
+      ${w&&x.status==="open"?`<button class="s2l-call-btn log" data-tdone="${x.id}">Done</button>`:""}${w?`<button class="linkbtn del" data-tdel="${x.id}">✕</button>`:""}
+    </div>`;
+  const team=T.team||{};
+  body.innerHTML=`
+    <div class="panel" style="max-width:900px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div><h3 style="margin:0">Review · ${esc(T.code||p.code||"")} ${esc(T.client||p.name||"")}</h3>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:4px">${esc(T.stage||"")}${stageDays!=null?" for "+stageDays+" d":""} · ${[team.consultant&&"C: "+esc(team.consultant),team.designer&&"D: "+esc(team.designer),team.pm&&"PM: "+esc(team.pm)].filter(Boolean).join(" · ")}${T.last_reviewed_at?" · last reviewed "+rvDate(T.last_reviewed_at):" · <b>never reviewed</b>"}</div></div>
+        <div class="tagrow">${flags.length?flags.map(f=>`<span class="s2l-chip ${f[0]==="bad"?"s2l-red":"s2l-amber"}" style="animation:none">${esc(f[1])}</span>`).join(""):(T.status!=="active"?`<span class="s2l-chip s2l-queued">${esc(T.status||"")}</span>`:'<span class="s2l-chip s2l-green">No red flags</span>')}</div>
+      </div>
+      <div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0 6px">
+        ${tile("Collected",pct+"%",fmt(received)+" of "+fmt(contract))}
+        ${tile("Next payment",M.next_due?esc(String(M.next_due).split(" · ")[0]):"—",M.next_due?fmt(Number(String(M.next_due).split(" · ")[1])||0):(M.total?"all paid":"no schedule"))}
+        ${tile("Handover",T.target_end||"—",T.days_to_target!=null?(T.days_to_target<0?(-T.days_to_target)+" d overdue":T.days_to_target+" d to go"):"no target")}
+        ${tile("Site progress",T.progress_pct!=null?T.progress_pct+"%":"—",T.progress_updated?"updated "+rvDate(T.progress_updated):"no reports yet")}
+        ${tile("Design tasks",(D.done||0)+" / "+(D.total||0),(D.overdue||0)?D.overdue+" overdue":"")}
+        ${tile("Snags · tickets",(S.open||0)+" · "+(T.tickets_open||0),(S.total||0)+" snags raised in total")}
+        ${T.csat?tile("Client feedback",T.csat.rating+"★",esc(T.csat.comment||T.csat.stage||"")):tile("Client messages",T.client_unread||0,T.last_client_msg?"last "+rvDate(T.last_client_msg):"none unanswered")}
+      </div>
+      <div class="grid2" style="gap:18px;align-items:start">
+        <div><div class="sec-label" style="border:none;padding:0;margin:8px 0 6px">Journey</div><div>${steps}</div>
+          <div class="sec-label" style="border:none;padding:0;margin:14px 0 6px">Stages</div><div>${stageRows||'<div class="empty">No stage plan.</div>'}</div></div>
+        <div>
+          ${w?`<div class="sec-label" style="border:none;padding:0;margin:8px 0 6px">Your review</div>
+          <div class="grid2">
+            <div class="field"><label>Projected handover <span style="font-weight:400;color:var(--ink-soft)">(committed: ${T.target_end||"—"})</span></label><input type="date" id="pr_hand" value="${T.projected_handover||T.target_end||""}"></div>
+            <div class="field"><label>Delivery risk</label><select id="pr_risk" class="lf-sel" style="width:100%"><option value="">—</option>${["low","medium","high"].map(r=>`<option value="${r}" ${T.review_risk===r?"selected":""}>${r}</option>`).join("")}</select></div>
+          </div>
+          <div class="field"><label>What is blocking delivery?</label><input id="pr_block" value="${esc(T.review_blocker||"")}" placeholder="e.g. site not ready · material delayed · client approval pending"></div>
+          <div class="field"><label>Review note <span style="color:#B4453A">*</span></label><textarea id="pr_note" rows="3" style="width:100%" placeholder="What you saw on site / in the numbers, what was agreed, what changes now"></textarea></div>
+          <button class="primary" id="pr_save">Save review</button>`:""}
+          <div class="sec-label" style="border:none;padding:0;margin:18px 0 6px">Tasks <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— ${openTasks.length} open · assignee gets it in the 09:15 digest and on their dashboard</span></div>
+          ${w?`<div class="grid2" style="gap:8px"><div class="field" style="grid-column:1/-1"><input id="tk_title" placeholder="Task, e.g. Confirm carcass delivery date with vendor"></div>
+            <div class="field"><select id="tk_who" class="lf-sel" style="width:100%"><option value="">Assign to…</option>${(STAFF||[]).filter(x=>x.is_active!==false).map(x=>`<option value="${x.id}" ${String(x.id)===String(p.pm_id)?"selected":""}>${esc(x.full_name)}</option>`).join("")}</select></div>
+            <div class="field"><input type="date" id="tk_due" value="${new Date(Date.now()+86400000).toISOString().slice(0,10)}"></div>
+            <div class="field"><select id="tk_prio" class="lf-sel" style="width:100%"><option value="normal">normal</option><option value="high">high</option><option value="low">low</option></select></div>
+            <div class="field"><button class="ghost" id="tk_add" style="width:100%">+ Add task</button></div></div>`:""}
+          <div class="s2l-call-list" style="margin-top:6px">${openTasks.map(taskRow).join("")||`<div class="empty" style="padding:6px 0">No open tasks.</div>`}${doneTasks.length?`<details style="margin-top:6px"><summary style="font-size:12px;color:var(--ink-soft);cursor:pointer">${doneTasks.length} done</summary>${doneTasks.map(taskRow).join("")}</details>`:""}</div>
+        </div>
+      </div>
+      <div class="sec-label" style="border:none;padding:0;margin:18px 0 6px">Review history</div>
+      ${(reviews||[]).length?(reviews||[]).map(r=>`<div class="tl-item2" style="padding:8px 0;border-top:1px solid var(--line)"><div class="tl-main"><div class="tl-top"><span class="tl-type2">${esc(staffNameByProfile(r.by_user)||"—")}</span><span class="tl-when2 mono">${rvDate(r.created_at)}${r.projected_handover?" · handover "+r.projected_handover:""}${r.risk?" · "+r.risk+" risk":""}</span></div><div class="tl-text2">${esc(r.note)}${r.blocker?`<div style="font-size:12px;color:var(--ink-soft)">Blocker: ${esc(r.blocker)}</div>`:""}</div></div></div>`).join(""):`<div class="empty" style="padding:6px 0">No reviews yet.</div>`}
+    </div>`;
+  if(!w) return;
+  $("#pr_save").onclick=async()=>{
+    const note=$("#pr_note").value.trim(); if(note.length<5) return toast("Write the review note — that is the record");
+    const hand=$("#pr_hand").value||null, risk=$("#pr_risk").value||null, block=$("#pr_block").value.trim()||null, now=new Date().toISOString();
+    const {error}=await sb.from("project_reviews").insert({project_id:p.id,note,projected_handover:hand,risk,blocker:block,by_user:me.id});
+    if(error) return toast(error.message);
+    const {error:e2}=await sb.from("projects").update({projected_handover:hand,review_risk:risk,review_blocker:block,last_reviewed_at:now,last_reviewed_by:me.id}).eq("id",p.id);
+    if(e2) return toast(e2.message);
+    Object.assign(p,{projected_handover:hand,review_risk:risk,review_blocker:block,last_reviewed_at:now});
+    toast("Review saved"); renderProjectWorkspace(p.id);
+  };
+  $("#tk_add").onclick=async()=>{
+    const title=$("#tk_title").value.trim(); if(!title) return toast("Write the task");
+    const who=$("#tk_who").value?Number($("#tk_who").value):null; if(!who) return toast("Assign it to someone");
+    const {error}=await sb.from("lead_tasks").insert({project_id:p.id,title,assignee_staff_id:who,due_date:$("#tk_due").value||null,priority:$("#tk_prio").value,created_by:me.id});
+    if(error) return toast(error.message);
+    toast("Task assigned to "+staffName(who)); pwReview(p,body);
+  };
+  body.querySelectorAll("[data-tdone]").forEach(b=>b.onclick=async()=>{ const {error}=await sb.from("lead_tasks").update({status:"done"}).eq("id",Number(b.dataset.tdone)); if(error) return toast(error.message); toast("Task done"); pwReview(p,body); });
+  body.querySelectorAll("[data-tdel]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this task?")) return; const {error}=await sb.from("lead_tasks").delete().eq("id",Number(b.dataset.tdel)); if(error) return toast(error.message); pwReview(p,body); });
+}
 async function pwPayments(p,body){
   const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
   const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx").order("id");
@@ -10139,6 +10247,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b52",date:"13 Sep 2026",title:"Review tab on projects",points:[
+    "Every project now has a <b>Review</b> tab: the delivery journey (lead → converted → kick-off → BOQ locked → first invoice → first payment → handover → closed) with time gaps, the stage plan, and tiles for collected %, next payment due, days to handover, site progress, design tasks, snags & tickets, and the client's latest feedback or unanswered messages.",
+    "Red flags surface automatically — past committed handover, execution with under 50% collected, BOQ not locked, meetings not closed, overdue design tasks, open snags at handover, unanswered client messages, client not updated for 7+ days, a low CSAT.",
+    "Record a <b>projected handover</b> (kept separate from the committed date the client sees), delivery risk, blocker and note — history is kept and the header shows a 🎯 Handover pill. Assign tasks to anyone with a due date; they reach the assignee's dashboard and 09:15 digest exactly like lead-review tasks."]},
   {build:"b51",date:"13 Sep 2026",title:"Lead Review tab · leads this month by source · tasks with owners",points:[
     "<b>Review</b> — a third tab under a lead's Activity & Notes. The journey is derived automatically: lead received → Priya reached out → client replied → first call → consultation booked / held → BOQ started → proposal sent → advance → won, each with the time gap between steps. Red flags (never called, SLA missed, proposal silent, no-shows, untouched 14 d, low qualification, overdue closure) show at the top.",
     "Record your verdict: <b>expected closure date</b>, <b>win probability</b>, what's blocking it, and a review note. Every review is kept as history; the closure date and % appear as a 🎯 pill in the lead header.",
@@ -11734,7 +11846,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b51 · 13 Sep 2026";
+const APP_BUILD = "b52 · 13 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
