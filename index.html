@@ -4634,11 +4634,11 @@ function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new 
 const PROJ_GROUPS={
   finance:[["payments","Payments"],["packages","Packages"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
-  site:[["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",packages:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+  site:[["kom","Kick-off"],["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
+const PROJ_SUB2GROUP={payments:"finance",packages:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
-const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","progress","execution","snags","documents","team","support"];
+const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","kom","progress","execution","snags","documents","team","support"];
 const projGroupSubs=g=>isDesignPartner()?PROJ_GROUPS[g].filter(s=>PARTNER_PROJ_TABS.includes(s[0])):PROJ_GROUPS[g];
 const projTabsFor=()=>PROJ_TABS.filter(t=>PROJ_GROUPS[t[0]]?projGroupSubs(t[0]).length:(!isDesignPartner()||PARTNER_PROJ_TABS.includes(t[0])));
 
@@ -4700,6 +4700,7 @@ function drawProjectSub(p,sub,body){
   if(sub==="moodboard")  return pwMoodboard(p,body);
   if(sub==="canvas")     return pwCanvas(p,body);
   if(sub==="vastu")      return vastuTab(p,body,"project");
+  if(sub==="kom")        return pwKom(p,body);
   if(sub==="progress")   return pwProgress(p,body);
   if(sub==="execution")  return pwExecution(p,body);
   if(sub==="snags")      return pwSnags(p,body);
@@ -5050,6 +5051,103 @@ function snagRow(s,w){
     <div style="display:flex;gap:8px;align-items:center;margin-top:7px;flex-wrap:wrap">${stSel} ${asSel} ${photos}${w?` <button class="chip" data-sndel="${s.id}" style="font-size:10px;padding:3px 7px">delete</button>`:""}</div>
   </div></div>`;
 }
+// ============== SITE KICK-OFF (KOM-01) ==============
+// Priya runs the kick-off checklist on WhatsApp (room by room, every checkpoint
+// cross-checked against the BOQ) and reports to all project holders. This tab is
+// the oversight + correction view: status, scope gaps, issues, room-by-room ticks.
+const KOM_ICON={general:"🏗",kitchen:"🍳",bedroom:"🛏",living:"🛋",dining:"🍽",bathroom:"🚿",utility:"🧺",foyer:"🚪",study:"📚",balcony:"🌿",pooja:"🪔",whole:"🏠",other:"📦",docs:"📄",scope:"🧾",site_general:"🏢",technical:"🔧",commercial:"💼"};
+// four stages (Livspace CL-001/002/003 fine-tuned + the site walk) — KOM-04
+const KOM_STAGES=[["pre_validation","1 · Pre-site validation","Scope & supply accountability, drawings"],["site_validation","2 · Site validation","Site access + technical checks"],["pre_kickoff","3 · Pre-kick-off","Commercial readiness (POs, sign-off, schedule)"],["kom","4 · Kick-off site walk","Room-by-room walk with the client"]];
+const KOM_SUPPLY={cx:["👤 Client","s2l-amber"],ls:["🏠 Lintel","s2l-green"],na:["➖ N/A","s2l-queued"]};
+const KOM_ANS={ok:["✅ OK","s2l-green"],issue:["⚠️ Issue","s2l-red"],na:["➖ N/A","s2l-queued"],skipped:["⤼ Skipped","s2l-amber"],pending:["⏳ Pending","s2l-amber"]};
+let komSel={};
+function komWhen(iso){ return iso?new Date(iso).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}):"—"; }
+function komShortQ(q){ q=String(q||"").replace(/^Confirm on site — /,""); const i=q.indexOf("?"); if(i>0&&i<80) q=q.slice(0,i); return q; }
+async function komPriya(path,payload){
+  try{ const r=await fetch(PRIYA_SERVER+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}); return await r.json(); }
+  catch(e){ return {ok:false,error:e.message}; }
+}
+async function pwKom(p, body){
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading kick-off…</div>`;
+  await ensureStaff();
+  const w=canWrite();
+  let sessions=[],rows=[],tplCount=0;
+  try{
+    const [{data:s},tc]=await Promise.all([
+      sb.from("kom_sessions").select("*").eq("project_id",p.id).order("started_at",{ascending:false}),
+      sb.from("kom_checklist_template").select("stage").eq("is_active",true)]);
+    sessions=s||[]; tplCount=(tc&&tc.data||[]).length; window.__komActiveStages=new Set((tc&&tc.data||[]).map(x=>x.stage||"kom"));
+    if(!sessions.some(x=>x.id===komSel[p.id])) komSel[p.id]=sessions[0]?sessions[0].id:null;
+    if(komSel[p.id]){ const {data:r}=await sb.from("kom_responses").select("*").eq("session_id",komSel[p.id]).order("seq"); rows=r||[]; }
+  }catch(e){ body.innerHTML=`<div class="empty" style="padding:24px">Couldn't load. ${esc(e.message||"")}</div>`; return; }
+  const S=sessions.find(x=>x.id===komSel[p.id])||null;
+  const pm=p.pm_id?staffName(p.pm_id):"";
+  const stageLabel=c=>(KOM_STAGES.find(x=>x[0]===c)||["","Kick-off"])[1];
+  const activeSt=window.__komActiveStages||new Set(KOM_STAGES.map(x=>x[0]));
+  const stageStrip=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:14px">${KOM_STAGES.filter(([c])=>activeSt.has(c)||sessions.some(x=>(x.stage||"kom")===c)).map(([c,l,d])=>{ const ss=sessions.filter(x=>(x.stage||"kom")===c); const done=ss.find(x=>x.status==="completed"&&!x.is_trial)||ss.find(x=>x.status==="completed"); const run=ss.find(x=>x.status==="in_progress"); const cur=S&&(S.stage||"kom")===c;
+    return `<div class="tile" data-komstage="${c}" style="padding:10px 12px;cursor:${ss.length?"pointer":"default"};border:1px solid ${cur?"var(--brass)":"var(--line)"};background:${done?"rgba(60,122,78,.06)":run?"rgba(169,121,30,.07)":"transparent"}"><div style="font-size:12px;font-weight:600">${done?"✅":run?"⏳":"▢"} ${esc(l)}</div><div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${done?"done "+komWhen(done.completed_at)+(done.is_trial?" (trial)":""):run?"in progress · "+esc(run.started_by_name||""):esc(d)}</div></div>`; }).join("")}</div>`;
+  const open=sessions.find(x=>x.status==="in_progress");
+  const howto=`<div class="cr-item"><div class="cr-main"><div class="cr-lead">How the four stages run</div><div class="cr-text">The PM / site engineer sends <b>KOM &lt;project&gt;</b> to Priya on WhatsApp and picks a stage (or <b>PSV</b> / <b>SV</b> / <b>PKO</b> / <b>walk</b> directly). <b>1 Pre-site validation</b> pins every scope item as Client / Lintel / N/A with make-model (BOQ suggests the owner). <b>2 Site validation</b> covers society rules and the technical checks. <b>3 Pre-kick-off</b> is commercial readiness, pre-filled from Lintel OS (POs, sign-offs, BOQ lock, schedule). (<b>4 Kick-off walk</b>, room by room from the BOQ, is currently switched off.) Each stage is one numbered checklist per section — the team replies with exceptions only — and ends with a consolidated report to the PM, designer, consultant, members and directors. ${tplCount} active checkpoints in total.</div></div>
+    ${w&&!open?`<div class="cr-side"><button class="chip" id="komNudge" title="${pm?"WhatsApp "+esc(pm)+" to start the KOM":"Assign a PM first"}" ${pm?"":"disabled"}>Nudge ${pm?esc(pm.split(" ")[0]):"PM"} on WhatsApp</button></div>`:""}</div>`;
+  if(!sessions.length){
+    body.innerHTML=stageStrip+`<div style="font-size:14px;margin-bottom:12px">No kick-off recorded yet${p.kom_date?` · KOM date on file <b>${esc(p.kom_date)}</b>`:""}.</div>${howto}`;
+    const nb=$("#komNudge"); if(nb) nb.onclick=async()=>{ nb.disabled=true; const r=await komPriya("/kom/nudge",{project_id:p.id}); toast(r.ok?"Priya messaged "+(r.to||pm):"Couldn't send: "+(r.error||"unknown")); nb.disabled=false; };
+    return;
+  }
+  const total=rows.length, done=rows.filter(r=>r.answer!=="pending").length;
+  const cnt=k=>rows.filter(r=>r.answer===k).length;
+  const issues=rows.filter(r=>r.answer==="issue");
+  const gaps=rows.filter(r=>(r.source==="template"&&r.requires_boq&&r.boq_status==="not_in_boq"&&(r.answer==="ok"||r.answer==="issue"))||(r.answer_kind==="supply"&&r.supply_by==="ls"&&r.boq_status!=="in_boq"));
+  const cxItems=rows.filter(r=>r.answer_kind==="supply"&&r.supply_by==="cx");
+  const notIn=rows.filter(r=>r.source==="template"&&!r.requires_boq&&r.boq_status==="not_in_boq"&&(r.answer==="ok"||r.answer==="issue"));
+  const statusChip=(S.is_trial?'<span class="s2l-chip s2l-queued" style="animation:none" title="Trial run — report went only to the initiator; project not stamped">🧪 Trial</span> ':"")+(S.status==="completed"?'<span class="s2l-chip s2l-green" style="animation:none">Completed</span>':S.status==="in_progress"?`<span class="s2l-chip s2l-amber" style="animation:none">${S.paused_at?"Paused":"In progress"}</span>`:'<span class="s2l-chip s2l-queued" style="animation:none">Abandoned</span>');
+  const ch=Array.isArray(S.report_channels)?S.report_channels:[];
+  const chHtml=ch.length?ch.map(c=>`<span class="s2l-chip ${c.ok?"s2l-green":"s2l-red"}" style="animation:none" title="${esc(c.channel)} → ${esc(c.to||"")}">${c.ok?"✓":"✗"} ${esc((c.name||c.to||"").split(" ")[0])} · ${c.channel==="email"?"✉":"WA"}</span>`).join(" "):"";
+  const rooms=[]; const byRoom={};
+  rows.forEach(r=>{ if(!byRoom[r.room]){ byRoom[r.room]={room:r.room,kind:r.room_kind,rows:[]}; rooms.push(byRoom[r.room]); } byRoom[r.room].rows.push(r); });
+  const boqChip=r=>{
+    if(r.source==="boq_item") return `<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 6px;font-size:10px">BOQ line</span>`;
+    if(r.boq_status==="in_boq") return `<span class="s2l-chip s2l-green" style="animation:none;padding:1px 6px;font-size:10px" title="${esc((r.boq_match||[]).map(m=>(m.item_name||m.category)+(m.qty?" ×"+m.qty+" "+(m.uom||""):"")).join(", "))}">In BOQ${r.boq_match&&r.boq_match.length?" · "+r.boq_match.length:""}</span>`;
+    if(r.boq_status==="not_in_boq") return `<span class="s2l-chip ${r.requires_boq?"s2l-red":"s2l-amber"}" style="animation:none;padding:1px 6px;font-size:10px">Not in BOQ${r.requires_boq?" · scope gap":""}</span>`;
+    return "";
+  };
+  const row=r=>{ const a=KOM_ANS[r.answer]||KOM_ANS.pending; return `<div class="s2l-call" style="cursor:default;align-items:flex-start">
+      ${w?`<select data-koma="${r.id}" class="s2l-chip ${a[1]}" style="animation:none;min-width:96px;border:0;appearance:auto">${Object.keys(KOM_ANS).map(k=>`<option value="${k}" ${k===r.answer?"selected":""}>${KOM_ANS[k][0]}</option>`).join("")}</select>`:`<span class="s2l-chip ${a[1]}" style="animation:none;min-width:96px;justify-content:center">${a[0]}</span>`}
+      <div class="s2l-call-main"><div class="s2l-call-nm" style="font-weight:${r.answer==="issue"?"600":"400"}">${esc(r.question)}</div>
+        <div class="s2l-call-sub">${r.answer_kind==="supply"&&r.supply_by?`<span class="s2l-chip ${KOM_SUPPLY[r.supply_by][1]}" style="animation:none;padding:1px 6px;font-size:10px">${KOM_SUPPLY[r.supply_by][0]}${r.supply_by==="ls"&&r.boq_status!=="in_boq"?" · not in BOQ":""}</span> `:""}${boqChip(r)}${r.spec?` · <b>${esc(r.spec)}</b>`:""}${r.prefill?` · <span style="color:#5b86b3">${esc(r.prefill)}</span>`:""}${r.comment?` · <span style="color:${r.answer==="issue"?"#B4453A":"var(--ink-soft)"}">${esc(r.comment)}</span>`:""}${r.photo_path?` · <a href="#" data-komphoto="${esc(r.photo_path)}">📷 photo</a>`:""}${r.answered_at?` · ${komWhen(r.answered_at)}`:""}</div></div>
+      ${w?`<button class="linkbtn" data-komc="${r.id}" title="Edit comment">✎</button>`:""}
+    </div>`; };
+  const listPanel=(title,arr,color,extra)=>arr.length?`<div class="panel" style="border-color:${color}33"><div class="sec-label" style="color:${color};margin-top:0">${title} · ${arr.length}</div>${arr.map(r=>`<div style="font-size:13px;padding:5px 0;border-top:1px solid var(--line-2)"><b>${esc(r.room)}</b> · ${esc(komShortQ(r.question))}${r.comment?` — <span style="color:#B4453A">${esc(r.comment)}</span>`:""}${extra?extra(r):""}</div>`).join("")}</div>`:"";
+  const sum=S.summary||{};
+  body.innerHTML=stageStrip+`
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h3 style="margin:0">${esc(stageLabel(S.stage||"kom"))}</h3>${statusChip}${sessions.length>1?`<select id="komPick" class="ghost sm">${sessions.map(x=>`<option value="${x.id}" ${x.id===S.id?"selected":""}>${stageLabel(x.stage||"kom")} · ${komWhen(x.started_at)} · ${x.status}</option>`).join("")}</select>`:""}</div>
+          <div style="font-size:12.5px;color:var(--ink-soft);margin-top:6px">Led by <b>${esc(S.started_by_name||"—")}</b> · started ${komWhen(S.started_at)}${S.completed_at?` · completed ${komWhen(S.completed_at)}${sum.duration_min?" ("+sum.duration_min+" min)":""}`:""}${S.attendees?`<br>👥 ${esc(S.attendees)}`:""}</div>
+          ${S.report_sent_at?`<div style="font-size:12px;color:var(--ink-soft);margin-top:6px">Report sent ${komWhen(S.report_sent_at)} → ${chHtml}</div>`:""}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${w&&S.status==="completed"?`<button class="ghost sm" id="komResend">Resend report</button>`:""}
+          ${w&&!open?`<button class="ghost sm" id="komNudge" ${pm?"":"disabled"}>Nudge ${pm?esc(pm.split(" ")[0]):"PM"} for a new KOM</button>`:""}
+        </div>
+      </div>
+      <div style="margin:14px 0 6px">${pgBar(total?done/total*100:0,S.status==="completed"?"var(--green)":"var(--brass)")}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px"><span><b>${done}</b>/${total} checks</span><span>✅ ${cnt("ok")}</span><span>⚠️ ${cnt("issue")}</span><span>➖ ${cnt("na")}</span>${cnt("skipped")?`<span>⤼ ${cnt("skipped")}</span>`:""}${cnt("pending")?`<span>⏳ ${cnt("pending")}</span>`:""}<span style="color:var(--ink-soft)">· ${rooms.length} rooms${S.boq_version_id?` · BOQ <span class="mono">#${S.boq_version_id}</span>`:""}</span></div>
+    </div>
+    ${listPanel("🧾 Scope gaps — on site but NOT in the BOQ",gaps,"#B4453A",()=>` <span class="s2l-chip s2l-red" style="animation:none;padding:1px 6px;font-size:10px">→ change order</span>`)}
+    ${listPanel("⚠️ Issues to resolve",issues,"#B4453A")}
+    ${cxItems.length?`<div class="panel" style="border-color:#A9791E33"><div class="sec-label" style="color:#A9791E;margin-top:0">👤 Client-supplied items · ${cxItems.length}</div>${cxItems.map(r=>`<div style="font-size:13px;padding:5px 0;border-top:1px solid var(--line-2)">${esc(komShortQ(r.question))}${r.spec?` — <b>${esc(r.spec)}</b>`:""}</div>`).join("")}</div>`:""}
+    ${listPanel("ℹ️ Not in BOQ — client-supplied / excluded (confirm in writing)",notIn,"#A9791E")}
+    ${rooms.map(rm=>{ const iss=rm.rows.filter(r=>r.answer==="issue").length, pend=rm.rows.filter(r=>r.answer==="pending").length; return `<details class="panel" style="padding:12px 16px" ${iss||pend?"open":""}><summary style="cursor:pointer;font-weight:600;font-size:14px;display:flex;gap:10px;align-items:center">${KOM_ICON[rm.kind]||"•"} ${esc(rm.room)} <span style="font-weight:400;font-size:12px;color:var(--ink-soft)">${rm.rows.length} checks${iss?` · <span style="color:#B4453A">⚠️ ${iss}</span>`:""}${pend?` · ⏳ ${pend}`:""}</span></summary><div style="margin-top:8px">${rm.rows.map(row).join("")}</div></details>`; }).join("")}
+    ${howto}`;
+  const pk=$("#komPick"); if(pk) pk.onchange=()=>{ komSel[p.id]=Number(pk.value); pwKom(p,body); };
+  body.querySelectorAll("[data-komstage]").forEach(t=>t.onclick=()=>{ const ss=sessions.filter(x=>(x.stage||"kom")===t.dataset.komstage); if(ss.length){ komSel[p.id]=ss[0].id; pwKom(p,body); } });
+  const nb=$("#komNudge"); if(nb) nb.onclick=async()=>{ nb.disabled=true; const r=await komPriya("/kom/nudge",{project_id:p.id}); toast(r.ok?"Priya messaged "+(r.to||pm):"Couldn't send: "+(r.error||"unknown")); nb.disabled=false; };
+  const rs=$("#komResend"); if(rs) rs.onclick=async()=>{ if(!confirm("Resend the kick-off report to all project holders (WhatsApp + email)?"))return; rs.disabled=true; const r=await komPriya("/kom/resend",{session_id:S.id}); toast(r.ok?"Report resent to "+((r.channels||[]).filter(c=>c.ok).length)+" recipient(s)":"Couldn't resend: "+(r.error||"unknown")); pwKom(p,body); };
+  body.querySelectorAll("[data-koma]").forEach(el=>el.onchange=async()=>{ const {error}=await sb.from("kom_responses").update({answer:el.value,answered_at:new Date().toISOString()}).eq("id",Number(el.dataset.koma)); if(error)return toast(error.message); toast("Updated"); pwKom(p,body); });
+  body.querySelectorAll("[data-komc]").forEach(b=>b.onclick=async()=>{ const r=rows.find(x=>x.id===Number(b.dataset.komc)); const v=prompt("Comment for this checkpoint:",r&&r.comment||""); if(v===null)return; const {error}=await sb.from("kom_responses").update({comment:v||null}).eq("id",Number(b.dataset.komc)); if(error)return toast(error.message); pwKom(p,body); });
+  body.querySelectorAll("[data-komphoto]").forEach(a=>a.onclick=async e=>{ e.preventDefault(); try{ const r=await sb.storage.from("site-photos").createSignedUrl(a.dataset.komphoto,3600); if(r&&r.data&&r.data.signedUrl) window.open(r.data.signedUrl,"_blank"); else toast("Photo not available"); }catch(err){ toast("Photo not available"); } });
+}
+
 async function pwSnags(p, body){
   body.innerHTML=`<div class="empty" style="padding:24px">Loading snags…</div>`;
   await ensureStaff();
