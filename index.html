@@ -1526,11 +1526,41 @@ async function enter(session){
         b.classList.add("active"); activeLead=null; activeProject=null; if(typeof gStopAutosave==="function")gStopAutosave(); render(b.dataset.view); };
     });
     osRestoreRoute();
+    punchGate();
   } catch(e) {
     window.__entered = false;
     const el=$("#loginErr"); if(el){ el.style.display="block"; el.textContent="Could not load workspace: "+(e&&e.message?e.message:"unknown")+". Refresh and try again."; }
     const b=$("#signinBtn"); if(b){ b.disabled=false; b.textContent="Sign in"; }
   }
+}
+
+/* ---------- attendance punch gate (PEOPLE-UX-16) ----------
+   Studio rule: Lintel OS opens only after today's punch (WhatsApp "In" to
+   Priya or the Lintel People punch button). hr_gate_status() exempts
+   admins, non-employees, weekends and holidays. Fails OPEN on any error
+   so a network blip never locks the team out of the CRM. */
+async function punchGate(){
+  try{
+    const {data:g, error} = await sb.rpc("hr_gate_status");
+    const st = Array.isArray(g) ? g[0] : g;
+    if(error || !st || !st.required || st.punched){ const o=$("#punchGate"); if(o) o.remove(); return; }
+    if(!$("#punchGate")){
+      const d=document.createElement("div");
+      d.id="punchGate";
+      d.style.cssText="position:fixed;inset:0;z-index:9999;background:rgba(11,13,30,.96);display:flex;align-items:center;justify-content:center;padding:20px";
+      d.innerHTML=`<div style="max-width:400px;background:#fff;border-radius:16px;padding:34px 28px;text-align:center;color:#0D0D27;font-family:inherit">
+        <div style="font-size:40px">&#128075;</div>
+        <h2 style="margin:10px 0 6px;font-size:21px">Good morning${st.first_name?", "+st.first_name:""}!</h2>
+        <p style="color:#565571;font-size:14px;line-height:1.6;margin:0 0 20px">Punch in to start your day &mdash; Lintel OS unlocks the moment your attendance is in.</p>
+        <a href="https://amitnagar-lintel.github.io/lintel-people/#overview" target="_blank" rel="noopener"
+           style="display:block;background:#DFB05E;color:#0D0D27;font-weight:700;padding:14px;border-radius:10px;text-decoration:none;font-size:15px">Punch in now &rarr;</a>
+        <p style="color:#8a8875;font-size:12px;margin:14px 0 0">or send <b>In</b> to Priya on WhatsApp &middot; selfie + location, 10 seconds</p>
+        <button onclick="punchGate()" style="margin-top:16px;background:none;border:1px solid #CFC4AD;border-radius:10px;padding:10px 18px;font-size:13px;cursor:pointer;font-family:inherit">I&rsquo;ve punched in &mdash; check again</button>
+      </div>`;
+      document.body.appendChild(d);
+      if(!window.__punchGateTimer) window.__punchGateTimer=setInterval(()=>{ if($("#punchGate")) punchGate(); else { clearInterval(window.__punchGateTimer); window.__punchGateTimer=null; } }, 45000);
+    }
+  }catch(e){ const o=$("#punchGate"); if(o) o.remove(); }
 }
 
 /* ---------- toast + modal ---------- */
