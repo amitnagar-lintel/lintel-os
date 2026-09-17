@@ -1105,7 +1105,7 @@ function estValueFromBand(b){
   if(nums.length===1) return Math.round(nums[0]*100000*(/above/i.test(b)?1.1:1));
   return 0;
 }
-const SOURCES = ["Instagram","Referral","Google / GBP","Website","Substack","Walk-in","Other"];
+const SOURCES = ["Instagram","Referral","Google / GBP","Website","Substack","Walk-in","Channel Partner","Other"];
 // Acquisition channel. `leads.platform` ('ig'|'fb'|'google_ads'|'website') is written by the
 // meta-leadgen and landing-lead edge functions and is the ONLY reliable Meta-vs-Google signal:
 // meta-leadgen maps Facebook leads to source="Other", and ~19 leads have a blank source.
@@ -1140,7 +1140,7 @@ function channelChipHtml(l,full){
   return `<span class="ch ${c.cls}" title="${esc(bits.join(" · "))}">${esc(full?c.label:c.short)}</span>`;
 }
 const PROJECT_TYPES = ["2BHK Apartment","3BHK Apartment","4BHK Apartment","Villa","Independent house","Office","Retail","Other"];
-const TAG_OPTIONS = ["hot","premium","referral","commercial","budget","comparing-quotes","newsletter-lead","case-study","closed","HEX"];
+const TAG_OPTIONS = ["hot","premium","referral","commercial","budget","comparing-quotes","newsletter-lead","case-study","closed","HEX","CP"];
 const QUAL = {
   q_budget_status:["confirmed","approx"], q_authority:["self","couple","family"],
   q_timeline:["imm","1-3","3-6"], q_scope:["full","multi","single"],
@@ -2391,6 +2391,7 @@ async function renderLeads(){
           <button data-lv="table" class="${window.leadView==='table'?'on':''}">☰ Table</button>
           <button data-lv="presales" class="${window.leadView==='presales'?'on':''}">📞 Presales</button>
         </div>
+        ${canManageLeads()?`<button class="ghost" id="importLeads" title="Bulk-add leads from a CSV or a pasted list (name, phone, society)">⇪ Import</button>`:""}
         ${canWrite()?`<button class="primary" id="addLead">+ New lead</button>`:""}
       </div>
     </div>
@@ -2408,6 +2409,7 @@ async function renderLeads(){
     </div>
     <div class="${window.leadView==='table'?'lead-table-wrap':'board'}" id="board">${skel(4,120)}</div>`;
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
+  if(canManageLeads()&&$("#importLeads")) $("#importLeads").onclick=()=>leadImportForm();
   $$(".viewtoggle button").forEach(b=>b.onclick=()=>{ window.leadView=b.dataset.lv; renderLeads(); });
   $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawLeadsView();};
   $("#lf_channel").onchange=e=>{leadFilters.channel=e.target.value;drawLeadsView();};
@@ -2791,7 +2793,7 @@ async function drawBoard(){
       const c=document.createElement("div");c.className="card";
       c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
         <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`,leadAvailBadge(l)].filter(Boolean).join(" · ")}</div>
-        <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}</div>
+        <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}${l.s2l_enabled===false?`<span class="tg" title="Consultant-handled · Priya silent">🤝</span>`:""}</div>
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l)||coldChipHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${coldChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
@@ -2913,6 +2915,8 @@ function leadForm(lead){
 
       <div class="sec-label">Tags</div>
       <div class="tagpick" id="tagpick">${TAG_OPTIONS.map(t=>`<span class="tgopt ${(l.tags||[]).includes(t)?"on":""}" data-t="${t}">${t}</span>`).join("")}</div>
+      <div class="field" style="margin-top:8px"><label style="display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none;letter-spacing:0"><input type="checkbox" id="f_s2l" ${l.s2l_enabled===false?"":"checked"}> Priya automation (S2L) — instant WhatsApp opener, follow-up touches, reminders and the 15-min call SLA</label>
+        <div class="s2l-hint">Untick for channel-partner / society-list leads: Priya stays silent and the assigned consultant handles them personally. Picking the <b>CP</b> tag unticks it.</div></div>
 
       <div class="field"><label>Notes</label><textarea id="f_notes" rows="2">${esc(l.notes||"")}</textarea></div>
     </div>
@@ -2923,6 +2927,7 @@ function leadForm(lead){
   const picked=new Set(l.tags||[]);
   $("#tagpick").querySelectorAll(".tgopt").forEach(el=>el.onclick=()=>{
     const t=el.dataset.t; if(picked.has(t)){picked.delete(t);el.classList.remove("on");}else{picked.add(t);el.classList.add("on");}
+    if(t==="CP"&&picked.has(t)&&$("#f_s2l")) $("#f_s2l").checked=false;
   });
   $("#saveLead").onclick=async()=>{
     const _sa=readSiteAddr("f_s", l.site_address);
@@ -2934,7 +2939,7 @@ function leadForm(lead){
       site_city:_sa.site_city, site_pincode:_sa.site_pincode, site_map_url:_sa.site_map_url, site_lat:_sa.site_lat, site_lng:_sa.site_lng,
       project_type:$("#f_ptype").value, source:$("#f_src").value,
       expected_value:Number($("#f_val").value||0)||estValueFromBand(l.budget_band), next_follow_up:$("#f_fu").value||null,
-      stage:lead?$("#f_stage").value:"new", notes:$("#f_notes").value.trim(), tags:[...picked],
+      stage:lead?$("#f_stage").value:"new", notes:$("#f_notes").value.trim(), tags:[...picked], s2l_enabled:$("#f_s2l").checked,
       consultant_id:$("#f_consultant_id").value?Number($("#f_consultant_id").value):null,
       designer_id:$("#f_designer_id").value?Number($("#f_designer_id").value):null,
       pm_id:$("#f_pm_id").value?Number($("#f_pm_id").value):null,
@@ -2970,6 +2975,98 @@ function leadForm(lead){
 }
 
 /* ---- Duplicate contact check: same phone or email elsewhere in leads/projects ---- */
+/* ===================== BULK LEAD IMPORT (CP / society lists, CSV or pasted rows) ===================== */
+function leadImportParse(txt){
+  const lines=String(txt||"").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if(!lines.length) return {rows:[],bad:[]};
+  const split=s=>{
+    if(s.includes("\t")) return s.split("\t").map(x=>x.trim());
+    const out=[];let cur="",q=false;
+    for(const ch of s){ if(ch==='"'){q=!q;continue;} if(ch===","&&!q){out.push(cur.trim());cur="";continue;} cur+=ch; }
+    out.push(cur.trim()); return out; };
+  let cells=lines.map(split);
+  let hdr=null; const h0=cells[0].map(x=>x.toLowerCase());
+  if(h0.some(x=>/name/.test(x))&&h0.some(x=>/phone|mobile|number|contact/.test(x))){ hdr=h0; cells=cells.slice(1); }
+  const idx=(re,def)=>{ if(!hdr) return def; const i=hdr.findIndex(x=>re.test(x)); return i<0?-1:i; };
+  const iN=idx(/name/,0), iP=idx(/phone|mobile|number|contact/,1), iS=idx(/society|project|apartment|building|locality|area|location/,2), iE=idx(/email/,-1);
+  const rows=[],bad=[];
+  cells.forEach((c,n)=>{
+    if(!hdr && /^\d{1,4}$/.test(c[0]||"") && c.length>=3) c=c.slice(1);   // leading serial number
+    const name=(c[iN]||"").trim(); let d=(c[iP]||"").replace(/\D/g,"");
+    if(d.length===12&&d.startsWith("91")) d=d.slice(2); if(d.length===11&&d.startsWith("0")) d=d.slice(1);
+    const rec={line:n+1,name,phone:d,society:(iS>=0?(c[iS]||""):"").trim(),email:(iE>=0?(c[iE]||""):"").trim()};
+    if(!name||d.length!==10||!/^[6-9]/.test(d)) bad.push(rec); else rows.push(rec);
+  });
+  return {rows,bad};
+}
+async function leadImportForm(){
+  await ensureStaff();
+  const consultants=STAFF.filter(s=>s.is_active!==false&&(/consult/i.test(s.role||"")||[3,4,7,12].includes(Number(s.id))));
+  openModal(`
+    <div class="modal-h">Import leads</div>
+    <div class="modal-b">
+      <div class="s2l-hint" style="margin-bottom:8px">Paste rows or pick a CSV — <b>name, phone, society / locality</b> per line (header row optional, a leading serial number is ignored). Anyone already in Lintel OS as a lead or client is skipped.</div>
+      <div class="field"><label>CSV file</label><input type="file" id="imp_file" accept=".csv,.txt,text/csv"></div>
+      <div class="field"><label>…or paste rows</label><textarea id="imp_txt" rows="7" placeholder="Vinod, 78928 23253, Prestige Lavender Fields"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label>Source</label><select id="imp_src">${opts(SOURCES,"Channel Partner")}</select></div>
+        <div class="field"><label>Assign to</label><select id="imp_who"><option value="">Round-robin across design consultants</option>${consultants.map(s=>`<option value="${s.id}">${esc(s.full_name)}</option>`).join("")}</select></div>
+      </div>
+      <div class="sec-label">Tags</div>
+      <div class="tagpick" id="imp_tags">${TAG_OPTIONS.map(t=>`<span class="tgopt ${t==="CP"?"on":""}" data-t="${t}">${t}</span>`).join("")}</div>
+      <div class="field" style="margin-top:8px"><label style="display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none;letter-spacing:0"><input type="checkbox" id="imp_s2l"> Priya automation (S2L) for these leads</label>
+        <div class="s2l-hint">Off by default for imported lists: no automated WhatsApp from Priya and no 15-min SLA timer — the assigned consultant works them personally. Assignees are not pinged per lead; the leads appear on their board immediately.</div></div>
+      <div id="imp_preview" class="s2l-hint" style="margin-top:6px"></div>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="imp_go" disabled>Import</button>
+    </div>`);
+  const picked=new Set(["CP"]);
+  $("#imp_tags").querySelectorAll(".tgopt").forEach(el=>el.onclick=()=>{ const t=el.dataset.t; if(picked.has(t)){picked.delete(t);el.classList.remove("on");}else{picked.add(t);el.classList.add("on");} });
+  let parsed={rows:[],bad:[]};
+  const preview=()=>{
+    parsed=leadImportParse($("#imp_txt").value);
+    const r0=parsed.rows[0];
+    $("#imp_preview").innerHTML=(parsed.rows.length||parsed.bad.length)?`<b>${parsed.rows.length}</b> ready${parsed.bad.length?` · <span style="color:#B4453A">${parsed.bad.length} skipped (no name or not a 10-digit Indian mobile)</span>`:""}${r0?` · e.g. ${esc(r0.name)} · ${r0.phone}${r0.society?" · "+esc(r0.society):""}`:""}`:"";
+    $("#imp_go").disabled=!parsed.rows.length;
+  };
+  $("#imp_txt").oninput=preview;
+  $("#imp_file").onchange=e=>{ const f=e.target.files[0]; if(!f) return; const rd=new FileReader(); rd.onload=()=>{ $("#imp_txt").value=String(rd.result||""); preview(); }; rd.readAsText(f); };
+  $("#imp_go").onclick=async()=>{
+    const btn=$("#imp_go"); btn.disabled=true; btn.textContent="Importing…";
+    const src=$("#imp_src").value, who=$("#imp_who").value?Number($("#imp_who").value):null, s2l=$("#imp_s2l").checked, tags=[...picked];
+    // one pass over existing contacts (leads + converted clients) instead of a query per row
+    const p10=x=>String(x||"").replace(/\D/g,"").slice(-10);
+    const [{data:L},{data:P}]=await Promise.all([sb.from("leads").select("id,name,phone"),sb.from("projects").select("id,name,client_phone")]);
+    const have=new Map();
+    (L||[]).forEach(x=>{ const k=p10(x.phone); if(k) have.set(k,"lead #"+x.id+" "+x.name); });
+    (P||[]).forEach(x=>{ const k=p10(x.client_phone); if(k) have.set(k,"client "+x.name); });
+    const seen=new Set(), fresh=[], dup=[];
+    parsed.rows.forEach(r=>{ if(have.has(r.phone)) dup.push(r.name+" → already "+have.get(r.phone)); else if(seen.has(r.phone)) dup.push(r.name+" (repeated in the list)"); else { seen.add(r.phone); fresh.push(r); } });
+    const PT=/bhk|apartment|independent|builder|villa|house|flat|duplex|plot/i, NOISE=/^(mixed projects?|cp leads?|n\/?a|-+|\.)$/i;
+    const now=new Date().toISOString(), batch="Imported "+now.slice(0,10)+" by "+(me.email||"Lintel OS");
+    const rows=fresh.map(r=>{
+      const soc=r.society&&!NOISE.test(r.society)?r.society:""; const isPt=!!soc&&PT.test(soc)&&soc.length<40;
+      return { name:r.name, phone:"+91"+r.phone, email:r.email||null, source:src, tags, s2l_enabled:s2l, stage:"new", city:"Bangalore",
+        locality:isPt?null:(soc||null), site_society:isPt?null:(soc||null), property_type:isPt?soc:null,
+        consultant_id:who, owner_id:me.id, assigned_notified_at:now,
+        notes:[batch, r.society?"Society / property: "+r.society:""].filter(Boolean).join(" · ") };
+    });
+    let added=0, err=null;
+    for(let i=0;i<rows.length;i+=100){
+      const {data,error}=await sb.from("leads").insert(rows.slice(i,i+100)).select("id");
+      if(error){ err=error.message; break; }
+      added+=(data||[]).length;
+      if(data&&data.length) await sb.from("lead_activities").insert(data.map(d=>({lead_id:d.id,type:"created",text:"Lead imported ("+src+")"+(s2l?"":" · consultant-handled, Priya automation off"),by_user:me.id})));
+    }
+    closeModal();
+    toast(err?`Imported ${added}, then failed: ${err}`:`Imported ${added} lead${added===1?"":"s"}${dup.length?` · ${dup.length} duplicate${dup.length===1?"":"s"} skipped`:""}`);
+    if(dup.length) console.info("Lead import — duplicates skipped:\n"+dup.join("\n"));
+    drawLeadsView();
+  };
+}
+
 async function findDuplicateContact(phone,email,excludeLeadId){
   const normPh=(phone||"").replace(/\D/g,"").slice(-10);
   const normEm=(email||"").trim().toLowerCase();
@@ -3117,6 +3214,7 @@ async function renderLeadWorkspace(id){
       <div class="lw-pills">
         ${s2lSlaChipHtml(l)}
         ${coldChipHtml(l)}${l.nurture_status==="priya"&&canWrite()?`<button class="primary sm" id="lwClaim" style="margin-left:4px">Take this lead</button>`:""}
+        ${l.s2l_enabled===false?`<span class="lw-pill" title="Consultant-handled lead: Priya sends no automated messages and no speed-to-lead timer runs. Edit the lead to switch Priya automation on.">🤝 Consultant-handled · Priya silent</span>`:""}
         ${s2lDupBadgeHtml(l)}
         ${channelChipHtml(l,true)}
         ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
@@ -10375,6 +10473,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b53",date:"17 Sep 2026",title:"Channel-partner lists & consultant-handled leads",points:[
+    "<b>⇪ Import</b> on the Leads page (admin / sales head / presales): paste rows or pick a CSV — name, phone, society — duplicates of existing leads and clients are skipped, consultants are assigned round-robin, and the leads land on the board tagged <b>CP</b>.",
+    "New per-lead switch <b>Priya automation (S2L)</b> in the lead form. Off = Priya sends no opener, follow-up touches or reminders, no 15-min SLA timer runs, and any WhatsApp the client sends is forwarded to the assigned consultant to answer personally. Shown as 🤝 <i>Consultant-handled · Priya silent</i>.",
+    "New source <b>Channel Partner</b> and tag <b>CP</b> (picking CP switches Priya automation off).",
+  ]},
   {build:"b52",date:"13 Sep 2026",title:"Review tab on projects",points:[
     "Every project now has a <b>Review</b> tab: the delivery journey (lead → converted → kick-off → BOQ locked → first invoice → first payment → handover → closed) with time gaps, the stage plan, and tiles for collected %, next payment due, days to handover, site progress, design tasks, snags & tickets, and the client's latest feedback or unanswered messages.",
     "Red flags surface automatically — past committed handover, execution with under 50% collected, BOQ not locked, meetings not closed, overdue design tasks, open snags at handover, unanswered client messages, client not updated for 7+ days, a low CSAT.",
@@ -11974,7 +12077,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b52 · 13 Sep 2026";
+const APP_BUILD = "b53 · 17 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
