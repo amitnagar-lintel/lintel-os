@@ -1267,6 +1267,8 @@ async function s2lLogCall(l){
         <select id="s2l_outcome" class="lf-sel" style="width:100%">${S2L.OUTCOMES.map(o=>`<option value="${o[0]}">${o[1]}</option>`).join("")}</select></div>
       <div class="field"><label>Note (optional)</label><textarea id="s2l_note" rows="3" style="width:100%" placeholder="What happened on the call"></textarea></div>
       <div class="s2l-hint">Touch ${next} of 6${l.first_call_at?"":" · logged as the first call"}</div>
+      ${l.s2l_enabled===false?`<div class="field" style="margin-top:8px"><label style="display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none;letter-spacing:0"><input type="checkbox" id="s2l_handoff"> ➡️ Positive — hand this lead to Priya to follow up</label>
+        <div class="s2l-hint">This is a consultant-handled lead. Tick this when there's interest (call back, wants details, planning) and Priya will take over the follow-up on WhatsApp. A positive note (e.g. "call back tomorrow") does this automatically.</div></div>`:""}
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="s2l_save">Log call</button></div>`);
   $("#s2l_save").onclick=async()=>{
@@ -1280,7 +1282,12 @@ async function s2lLogCall(l){
     if(uErr) return toast(uErr.message);
     await sb.from("lead_activities").insert({lead_id:l.id,type:"Call",text:`Call logged · ${(S2L.OUTCOMES.find(o=>o[0]===outcome)||["",outcome])[1]}${note?" · "+note:""}`,by_user:me.id});
     Object.assign(l,upd);
-    closeModal(); toast(outcome==="connected"?"Call logged":"Call logged · retry booked (2 h later in hours, else tomorrow morning)");
+    let handedToPriya=false;
+    if(l.s2l_enabled===false && $("#s2l_handoff") && $("#s2l_handoff").checked){
+      const {data:hd,error:hErr}=await sb.rpc("cp_handoff_to_priya",{p_lead_id:l.id,p_reason:note||"consultant marked positive"});
+      if(hErr) toast(hErr.message); else if(hd){ l.s2l_enabled=true; l.priya_handoff_at=new Date().toISOString(); l.stage=l.stage==="new"?"contacted":l.stage; l.nurture_status="warm"; handedToPriya=true; }
+    }
+    closeModal(); toast(handedToPriya?"Call logged · handed to Priya to follow up":(outcome==="connected"?"Call logged":"Call logged · retry booked (2 h later in hours, else tomorrow morning)"));
     if(activeLead===l.id) renderLeadWorkspace(l.id);
     else if($("#dashS2lCalls")) renderDashboard();
     else drawLeadsView();
@@ -3214,7 +3221,7 @@ async function renderLeadWorkspace(id){
       <div class="lw-pills">
         ${s2lSlaChipHtml(l)}
         ${coldChipHtml(l)}${l.nurture_status==="priya"&&canWrite()?`<button class="primary sm" id="lwClaim" style="margin-left:4px">Take this lead</button>`:""}
-        ${l.s2l_enabled===false?`<span class="lw-pill" title="Consultant-handled lead: Priya sends no automated messages and no speed-to-lead timer runs. Edit the lead to switch Priya automation on.">🤝 Consultant-handled · Priya silent</span>`:""}
+        ${l.s2l_enabled===false?`<span class="lw-pill" title="Consultant-handled lead: Priya sends no automated messages and no speed-to-lead timer runs. Log a positive call (or edit the lead) to hand it to Priya.">🤝 Consultant-handled · Priya silent</span>`:(l.priya_handoff_at?`<span class="lw-pill" title="A consultant logged a positive call outcome, so Priya is now following up on WhatsApp and keeping this lead warm.">🤖 Priya engaging · since ${String(l.priya_handoff_at).slice(0,10)}</span>`:"")}
         ${s2lDupBadgeHtml(l)}
         ${channelChipHtml(l,true)}
         ${l.next_follow_up?`<span class="lw-pill due ${dc==="today"?"today":""}">⏱ Follow-up ${l.next_follow_up}</span>`:""}
@@ -10473,6 +10480,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b54",date:"17 Sep 2026",title:"Consultant's positive call hands the lead to Priya",points:[
+    "On a consultant-handled lead (Priya silent), when a consultant logs a call with a <b>positive</b> remark — call back, call later, interested, wants details, planning, site visit — the lead is automatically handed to Priya, who then follows up on WhatsApp and keeps it warm.",
+    "Negative or neutral outcomes (not interested, not looking, already done, RNR, switched off) do nothing — the lead stays consultant-handled.",
+    "The Log-a-call dialog now has an explicit <b>➡️ hand to Priya</b> tick for these leads, and the lead header shows <b>🤖 Priya engaging</b> once handed over.",
+  ]},
   {build:"b53",date:"17 Sep 2026",title:"Channel-partner lists & consultant-handled leads",points:[
     "<b>⇪ Import</b> on the Leads page (admin / sales head / presales): paste rows or pick a CSV — name, phone, society — duplicates of existing leads and clients are skipped, consultants are assigned round-robin, and the leads land on the board tagged <b>CP</b>.",
     "New per-lead switch <b>Priya automation (S2L)</b> in the lead form. Off = Priya sends no opener, follow-up touches or reminders, no 15-min SLA timer runs, and any WhatsApp the client sends is forwarded to the assigned consultant to answer personally. Shown as 🤝 <i>Consultant-handled · Priya silent</i>.",
@@ -12077,7 +12089,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b53 · 17 Sep 2026";
+const APP_BUILD = "b54 · 17 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
