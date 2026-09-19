@@ -2668,10 +2668,25 @@ function psConfetti(host){
   }
 }
 
+// Supabase/PostgREST caps a single select at 1000 rows. With 1000+ leads the
+// board and table silently dropped the overflow (oldest by sort key) — contacted
+// leads with no follow-up date fell off. Page through in 1000-row chunks with a
+// stable id tiebreaker so every lead loads.
+async function sbAllLeads(build){
+  const out=[]; const size=1000; let from=0;
+  for(;;){
+    const {data,error}=await build(from, from+size-1);
+    if(error) return {data:out,error};
+    if(data&&data.length) out.push(...data);
+    if(!data||data.length<size) break;
+    from+=size;
+  }
+  return {data:out,error:null};
+}
 async function drawLeadsTable(){
   const host=$("#board"); if(!host) return;
   host.className="lead-table-wrap";
-  const {data:leads,error}=await sb.from("leads").select("*").order("updated_at",{ascending:false});
+  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("updated_at",{ascending:false}).order("id",{ascending:false}).range(a,b));
   leadAutoResume(leads);
   if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
   const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
@@ -2744,7 +2759,7 @@ async function drawLeadsTable(){
 }
 
 async function drawBoard(){
-  const {data:leads,error}=await sb.from("leads").select("*").order("next_follow_up",{ascending:true,nullsFirst:false});
+  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("next_follow_up",{ascending:true,nullsFirst:false}).order("id",{ascending:false}).range(a,b));
   leadAutoResume(leads);
   const board=$("#board"); if(!board) return;
   if(error){board.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
@@ -10480,6 +10495,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b55",date:"19 Sep 2026",title:"All leads load (1000+ cap fixed) · on-hold projects go quiet",points:[
+    "The Leads board and table now load <b>every</b> lead. Past 1,000 leads the list silently dropped the overflow — contacted leads with no follow-up date were going missing. Both views now page through in full.",
+    "A project set to <b>On hold</b> (or Cancelled) no longer gets any automated Priya follow-ups — weekly digest, payment nudges, needs-you chases and PM report nudges all stop until it's Active again.",
+  ]},
   {build:"b54",date:"17 Sep 2026",title:"Consultant's positive call hands the lead to Priya",points:[
     "On a consultant-handled lead (Priya silent), when a consultant logs a call with a <b>positive</b> remark — call back, call later, interested, wants details, planning, site visit — the lead is automatically handed to Priya, who then follows up on WhatsApp and keeps it warm.",
     "Negative or neutral outcomes (not interested, not looking, already done, RNR, switched off) do nothing — the lead stays consultant-handled.",
@@ -12089,7 +12108,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b54 · 17 Sep 2026";
+const APP_BUILD = "b55 · 19 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
