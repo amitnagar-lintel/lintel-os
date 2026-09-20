@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Lintel OS</title>
-<meta name="theme-color" content="#0D0D27" />
+<meta name="theme-color" content="#1B1C20" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Lintel OS" />
@@ -19,13 +19,15 @@
 <style>
   /* ---- Lintel OS · drafting-sheet design system -------------------- */
   :root{
-    --paper:#F4EFE6; --paper-2:#ECE4D6; --ink:#0D0D27; --ink-soft:#565571;
-    --line:#DDD3C1; --line-2:#CFC4AD; --brass:#DFB05E; --brass-deep:#B08433;
-    --navy:#0D0D27; --navy-soft:#1C1C3A;
-    --slate:#565571; --green:#4F7D52; --clay:#A4503E; --blue:#5B86B3;
-    --new:#7C8DA0; --contacted:#5B86B3; --qualified:#B08433;
-    --quoted:#DFB05E; --won:#4F7D52; --lost:#A4503E;
-    --radius:10px; --shadow:0 1px 2px rgba(13,13,39,.06),0 8px 24px rgba(13,13,39,.08);
+    /* Lintel Space Atelier brand palette (from lintelspace.com): neutral gallery
+       off-white, near-black ink, terracotta accent, warm-neutral greys. */
+    --paper:#F9F8F6; --paper-2:#F0EDE8; --ink:#101216; --ink-soft:#545A61;
+    --line:#E6E2DC; --line-2:#D9D6D1; --brass:#9A633B; --brass-deep:#7B4E2D;
+    --navy:#1B1C20; --navy-soft:#2C2E33;
+    --slate:#545A61; --green:#4F7D52; --clay:#A4503E; --blue:#5B86B3;
+    --new:#8A8478; --contacted:#5B86B3; --qualified:#A9773F;
+    --quoted:#9A633B; --won:#4F7D52; --lost:#A4503E;
+    --radius:10px; --shadow:0 1px 2px rgba(16,18,22,.06),0 8px 24px rgba(16,18,22,.08);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
@@ -88,7 +90,7 @@
   .col-h{display:flex;align-items:center;gap:7px;padding:4px 6px 10px;font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em}
   .dot{width:8px;height:8px;border-radius:50%}
   .col-count{margin-left:auto;font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft)}
-  .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(28,26,23,.03);cursor:pointer;overflow:hidden;transition:border-color .12s,transform .12s}
+  .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(20,20,24,.03);cursor:pointer;overflow:hidden;transition:border-color .12s,transform .12s}
   .card:hover{border-color:var(--brass);transform:translateY(-1px)}
   .card .nm{font-weight:600;font-size:14px}
   .card .meta{color:var(--ink-soft);font-size:12.5px;margin-top:3px}
@@ -107,7 +109,7 @@
   .num{font-family:'IBM Plex Mono';text-align:right;font-variant-numeric:tabular-nums}
   .pill{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600}
   .pill.active{background:#E7F0E8;color:var(--green)} .pill.draft{background:var(--paper-2);color:var(--slate)}
-  .pill.completed{background:#E8EEF6;color:var(--blue)} .pill.on_hold{background:#F6EFE3;color:#8A6D2F} .pill.cancelled{background:#F6E7E3;color:var(--clay)}
+  .pill.completed{background:#E8EEF6;color:var(--blue)} .pill.on_hold{background:#F6EFE3;color:#7B4E2D} .pill.cancelled{background:#F6E7E3;color:var(--clay)}
   .pill.approved{background:#E7F0E8;color:var(--green)} .pill.sent{background:#E8EEF6;color:var(--blue)}
 
   /* ---- BOQ sheet (signature surface) ------------------------------ */
@@ -133,9 +135,9 @@
   .addbar{display:flex;gap:8px;padding:12px 18px;border-top:1px solid var(--line);background:var(--paper-2);flex-wrap:wrap}
 
   /* ---- modal ------------------------------------------------------- */
-  .scrim{position:fixed;inset:0;background:rgba(28,26,23,.4);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .scrim{position:fixed;inset:0;background:rgba(20,20,24,.4);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .scrim.open{display:flex}
-  .modal{background:var(--paper);border-radius:16px;width:min(560px,96vw);max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(28,26,23,.3)}
+  .modal{background:var(--paper);border-radius:16px;width:min(560px,96vw);max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(20,20,24,.3)}
   .modal-h{padding:20px 24px;border-bottom:1px solid var(--line);font-family:'Bricolage Grotesque';font-weight:600;font-size:20px}
   .modal-b{padding:22px 24px;display:grid;gap:14px}
   .modal-f{padding:16px 24px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
@@ -164,7 +166,7 @@
   /* Lead table view */
   .lead-table-wrap{width:100%}
   .lead-count{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px}
-  .ltbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 2px 10px -6px rgba(13,13,39,.12)}
+  .ltbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:0 2px 10px -6px rgba(16,18,22,.12)}
   .lead-table{width:100%;border-collapse:collapse;font-size:14px;min-width:680px}
   /* presales call sheet — Notes-style cards + cloud editor */
   .ps-tbl{min-width:1200px}
@@ -186,11 +188,11 @@
   .ps-cloud-t{width:100%;min-height:84px;border:none;resize:vertical;font:inherit;font-size:13px;line-height:1.5;outline:none;background:#FFFCF2;border-radius:8px;padding:8px}
   .ps-cloud-f{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
   /* slide view */
-  #psSlideView{position:fixed;inset:0;z-index:900;background:rgba(13,13,39,.93);backdrop-filter:blur(4px);display:flex;flex-direction:column;overflow:hidden}
+  #psSlideView{position:fixed;inset:0;z-index:900;background:rgba(16,18,22,.93);backdrop-filter:blur(4px);display:flex;flex-direction:column;overflow:hidden}
   .ps-sv-top{display:flex;align-items:center;gap:14px;padding:14px 18px}
   .ps-sv-progwrap{flex:1;display:flex;align-items:center;gap:12px}
   .ps-sv-prog{flex:1;height:10px;background:rgba(255,255,255,.15);border-radius:6px;overflow:hidden}
-  .ps-sv-fill{height:100%;width:0;background:linear-gradient(90deg,#C9A45C,#DFB05E);border-radius:6px;transition:width .5s cubic-bezier(.22,1,.36,1)}
+  .ps-sv-fill{height:100%;width:0;background:linear-gradient(90deg,#C9A45C,#9A633B);border-radius:6px;transition:width .5s cubic-bezier(.22,1,.36,1)}
   .ps-sv-count{color:#EDE6D6;font-size:13px;white-space:nowrap}
   .ps-sv-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:10px}
   .ps-sv-card{width:min(520px,92vw);background:#FFFDF6;border-radius:18px;padding:22px 24px;box-shadow:0 24px 64px rgba(0,0,0,.4)}
@@ -199,7 +201,7 @@
   .ps-sv-out{transform:translateX(-120%);opacity:0;transition:all .18s ease-in}
   .ps-sv-outr{transform:translateX(120%);opacity:0;transition:all .18s ease-in}
   .ps-sv-n{font-size:11px;color:#9A9490;text-transform:uppercase;letter-spacing:.6px}
-  .ps-sv-name{font-size:24px;font-weight:700;color:#0D0D27;margin-top:2px}
+  .ps-sv-name{font-size:24px;font-weight:700;color:#1B1C20;margin-top:2px}
   .ps-sv-sub{font-size:13px;color:#6B6560}
   .ps-sv-chips{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
   .ps-sv-chip{font-size:11.5px;background:#F2EDE2;border-radius:8px;padding:3px 8px;color:#6B6560}
@@ -208,7 +210,7 @@
   .ps-sv-last{font-size:12px;background:#F7F2E6;border-radius:8px;padding:6px 9px;margin:4px 0;color:#57503F}
   .ps-sv-ta{min-height:96px;margin-top:10px;border:1px solid #E3DCC9}
   .ps-sv-row{display:flex;justify-content:space-between;gap:10px;margin-top:12px}
-  .ps-sv-msg{text-align:center;color:#DFB05E;font-size:15px;font-weight:600;padding:14px;min-height:46px}
+  .ps-sv-msg{text-align:center;color:#9A633B;font-size:15px;font-weight:600;padding:14px;min-height:46px}
   .ps-sv-msg.pop{animation:psPop .5s ease}
   @keyframes psPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.15)}100%{transform:scale(1)}}
   .ps-conf{position:absolute;top:-12px;width:9px;height:14px;border-radius:2px;animation:psFall linear forwards}
@@ -230,7 +232,7 @@
   .ch-meta{background:#E9F1FD;color:#1B4F9C}
   .ch-google{background:#E7F1EA;color:#1F7A4C}
   .ch-web{background:#F1EDFA;color:#5B4A8A}
-  .ch-ref{background:#EFE7D8;color:var(--brass-deep)}
+  .ch-ref{background:#EEE5DB;color:var(--brass-deep)}
   .ch-walk{background:#F1EDE1;color:var(--ink-soft)}
   .ch-sub{background:#FBEDE6;color:#A9552F}
   .ch-other{background:#EDEEF1;color:#5A6072}
@@ -293,7 +295,7 @@
   .board{grid-template-columns:repeat(7,minmax(170px,1fr))}
   .col-val{font-size:11px;color:var(--ink-soft);padding:0 6px 8px}
   .tagrow{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
-  .tg{font-size:11px;padding:2px 7px;border-radius:20px;background:#EFE7D8;color:var(--brass-deep);font-weight:600}
+  .tg{font-size:11px;padding:2px 7px;border-radius:20px;background:#EEE5DB;color:var(--brass-deep);font-weight:600}
   .fu{font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft);margin-left:auto}
   .fu.today{color:var(--brass-deep);font-weight:600} .fu.overdue{color:var(--clay);font-weight:600}
   .card .val{margin-left:8px}
@@ -462,7 +464,7 @@
   .cpl{color:#A09A93;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;font-size:11px}
   .cpv{font-weight:600;color:#1A1714}
   .specbox{background:#FAFAF8;border:1px solid #E8E4DC;border-radius:6px;padding:14px 16px}
-  .spect{font-weight:600;color:#0D0D27;margin-bottom:4px} .specd{color:#6B6560;line-height:1.7}
+  .spect{font-weight:600;color:#1B1C20;margin-bottom:4px} .specd{color:#6B6560;line-height:1.7}
   @media print{
     body *{visibility:hidden}
     #client-sheet,#client-sheet *{visibility:visible}
@@ -533,7 +535,7 @@
   @media print{ #cut-sheet.printing,#cut-sheet.printing *{visibility:visible} body:has(#cut-sheet.printing) *{visibility:hidden} #cut-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
   @media print{ #rcpt-sheet.printing,#rcpt-sheet.printing *{visibility:visible} body:has(#rcpt-sheet.printing) *{visibility:hidden} #rcpt-sheet.printing{position:absolute;left:0;top:0;width:100%;box-shadow:none;border:none} }
   .cut-wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
-  .cut-hd{background:linear-gradient(135deg,#0D0D27,#1A1A40);padding:16px 22px;display:flex;align-items:center;gap:14px}
+  .cut-hd{background:linear-gradient(135deg,#1B1C20,#1A1A40);padding:16px 22px;display:flex;align-items:center;gap:14px}
   .cut-hd img{width:46px;height:46px;background:#fff;border-radius:50%;padding:3px}
   .cut-hd .cn{font-family:'Times New Roman',serif;font-size:16px;letter-spacing:3px;color:#fff;text-transform:uppercase}
   .cut-hd .cs{font-size:9px;letter-spacing:2.5px;color:var(--brass);margin-top:3px;text-transform:uppercase}
@@ -649,7 +651,7 @@
   .dash-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
   .kpi{background:#fff;border:1px solid var(--line);border-left:3px solid var(--kc,var(--brass));
     border-radius:var(--radius);padding:20px;cursor:default;transition:transform .12s,box-shadow .12s}
-  .kpi[data-goto]:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(13,13,39,.12);cursor:pointer}
+  .kpi[data-goto]:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(16,18,22,.12);cursor:pointer}
   .kpi-val{font-size:20px;font-weight:700;color:var(--ink);line-height:1.1}
   .kpi-lbl{margin-top:4px;font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.4px}
   .kpi-skel{height:74px;background:linear-gradient(90deg,#f0ebe0,#f7f3ea,#f0ebe0);background-size:200% 100%;
@@ -690,14 +692,14 @@
   .s2l-red{background:#FBE4E1;color:#B4453A;animation:s2lPulse 1.1s ease-in-out infinite}
   .s2l-queued{background:#EEF1F7;color:#48506B}
   @keyframes s2lPulse{0%,100%{opacity:1}50%{opacity:.5}}
-  .s2l-dup{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#0D0D27;color:#DFB05E;letter-spacing:.3px}
+  .s2l-dup{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;background:#1B1C20;color:#9A633B;letter-spacing:.3px}
   .s2l-dots{display:inline-flex;gap:4px;align-items:center;vertical-align:middle}
   .s2l-dot{width:8px;height:8px;border-radius:50%;background:#e3e0d8;display:inline-block}
-  .s2l-dot.on{background:#DFB05E}
-  .s2l-dot.next{background:#fff;box-shadow:inset 0 0 0 2px #DFB05E}
+  .s2l-dot.on{background:#9A633B}
+  .s2l-dot.next{background:#fff;box-shadow:inset 0 0 0 2px #9A633B}
   .s2l-hint{font-size:11px;color:var(--ink-soft);margin-top:8px}
   .s2l-panel .s2l-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-  .s2l-logcall{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:7px;background:#0D0D27;color:#fff;border:none;cursor:pointer}
+  .s2l-logcall{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:7px;background:#1B1C20;color:#fff;border:none;cursor:pointer}
   .s2l-logcall:hover{background:#20204a}
   .dash-kpis.s2l3{grid-template-columns:repeat(3,1fr)}
   @media(max-width:640px){.dash-kpis.s2l3{grid-template-columns:1fr}}
@@ -709,15 +711,15 @@
   .s2l-call-nm{font-weight:600;font-size:14px}
   .s2l-call-sub{font-size:11px;color:var(--ink-soft)}
   .s2l-call-btn{flex:none;font-size:11px;font-weight:600;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper-2);color:var(--ink);text-decoration:none;cursor:pointer;white-space:nowrap}
-  .s2l-call-btn.log{background:#0D0D27;color:#fff;border:none}
+  .s2l-call-btn.log{background:#1B1C20;color:#fff;border:none}
 
   /* ---- Call reminders / in-app alarm -------------------------------- */
   .rem-list{margin-top:8px;display:flex;flex-direction:column;gap:4px}
   .rem-row{font-size:12.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px}
   .rem-row button{border:none;background:none;color:var(--clay);cursor:pointer;font-size:12.5px;padding:0 2px}
-  #remAlarm{position:fixed;inset:0;z-index:900;background:rgba(13,13,39,.55);display:flex;align-items:center;justify-content:center}
+  #remAlarm{position:fixed;inset:0;z-index:900;background:rgba(16,18,22,.55);display:flex;align-items:center;justify-content:center}
   .rem-alarm-box{background:var(--paper);border:1px solid var(--brass);border-radius:18px;
-    box-shadow:0 24px 80px rgba(13,13,39,.45);padding:34px 40px;text-align:center;max-width:360px;width:calc(100vw - 40px)}
+    box-shadow:0 24px 80px rgba(16,18,22,.45);padding:34px 40px;text-align:center;max-width:360px;width:calc(100vw - 40px)}
   .rem-clock{font-size:64px;display:inline-block;animation:remRing .8s ease-in-out infinite;transform-origin:50% 0}
   @keyframes remRing{0%,100%{transform:rotate(-14deg)}50%{transform:rotate(14deg)}}
   .rem-name{font-family:'Bricolage Grotesque',sans-serif;font-size:20px;font-weight:700;margin:10px 0 4px}
@@ -728,11 +730,11 @@
   .rem-btns .rem-done{background:var(--navy);color:var(--brass);border:none}
 
   /* ---- Conversion celebration (confetti) ---------------------------- */
-  #convParty{position:fixed;inset:0;z-index:950;background:rgba(13,13,39,.55);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s}
+  #convParty{position:fixed;inset:0;z-index:950;background:rgba(16,18,22,.55);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .25s}
   #convParty.show{opacity:1}
   #convParty canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .party-card{position:relative;background:var(--paper);border:1px solid var(--brass);border-radius:18px;
-    box-shadow:0 24px 80px rgba(13,13,39,.45);padding:38px 44px;text-align:center;max-width:400px;width:calc(100vw - 40px);
+    box-shadow:0 24px 80px rgba(16,18,22,.45);padding:38px 44px;text-align:center;max-width:400px;width:calc(100vw - 40px);
     transform:scale(.85);transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
   #convParty.show .party-card{transform:scale(1)}
   .party-emoji{font-size:52px;display:inline-block;animation:partyPop .6s cubic-bezier(.34,1.56,.64,1)}
@@ -773,8 +775,8 @@
   .pj-stat.sel{border-color:var(--brass);background:#FFF9EA}
   .pj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
   .pjc{background:#fff;border:1px solid var(--line-2);border-left:4px solid var(--line-2);border-radius:13px;padding:14px 16px;cursor:pointer;transition:box-shadow .15s,transform .15s;display:flex;flex-direction:column;gap:9px}
-  .pjc:hover{box-shadow:0 10px 30px -14px rgba(13,13,39,.28);transform:translateY(-1px)}
-  .pjc.h-green{border-left-color:#4f7d52}.pjc.h-amber{border-left-color:#DFB05E}.pjc.h-red{border-left-color:#B4453A}
+  .pjc:hover{box-shadow:0 10px 30px -14px rgba(16,18,22,.28);transform:translateY(-1px)}
+  .pjc.h-green{border-left-color:#4f7d52}.pjc.h-amber{border-left-color:#9A633B}.pjc.h-red{border-left-color:#B4453A}
   .pjc-top{display:flex;align-items:center;gap:8px}
   .pjc-code{font:600 11px ui-monospace,monospace;color:var(--ink-soft);letter-spacing:.5px}
   .pjc-health{margin-left:auto;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px}
@@ -807,7 +809,7 @@
     background:#C0392B;color:#fff;font:700 11px/19px Inter,sans-serif;text-align:center;display:none}
   #chatPanel{position:fixed;right:20px;bottom:84px;z-index:610;width:380px;max-width:calc(100vw - 24px);
     height:600px;max-height:calc(100vh - 120px);display:none;flex-direction:column;background:var(--paper);
-    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(13,13,39,.15),0 16px 48px rgba(13,13,39,.22);overflow:hidden}
+    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(16,18,22,.15),0 16px 48px rgba(16,18,22,.22);overflow:hidden}
   #chatPanel.open{display:flex}
   .chat-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--navy);color:#fff}
   .chat-head b{font-size:14px;flex:1}
@@ -841,7 +843,7 @@
   @media (max-width:520px){ #chatPanel{right:8px;left:8px;width:auto;bottom:76px} }
   #assistPanel{position:fixed;right:20px;bottom:84px;z-index:600;width:380px;max-width:calc(100vw - 24px);
     height:560px;max-height:calc(100vh - 120px);display:none;flex-direction:column;background:var(--paper);
-    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(13,13,39,.15),0 16px 48px rgba(13,13,39,.22);overflow:hidden}
+    border:1px solid var(--line-2);border-radius:14px;box-shadow:0 4px 12px rgba(16,18,22,.15),0 16px 48px rgba(16,18,22,.22);overflow:hidden}
   #assistPanel.open{display:flex}
   .assist-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--navy);color:#fff}
   .assist-head .t{font-weight:700;font-size:14px;letter-spacing:.2px}
@@ -898,7 +900,7 @@
 .vt-pill.vt-ok{background:#fdf3dd;color:#a06f00}
 .vt-pill.vt-bad{background:#fde4e4;color:#b83232}
 .vt-rooms{margin-top:10px;display:flex;flex-direction:column;gap:4px}
-.vt-roomrow{display:grid;grid-template-columns:1fr 38px 44px 24px;align-items:center;gap:6px;font-size:14px;padding:5px 8px;background:rgba(13,13,39,.04);border-radius:8px}
+.vt-roomrow{display:grid;grid-template-columns:1fr 38px 44px 24px;align-items:center;gap:6px;font-size:14px;padding:5px 8px;background:rgba(16,18,22,.04);border-radius:8px}
 .vt-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
   /* ===== DS-2 refinement layer (2026-07-31): type scale 11/12.5/14/16/20/26 · 8pt spacing ·
      one pill metric · stat-card accents moved from tinted backgrounds to left borders ===== */
@@ -934,7 +936,7 @@
   }
   /* Post-sales support tickets */
   .tk{margin-bottom:12px}
-  .tk-hot{border-left:3px solid #DFB05E}
+  .tk-hot{border-left:3px solid #9A633B}
   .tk-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
   .tk-age{color:var(--ink-soft);font-size:12px}
   .tk-subj{font-weight:600;margin-bottom:2px}
@@ -1397,8 +1399,8 @@ function s2lRenderDashKpis(s){
   const host=$("#dashS2lKpis"); if(!host) return;
   const mfr=s.median_first_touch_min;
   const mfrTxt=(mfr==null)?"—":s2lFmtMins(mfr);
-  const mfrAccent=(mfr==null)?"#7c8da0":(mfr<=15?"#4f7d52":mfr<=120?"#B08433":"#a4503e");
-  const pct=s.in_sla_pct; const pctAccent=pct==null?"#7c8da0":pct>=80?"#4f7d52":pct>=50?"#B08433":"#a4503e";
+  const mfrAccent=(mfr==null)?"#7c8da0":(mfr<=15?"#4f7d52":mfr<=120?"#7B4E2D":"#a4503e");
+  const pct=s.in_sla_pct; const pctAccent=pct==null?"#7c8da0":pct>=80?"#4f7d52":pct>=50?"#7B4E2D":"#a4503e";
   const br=Number(s.sla_breaches_week)||0;
   const brAccent=br===0?"#4f7d52":"#a4503e";
   const cpm=s.cost_per_meeting||[];
@@ -1411,7 +1413,7 @@ function s2lRenderDashKpis(s){
     + `<div class="kpi" style="--kc:${mfrAccent}"><div class="kpi-val">${mfrTxt}</div><div class="kpi-lbl">Median 1st human call · wk<span style="display:block;font-size:10px;opacity:.65">Priya's instant ack not counted</span></div></div>`
     + `<div class="kpi" style="--kc:${brAccent}"><div class="kpi-val">${br}</div><div class="kpi-lbl">SLA breaches · wk<span style="display:block;font-size:10px;opacity:.65">${s.unclaimed_now?s.unclaimed_now+" unclaimed right now":"target 0"}</span></div></div>`
     + `<div class="kpi" style="--kc:#5b86b3"><div class="kpi-val">${Number(s.cold_now)||0}</div><div class="kpi-lbl">In Priya nurture<span style="display:block;font-size:10px;opacity:.65">${Number(s.warmed_week)||0} warmed up this week · cold-source leads until they reply</span></div></div>`
-    + `<div class="kpi" id="dashCpm" style="--kc:#B08433;cursor:pointer"><div class="kpi-val">${cpmTxt}</div><div class="kpi-lbl">Cost / meeting · wk<span style="display:block;font-size:10px;opacity:.65">${cpm.length?(cpm.length+" campaign"+(cpm.length>1?"s":"")+" · tap"):"tap to add spend"}</span></div></div>`;
+    + `<div class="kpi" id="dashCpm" style="--kc:#7B4E2D;cursor:pointer"><div class="kpi-val">${cpmTxt}</div><div class="kpi-lbl">Cost / meeting · wk<span style="display:block;font-size:10px;opacity:.65">${cpm.length?(cpm.length+" campaign"+(cpm.length>1?"s":"")+" · tap"):"tap to add spend"}</span></div></div>`;
   const cpmCard=$("#dashCpm"); if(cpmCard) cpmCard.onclick=()=>s2lSpendDialog(cpm);
 }
 // prioritised call queue: SLA breach → awaiting 1st call → cadence due → possession hot
@@ -1419,7 +1421,7 @@ let s2lShowAllCalls=false; // collapsed by default so the dashboard KPIs stay ab
 function s2lRenderTodayCalls(calls){
   const host=$("#dashS2lCalls"); if(!host) return;
   if(!calls.length){ host.innerHTML=""; return; }
-  const PRIO={1:["SLA breach","#a4503e"],2:["Awaiting 1st call","#c0692d"],3:["Cadence call due","#B08433"],4:["Possession hot","#5b86b3"]};
+  const PRIO={1:["SLA breach","#a4503e"],2:["Awaiting 1st call","#c0692d"],3:["Cadence call due","#7B4E2D"],4:["Possession hot","#5b86b3"]};
   const rowHtml=c=>{
     const [plabel,pc]=PRIO[c.prio]||["Call","#7c8da0"];
     const tel=(c.phone||"").replace(/[^\d+]/g,"");
@@ -1579,14 +1581,14 @@ async function punchGate(){
       const d=document.createElement("div");
       d.id="punchGate";
       d.style.cssText="position:fixed;inset:0;z-index:9999;background:rgba(11,13,30,.96);display:flex;align-items:center;justify-content:center;padding:20px";
-      d.innerHTML=`<div style="max-width:400px;background:#fff;border-radius:16px;padding:34px 28px;text-align:center;color:#0D0D27;font-family:inherit">
+      d.innerHTML=`<div style="max-width:400px;background:#fff;border-radius:16px;padding:34px 28px;text-align:center;color:#1B1C20;font-family:inherit">
         <div style="font-size:40px">&#128075;</div>
         <h2 style="margin:10px 0 6px;font-size:21px">Good morning${st.first_name?", "+st.first_name:""}!</h2>
-        <p style="color:#565571;font-size:14px;line-height:1.6;margin:0 0 20px">Punch in to start your day &mdash; Lintel OS unlocks the moment your attendance is in.</p>
+        <p style="color:#545A61;font-size:14px;line-height:1.6;margin:0 0 20px">Punch in to start your day &mdash; Lintel OS unlocks the moment your attendance is in.</p>
         <a href="https://amitnagar-lintel.github.io/lintel-people/#overview" target="_blank" rel="noopener"
-           style="display:block;background:#DFB05E;color:#0D0D27;font-weight:700;padding:14px;border-radius:10px;text-decoration:none;font-size:15px">Punch in now &rarr;</a>
+           style="display:block;background:#9A633B;color:#1B1C20;font-weight:700;padding:14px;border-radius:10px;text-decoration:none;font-size:15px">Punch in now &rarr;</a>
         <p style="color:#8a8875;font-size:12px;margin:14px 0 0">or send <b>In</b> to Priya on WhatsApp &middot; selfie + location, 10 seconds</p>
-        <button onclick="punchGate()" style="margin-top:16px;background:none;border:1px solid #CFC4AD;border-radius:10px;padding:10px 18px;font-size:13px;cursor:pointer;font-family:inherit">I&rsquo;ve punched in &mdash; check again</button>
+        <button onclick="punchGate()" style="margin-top:16px;background:none;border:1px solid #D9D6D1;border-radius:10px;padding:10px 18px;font-size:13px;cursor:pointer;font-family:inherit">I&rsquo;ve punched in &mdash; check again</button>
       </div>`;
       document.body.appendChild(d);
     }
@@ -1894,7 +1896,7 @@ async function renderCsatDash(){
   if(kp && !$("#kpiCsat")){
     const avg=s.avg_rating_month, n=Number(s.responses_month)||0, sent=Number(s.sent_month)||0;
     const rate=sent?Math.round(n/sent*100):0;
-    kp.insertAdjacentHTML("beforeend",`<div class="kpi" id="kpiCsat" style="--kc:${avg==null?'#9A9490':avg>=4.5?'#4f7d52':avg>=4?'#B08433':'#a4503e'}" title="Average client rating this month · ${n} response${n===1?'':'s'} of ${sent} sent (${rate}%)${s.nps_month!=null?' · NPS '+s.nps_month:''}">
+    kp.insertAdjacentHTML("beforeend",`<div class="kpi" id="kpiCsat" style="--kc:${avg==null?'#9A9490':avg>=4.5?'#4f7d52':avg>=4?'#7B4E2D':'#a4503e'}" title="Average client rating this month · ${n} response${n===1?'':'s'} of ${sent} sent (${rate}%)${s.nps_month!=null?' · NPS '+s.nps_month:''}">
       <div class="kpi-val">${avg==null?"—":Number(avg).toFixed(1)+"★"}</div><div class="kpi-lbl">CSAT · mo${n?` <span style="opacity:.6">(${n})</span>`:""}</div></div>`);
   }
   const host=$("#dashCsatLow"); if(!host) return;
@@ -1931,7 +1933,7 @@ async function renderFounderIntel(){
       No weekly report yet — the first one lands Monday 9:00 IST, or generate one now. ${runBtn}</div>`;
   } else {
     const r=data.report||{}, m=data.metrics||{}, tw=m.this_week||{}, pw=m.prev_week||{}, mv=tw.moves_to||{}, pv=pw.moves_to||{};
-    const stat=(label,cur,prev)=>`<div class="kpi" style="--kc:#B08433;min-width:120px"><div class="kpi-val" style="font-size:19px">${cur}</div><div class="kpi-lbl">${label}${prev!==""?` <span style="opacity:.55">· ${prev} last wk</span>`:""}</div></div>`;
+    const stat=(label,cur,prev)=>`<div class="kpi" style="--kc:#7B4E2D;min-width:120px"><div class="kpi-val" style="font-size:19px">${cur}</div><div class="kpi-lbl">${label}${prev!==""?` <span style="opacity:.55">· ${prev} last wk</span>`:""}</div></div>`;
     box.innerHTML=`
       <div style="font-size:14.5px;font-weight:700;color:var(--ink);margin-bottom:4px">${esc(r.headline||"")}</div>
       <div style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin-bottom:12px">${esc(r.summary||"")}</div>
@@ -2054,7 +2056,7 @@ async function renderDashboard(){
     </div>`;
   $("#dashKpisCore").innerHTML =
       kpi("Open leads", S.open_leads||0, "leads", "#5b86b3")
-    + kpi("Leads added · mo", S.leads_added_month||0, "leads", "#B08433")
+    + kpi("Leads added · mo", S.leads_added_month||0, "leads", "#7B4E2D")
     + kpi("Quotes shared · mo", S.quotes_month||0, "leads", "#c0692d")
     + kpi("Converted · mo", S.converted_month||0, "projects", "#4f7d52");
   s2lRenderDashKpis(s2l||{});
@@ -2078,7 +2080,7 @@ async function renderDashboard(){
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
         <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px">
           <th style="padding:5px 8px">Consultant</th><th style="padding:5px 8px" class="num" title="New leads in the last 7 days called within the 15-minute SLA (morning queue: by 11:00)">Called in SLA · 7d</th><th style="padding:5px 8px" class="num" title="Median minutes from lead arrival to first human touch, last 7 days">1st call · median</th><th style="padding:5px 8px" class="num">Assigned</th><th style="padding:5px 8px" class="num">Added</th><th style="padding:5px 8px" class="num">Meetings</th><th style="padding:5px 8px" class="num">Quotes</th><th style="padding:5px 8px" class="num">Converted</th><th style="padding:5px 8px" class="num">Project value · ex-GST (mo)</th></tr></thead>
-        <tbody>${bp.map(r=>{ const sc=SC.find(x=>String(x.cid)===String(r.cid))||{}; const pct=sc.in_sla_pct; const pc=pct==null?"var(--ink-soft)":pct>=80?"#4f7d52":pct>=50?"#B08433":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
+        <tbody>${bp.map(r=>{ const sc=SC.find(x=>String(x.cid)===String(r.cid))||{}; const pct=sc.in_sla_pct; const pc=pct==null?"var(--ink-soft)":pct>=80?"#4f7d52":pct>=50?"#7B4E2D":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
           <td style="padding:6px 8px">${r.cid?`<a href="#" data-cid="${r.cid}" data-name="${esc(r.name)}" style="color:var(--brass);text-decoration:none;font-weight:600">${esc(r.name)}</a>`:`<span style="color:var(--ink-soft)">${esc(r.name)}</span>`}</td>
           <td style="padding:6px 8px" class="num" style="white-space:nowrap"><b style="color:${pc}">${pct==null?"—":pct+"%"}</b>${sc.leads?` <span style="color:var(--ink-soft);font-size:11px">of ${sc.leads}</span>`:""}${sc.unclaimed?` <span class="s2l-chip s2l-red" style="padding:1px 6px;font-size:10px;animation:none">${sc.unclaimed} unclaimed</span>`:""}</td>
           <td style="padding:6px 8px" class="num">${sc.med_mins==null?"—":s2lFmtMins(sc.med_mins)}</td>
@@ -2256,14 +2258,14 @@ async function renderSourceRoi(){
   const c=v=>v==null?"—":v;
   host.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:720px">
     <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Source</th><th class="num" style="padding:5px 8px">Leads</th><th class="num" style="padding:5px 8px" title="Cold-source leads currently in Priya nurture">Cold</th><th class="num" style="padding:5px 8px" title="BANT ≥ 40 or 4+ answers">Qualified</th><th class="num" style="padding:5px 8px">Meetings</th><th class="num" style="padding:5px 8px">Proposals</th><th class="num" style="padding:5px 8px">Won</th><th class="num" style="padding:5px 8px">Conv.</th><th class="num" style="padding:5px 8px">Won value</th><th class="num" style="padding:5px 8px">Spend</th><th class="num" style="padding:5px 8px">₹ / lead</th><th class="num" style="padding:5px 8px">₹ / win</th></tr></thead>
-    <tbody>${rows.map(r=>{const cv=Number(r.conv_pct); const cc=isNaN(cv)?"var(--ink-soft)":cv>=15?"#4f7d52":cv>=5?"#B08433":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
+    <tbody>${rows.map(r=>{const cv=Number(r.conv_pct); const cc=isNaN(cv)?"var(--ink-soft)":cv>=15?"#4f7d52":cv>=5?"#7B4E2D":"#B4453A"; return `<tr style="border-top:1px solid var(--line-2)">
       <td style="padding:6px 8px;font-weight:600">${esc(r.source)}</td><td class="num" style="padding:6px 8px">${r.leads}</td><td class="num" style="padding:6px 8px">${r.cold||""}</td><td class="num" style="padding:6px 8px">${r.qualified}</td><td class="num" style="padding:6px 8px">${r.meetings}</td><td class="num" style="padding:6px 8px">${r.proposals}</td><td class="num" style="padding:6px 8px;font-weight:600">${r.won}</td>
       <td class="num" style="padding:6px 8px;color:${cc};font-weight:600">${c(r.conv_pct)}${r.conv_pct!=null?"%":""}</td><td class="num mono" style="padding:6px 8px">${r.won_value?fmt(r.won_value):"—"}</td><td class="num mono" style="padding:6px 8px">${r.spend?fmt(r.spend):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpl?fmt(r.cpl):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpw?fmt(r.cpw):"—"}</td></tr>`;}).join("")}</tbody></table></div>
     <div class="s2l-hint" style="margin-top:8px">Spend is per campaign (Dashboard → Cost / meeting tile → add weekly spend); it rolls up to the source of the leads that carry that campaign name. Organic sources show no spend by design.</div>`;
 }
 /* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
 const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
-function scPct(v,max){ if(v==null) return "var(--ink-soft)"; const p=v/max; return p>=.8?"#4f7d52":p>=.5?"#B08433":"#B4453A"; }
+function scPct(v,max){ if(v==null) return "var(--ink-soft)"; const p=v/max; return p>=.8?"#4f7d52":p>=.5?"#7B4E2D":"#B4453A"; }
 function scorecardHtml(card){
   const rows=card.rows||[];
   return `<div style="margin-bottom:18px">
@@ -2690,7 +2692,7 @@ function psSlideView(S){
   renderCard();
 }
 function psConfetti(host){
-  const colors=["#DFB05E","#A4503E","#4F7D52","#C9A45C","#946F33","#EDE6D6"];
+  const colors=["#9A633B","#A4503E","#4F7D52","#C9A45C","#946F33","#EDE6D6"];
   for(let i=0;i<40;i++){
     const s=document.createElement("span"); s.className="ps-conf";
     s.style.left=(Math.random()*100)+"%";
@@ -4106,7 +4108,7 @@ function shareAdvance(l,total,advance){
       ${l.email?`<button class="ghost" id="adv_email">✉️ Email</button>`:""}
     </div>`);
   // render QR of the UPI link
-  try{ new QRCode($("#adv_qr"),{text:upiLink,width:150,height:150,colorDark:"#0D0D27",colorLight:"#ffffff"}); }
+  try{ new QRCode($("#adv_qr"),{text:upiLink,width:150,height:150,colorDark:"#1B1C20",colorLight:"#ffffff"}); }
   catch(e){ $("#adv_qr").innerHTML='<div style="font-size:12px;color:var(--ink-soft);width:150px">QR unavailable</div>'; }
   if($("#adv_wa")) $("#adv_wa").onclick=()=>{
     waOpen(l.phone,msg);
@@ -4175,7 +4177,7 @@ function celebrateConversion(code, clientName, onShare){
   void wrap.offsetWidth; wrap.classList.add("show");
   const cv=wrap.querySelector("canvas"), cx=cv.getContext("2d");
   cv.width=innerWidth; cv.height=innerHeight;
-  const colors=["#DFB05E","#B08433","#0D0D27","#C96F4A","#7A9E7E","#FFFFFF"];
+  const colors=["#9A633B","#7B4E2D","#1B1C20","#C96F4A","#7A9E7E","#FFFFFF"];
   const P=[]; for(let i=0;i<160;i++){P.push({
     x:Math.random()*cv.width, y:-20-Math.random()*cv.height*0.5,
     w:6+Math.random()*6, h:8+Math.random()*8, c:colors[i%colors.length],
@@ -4594,7 +4596,7 @@ function drawProjBoard(){
   $("#pjStats").innerHTML=`
     <div class="pj-stat"><b>${act.length}</b> active</div>
     <div class="pj-stat ${hf==="red"?"sel":""}" data-hf="red"><span class="hd" style="background:#B4453A"></span><b>${red}</b> at risk</div>
-    <div class="pj-stat ${hf==="amber"?"sel":""}" data-hf="amber"><span class="hd" style="background:#DFB05E"></span><b>${amber}</b> need attention</div>
+    <div class="pj-stat ${hf==="amber"?"sel":""}" data-hf="amber"><span class="hd" style="background:#9A633B"></span><b>${amber}</b> need attention</div>
     <div class="pj-stat ${hf==="green"?"sel":""}" data-hf="green"><span class="hd" style="background:#4f7d52"></span><b>${act.length-red-amber}</b> on track</div>
     ${isBoqAdmin()?`<div class="pj-stat"><b>${fmt(collected)}</b> collected</div>
     <div class="pj-stat"><b>${fmt(outstanding)}</b> outstanding</div>`:""}`;
@@ -4681,7 +4683,7 @@ function drawProjBoard(){
           ?`<select class="tl2-sel" data-stg="${p.id}" onclick="event.stopPropagation()">${STAGE_FLOW.map(st=>`<option ${st===p.current_stage?"selected":""}>${st}</option>`).join("")}</select> ${handoverPill(p)}`
           :`${esc(p.current_stage||"—")} ${handoverPill(p)}`;
         return `<tr class="clickable" data-id="${p.id}">
-          <td><span class="hd" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.health==="red"?"#B4453A":p.health==="amber"?"#DFB05E":"#4f7d52"}" title="${HN[p.health]}"></span></td>
+          <td><span class="hd" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.health==="red"?"#B4453A":p.health==="amber"?"#9A633B":"#4f7d52"}" title="${HN[p.health]}"></span></td>
           <td class="mono">${esc(p.code||"—")}</td>
           <td><b>${esc(p.name)}</b><div style="color:var(--ink-soft);font-size:12px">${esc([p.site_area,p.site_city].filter(Boolean).join(", "))}</div></td>
           <td>${stageCell}</td>
@@ -6058,9 +6060,9 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
   const today=new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
   const doc=`
   <div id="pidoc" style="font-family:'Times New Roman',serif;max-width:760px;margin:0 auto;background:#fff;color:#1a1a1a">
-    <div style="background:#0D0D27;color:#fff;padding:24px 32px;display:flex;justify-content:space-between;align-items:flex-start">
+    <div style="background:#1B1C20;color:#fff;padding:24px 32px;display:flex;justify-content:space-between;align-items:flex-start">
       <div>
-        <div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>
+        <div style="font-size:12px;letter-spacing:3px;color:#9A633B">LINTEL SPACE ATELIER</div>
         <div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">
           Survey No.36/4, site no.25 to 30, Ground Floor,<br>Ramky House, Kalyan Nagar, Bengaluru 560043<br>
           +91 9916558777 · contact@lintelspace.com
@@ -6068,7 +6070,7 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
       </div>
       <div style="text-align:right">
         <div style="font-size:20px;letter-spacing:1px">PROFORMA INVOICE</div>
-        <div style="font-size:13px;color:#DFB05E;margin-top:6px">${esc(piNumber)}</div>
+        <div style="font-size:13px;color:#9A633B;margin-top:6px">${esc(piNumber)}</div>
         <div style="font-size:12px;color:#9CA0B0;margin-top:4px">${today}</div>
       </div>
     </div>
@@ -6103,9 +6105,9 @@ function showProformaDoc(p, milestone, piNumber, boqRef){
       </table>
       <div style="display:flex;justify-content:flex-end;margin-top:8px">
         <div style="width:260px">
-          <div style="display:flex;justify-content:space-between;padding:12px;background:#0D0D27;color:#fff;border-radius:6px">
+          <div style="display:flex;justify-content:space-between;padding:12px;background:#1B1C20;color:#fff;border-radius:6px">
             <span style="font-weight:600">Amount Payable</span>
-            <span style="font-weight:700;color:#DFB05E">₹${amt.toLocaleString('en-IN')}</span>
+            <span style="font-weight:700;color:#9A633B">₹${amt.toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>
@@ -6184,7 +6186,7 @@ function rupeesInWords(num){
 /* Payment receipt — a plain "we have received your payment" acknowledgement.
    Client details auto-captured from the project. Brand navy + brass, one page. */
 async function paymentReceipt(p, pay, body){
-  const NAVY="#0D0D27",BRASS="#DFB05E",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7";
+  const NAVY="#1B1C20",BRASS="#9A633B",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7";
   const {data:allPays}=await sb.from("project_payments").select("amount").eq("project_id",p.id);
   const received=(allPays||[]).reduce((s,r)=>s+Number(r.amount||0),0);
   const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
@@ -6462,10 +6464,10 @@ async function poDetail(p,body,poId){
       </div>
     </div>`}
     <div id="po-sheet">
-      <div style="background:linear-gradient(135deg,#0D0D27,#1A1A40);padding:18px 28px;display:flex;align-items:center;gap:16px">
+      <div style="background:linear-gradient(135deg,#1B1C20,#1A1A40);padding:18px 28px;display:flex;align-items:center;gap:16px">
         <img src="${LSA_SEAL}" style="width:60px;height:60px;background:#fff;border-radius:50%;padding:3px">
         <div><div style="font-family:'Times New Roman',serif;font-size:17px;letter-spacing:3px;color:#fff;text-transform:uppercase">LINTEL SPACE ATELIER</div>
-          <div style="font-size:9px;letter-spacing:3px;color:#DFB05E;margin-top:3px;text-transform:uppercase">Work Order · Internal</div></div>
+          <div style="font-size:9px;letter-spacing:3px;color:#9A633B;margin-top:3px;text-transform:uppercase">Work Order · Internal</div></div>
         <div style="margin-left:auto;text-align:right;color:#fff">
           <div style="font-size:13px;font-weight:600">${esc(o.po_number)}</div>
           <div style="font-size:10px;color:rgba(255,255,255,.6)">${new Date(o.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div></div>
@@ -6479,7 +6481,7 @@ async function poDetail(p,body,poId){
           <div><div class="cpl">Schedule</div><div class="cpv">${o.start_date||'—'} → ${o.target_date||'—'}</div></div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:#0D0D27">
+          <thead><tr style="background:#1B1C20">
             <th style="text-align:left;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Room</th>
             <th style="text-align:left;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Item</th>
             <th style="text-align:right;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Qty</th>
@@ -6571,12 +6573,12 @@ function cutSvg(sheet,board,idx){
   const parts=sheet.placed.map(p=>{
     const show=p.w>board.w*0.05&&p.h>board.h*0.06, cx=p.x+p.w/2, cy=p.y+p.h/2;
     const lbl=p.label.length>16?p.label.slice(0,15)+'…':p.label;
-    const t=show?`<text x="${cx}" y="${cy-ds*0.15}" font-size="${fs}" text-anchor="middle" fill="#0D0D27" font-family="Inter,sans-serif" font-weight="600">${esc(lbl)}${p.rot?' ↻':''}</text><text x="${cx}" y="${cy+fs*0.95}" font-size="${ds}" text-anchor="middle" fill="#0D0D27" fill-opacity="0.6" font-family="'IBM Plex Mono',monospace">${cutNum(p.w)} × ${cutNum(p.h)}</text>`:'';
-    return `<g><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.color}" fill-opacity="0.82" stroke="#0D0D27" stroke-opacity="0.35" stroke-width="${sw}"/>${t}</g>`;
+    const t=show?`<text x="${cx}" y="${cy-ds*0.15}" font-size="${fs}" text-anchor="middle" fill="#1B1C20" font-family="Inter,sans-serif" font-weight="600">${esc(lbl)}${p.rot?' ↻':''}</text><text x="${cx}" y="${cy+fs*0.95}" font-size="${ds}" text-anchor="middle" fill="#1B1C20" fill-opacity="0.6" font-family="'IBM Plex Mono',monospace">${cutNum(p.w)} × ${cutNum(p.h)}</text>`:'';
+    return `<g><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="${p.color}" fill-opacity="0.82" stroke="#1B1C20" stroke-opacity="0.35" stroke-width="${sw}"/>${t}</g>`;
   }).join('');
   return `<div class="cut-board"><div class="cbh"><b>Sheet ${idx+1}</b><span class="u">${util}% used</span></div>`+
     `<svg viewBox="0 0 ${vw} ${vh}" preserveAspectRatio="xMidYMid meet"><g transform="translate(${PAD},${PAD})">`+
-    `<rect x="0" y="0" width="${board.w}" height="${board.h}" fill="#F4EFE6" stroke="#CFC4AD" stroke-width="${board.w*0.004}"/>${parts}</g></svg></div>`;
+    `<rect x="0" y="0" width="${board.w}" height="${board.h}" fill="#F9F8F6" stroke="#D9D6D1" stroke-width="${board.w*0.004}"/>${parts}</g></svg></div>`;
 }
 
 async function pwCutting(p,body){
@@ -6969,10 +6971,10 @@ async function vpoDetail(p,body,id){
       </div>`:`<div class="hint">Recording vendor payments is admin-only.</div>`}
     </div>
     <div id="vpo-sheet">
-      <div style="background:linear-gradient(135deg,#0D0D27,#1A1A40);padding:18px 28px;display:flex;align-items:center;gap:16px">
+      <div style="background:linear-gradient(135deg,#1B1C20,#1A1A40);padding:18px 28px;display:flex;align-items:center;gap:16px">
         <img src="${LSA_SEAL}" style="width:60px;height:60px;background:#fff;border-radius:50%;padding:3px">
         <div><div style="font-family:'Times New Roman',serif;font-size:17px;letter-spacing:3px;color:#fff;text-transform:uppercase">LINTEL SPACE ATELIER</div>
-          <div style="font-size:9px;letter-spacing:3px;color:#DFB05E;margin-top:3px;text-transform:uppercase">Purchase Order</div></div>
+          <div style="font-size:9px;letter-spacing:3px;color:#9A633B;margin-top:3px;text-transform:uppercase">Purchase Order</div></div>
         <div style="margin-left:auto;text-align:right;color:#fff">
           <div style="font-size:13px;font-weight:600">${esc(o.po_number)}</div>
           <div style="font-size:10px;color:rgba(255,255,255,.6)">${new Date(o.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div></div>
@@ -6987,7 +6989,7 @@ async function vpoDetail(p,body,id){
           <div><div class="cpl">Expected delivery</div><div class="cpv">${o.expected_delivery||'—'}</div></div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:#0D0D27">
+          <thead><tr style="background:#1B1C20">
             <th style="text-align:left;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Room</th>
             <th style="text-align:left;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Item</th>
             <th style="text-align:right;padding:8px 10px;color:rgba(255,255,255,.7);font-size:10px;text-transform:uppercase">Qty</th>
@@ -8248,8 +8250,8 @@ function momExport(entityType, entity, momId, moms, actions, mode){
 
   if(mode==="pdf"){
     const doc=`<div style="font-family:'Times New Roman',serif;max-width:720px;margin:0 auto;color:#1a1a1a">
-      <div style="background:#0D0D27;color:#fff;padding:22px 30px">
-        <div style="font-size:12px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>
+      <div style="background:#1B1C20;color:#fff;padding:22px 30px">
+        <div style="font-size:12px;letter-spacing:3px;color:#9A633B">LINTEL SPACE ATELIER</div>
         <div style="font-size:19px;margin-top:8px">${esc(m.title||"Minutes of Meeting")}</div>
         <div style="font-size:12px;color:#9CA0B0;margin-top:6px">${dateStr}${refLabel?" · "+esc(refLabel):""}${m.attendees?" · Attendees: "+esc(m.attendees):""}</div>
       </div>
@@ -8719,7 +8721,7 @@ function execClientView(p,acts){
     const color=st==="late"?"#B45844":st==="done"?"#3C7A4E":st==="in_progress"?"#A9791E":"#8A8FA3";
     return `<tr style="border-bottom:1px solid #ECECEC">
       <td style="padding:9px 8px;color:#8A8FA3">${i+1}</td>
-      <td style="padding:9px 8px;font-weight:${a.is_critical?"700":"500"}">${esc(a.name)}${a.is_critical?' <span style="color:#0D0D27;font-size:11px">◆ critical</span>':""}</td>
+      <td style="padding:9px 8px;font-weight:${a.is_critical?"700":"500"}">${esc(a.name)}${a.is_critical?' <span style="color:#1B1C20;font-size:11px">◆ critical</span>':""}</td>
       <td style="padding:9px 8px">${a.planned_start||"—"} → ${a.planned_finish||"—"}</td>
       <td style="padding:9px 8px">${a.actual_start||"—"} → ${a.actual_finish||"—"}</td>
       <td style="padding:9px 8px;text-align:center">${a.percent_complete||0}%</td>
@@ -8728,9 +8730,9 @@ function execClientView(p,acts){
   }).join("");
   const win=`
   <div id="exsheet" style="font-family:'Times New Roman',serif;max-width:920px;margin:0 auto;background:#fff;color:#1a1a1a">
-    <div style="background:#0D0D27;color:#fff;padding:26px 34px;display:flex;justify-content:space-between;align-items:center">
+    <div style="background:#1B1C20;color:#fff;padding:26px 34px;display:flex;justify-content:space-between;align-items:center">
       <div>
-        <div style="font-size:13px;letter-spacing:3px;color:#DFB05E">LINTEL SPACE ATELIER</div>
+        <div style="font-size:13px;letter-spacing:3px;color:#9A633B">LINTEL SPACE ATELIER</div>
         <div style="font-size:24px;margin-top:4px">Project Execution Schedule</div>
       </div>
       <div style="text-align:right;font-size:12px;color:#C9CDDA">
@@ -8743,7 +8745,7 @@ function execClientView(p,acts){
         <div><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase">Site</div><div style="font-size:15px">${esc(p.site_address||"—")}</div></div>
       </div>
       <div style="display:flex;gap:28px;margin:16px 0 22px;padding:14px 0;border-top:1px solid #ECECEC;border-bottom:1px solid #ECECEC">
-        <div><span style="font-size:26px;font-weight:700;color:#DFB05E">${pct}%</span> <span style="font-size:12px;color:#8A8FA3">complete</span></div>
+        <div><span style="font-size:26px;font-weight:700;color:#9A633B">${pct}%</span> <span style="font-size:12px;color:#8A8FA3">complete</span></div>
         <div><span style="font-size:26px;font-weight:700">${done}</span> <span style="font-size:12px;color:#8A8FA3">of ${acts.length} done</span></div>
         ${late?`<div><span style="font-size:26px;font-weight:700;color:#B45844">${late}</span> <span style="font-size:12px;color:#8A8FA3">delayed</span></div>`:""}
       </div>
@@ -9133,7 +9135,7 @@ function vtRefresh(){
   ctx.drawImage(VT.img,0,0,cv.width,cv.height);
   ctx.save();
   // brahmasthan + rings
-  ctx.strokeStyle="rgba(13,13,39,.75)"; ctx.lineWidth=1.5;
+  ctx.strokeStyle="rgba(16,18,22,.75)"; ctx.lineWidth=1.5;
   ctx.beginPath(); ctx.arc(cx,cy,rad,0,Math.PI*2); ctx.stroke();
   ctx.setLineDash([4,4]);
   ctx.beginPath(); ctx.arc(cx,cy,rad*0.25,0,Math.PI*2); ctx.stroke();
@@ -9143,7 +9145,7 @@ function vtRefresh(){
   for(let i=0;i<16;i++){
     const a=nd+(11.25+i*22.5)*Math.PI/180;
     const bold=(i%2===1); // every second fine boundary aligns with 8-dir boundary
-    ctx.strokeStyle=bold?"rgba(13,13,39,.6)":"rgba(13,13,39,.25)";
+    ctx.strokeStyle=bold?"rgba(16,18,22,.6)":"rgba(16,18,22,.25)";
     ctx.lineWidth=bold?1.4:0.8;
     ctx.beginPath(); ctx.moveTo(cx+Math.sin(a)*rad*0.25,cy-Math.cos(a)*rad*0.25);
     ctx.lineTo(cx+Math.sin(a)*rad,cy-Math.cos(a)*rad); ctx.stroke();
@@ -9167,7 +9169,7 @@ function vtRefresh(){
     const lx=cx+Math.sin(a)*rad*1.1, ly=cy-Math.cos(a)*rad*1.1;
     if(lx<8||ly<8||lx>cv.width-8||ly>cv.height-8) return;
     const primary=i%2===0;
-    ctx.fillStyle=d==="N"?"#c0392b":primary?"#0D0D27":"rgba(13,13,39,.45)";
+    ctx.fillStyle=d==="N"?"#c0392b":primary?"#1B1C20":"rgba(16,18,22,.45)";
     ctx.font=(primary?"800 13px":"600 10px")+" system-ui";
     ctx.fillText(d,lx,ly);
   });
@@ -9247,7 +9249,7 @@ function vtReport(){
     img.plan{width:100%;border:1px solid #ddd;border-radius:8px;margin:10px 0}
     table{width:100%;border-collapse:collapse;font-size:14px;margin:14px 0}
     th,td{padding:8px 10px;border-bottom:1px solid #e5e5e5;text-align:left}
-    th{background:#0D0D27;color:#fff;font-size:12px;letter-spacing:.04em}
+    th{background:#1B1C20;color:#fff;font-size:12px;letter-spacing:.04em}
     .good{color:#1e7a46;font-weight:700}.ok{color:#a06f00;font-weight:700}.bad{color:#b83232;font-weight:700}
     .rem{background:#fdf8ef;border-left:3px solid #c4943a;padding:10px 14px;margin:8px 0;font-size:13.5px}
     .foot{margin-top:28px;font-size:11.5px;color:#888;border-top:1px solid #eee;padding-top:12px}
@@ -10597,6 +10599,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b60",date:"20 Sep 2026",title:"Lintel Space brand colours",points:[
+    "Lintel OS now wears the studio's real palette from lintelspace.com — a neutral gallery off-white, near-black ink and the <b>terracotta</b> brand accent — in place of the old cream-and-gold theme. It reads as Lintel, not a generic template.",
+  ]},
   {build:"b59",date:"20 Sep 2026",title:"Leads filters tidied — More filters toggle",points:[
     "The Leads bar now shows just the everyday filters — search, channel, owner, tag and status. The follow-ups-due and agency-duplicate toggles and the created / closed month pickers live behind a <b>⚙ More filters</b> button.",
     "If any of those are active, the button shows a small count so a hidden filter is never forgotten. Click it to expand or collapse; your choice sticks while you're on the page.",
@@ -11629,7 +11634,7 @@ function gClient(p){
   /* Client quotation — redesign approved 12 Aug 2026: brand navy+brass only, every
      claim once, single grand total, calm BOQ table, A4-friendly blocks. */
   const v=G.ver||{}, f=gGrand();
-  const NAVY="#0D0D27",BRASS="#DFB05E",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7",MUTE="#B8B2AA";
+  const NAVY="#1B1C20",BRASS="#9A633B",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7",MUTE="#B8B2AA";
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
   const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
   const qLabel=t=>`<div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:${GREY};text-transform:uppercase;margin:0 0 4px">${t}</div><div style="width:34px;height:2px;background:${BRASS};margin-bottom:16px"></div>`;
@@ -11769,7 +11774,7 @@ function gClient(p){
     </div>
   </div>`;
   // UPI QR
-  try{ const qrEl=$("#upi-qr"); if(qrEl&&typeof QRCode!=='undefined'){ new QRCode(qrEl,{text:'upi://pay?pa=Lintels234@idfcbank&pn=Lintel+Space+Atelier&cu=INR',width:140,height:140,colorDark:'#0D0D27',colorLight:'#fff',correctLevel:QRCode.CorrectLevel.M}); } }catch(e){}
+  try{ const qrEl=$("#upi-qr"); if(qrEl&&typeof QRCode!=='undefined'){ new QRCode(qrEl,{text:'upi://pay?pa=Lintels234@idfcbank&pn=Lintel+Space+Atelier&cu=INR',width:140,height:140,colorDark:'#1B1C20',colorLight:'#fff',correctLevel:QRCode.CorrectLevel.M}); } }catch(e){}
 }
 
 /* ================= RATES (library editor) ================= */
@@ -12226,7 +12231,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b59 · 20 Sep 2026";
+const APP_BUILD = "b60 · 20 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
@@ -12241,7 +12246,7 @@ window.addEventListener("beforeinstallprompt",(e)=>{
   if(document.getElementById("pwaInstall")) return;
   const btn=document.createElement("button");
   btn.id="pwaInstall"; btn.textContent="⤓ Install app";
-  btn.style.cssText="margin-left:auto;padding:6px 12px;border:1px solid var(--brass,#DFB05E);background:transparent;color:var(--brass,#DFB05E);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer";
+  btn.style.cssText="margin-left:auto;padding:6px 12px;border:1px solid var(--brass,#9A633B);background:transparent;color:var(--brass,#9A633B);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer";
   btn.onclick=async()=>{ if(!deferredPrompt)return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; btn.remove(); };
   host.appendChild(btn);
 });
