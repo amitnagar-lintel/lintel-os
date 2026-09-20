@@ -88,14 +88,15 @@
   .col-h{display:flex;align-items:center;gap:7px;padding:4px 6px 10px;font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em}
   .dot{width:8px;height:8px;border-radius:50%}
   .col-count{margin-left:auto;font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft)}
-  .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(28,26,23,.03);cursor:pointer;transition:border-color .12s,transform .12s}
+  .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(28,26,23,.03);cursor:pointer;overflow:hidden;transition:border-color .12s,transform .12s}
   .card:hover{border-color:var(--brass);transform:translateY(-1px)}
   .card .nm{font-weight:600;font-size:14px}
   .card .meta{color:var(--ink-soft);font-size:12.5px;margin-top:3px}
-  .card .row2{display:flex;align-items:center;gap:8px;margin-top:9px}
+  .card .row2{display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:6px;margin-top:9px}
+  .card .row2 .fu{margin-left:0}
   .bant{font-family:'IBM Plex Mono';font-size:11px;padding:2px 6px;border-radius:5px;background:var(--paper-2);color:var(--slate)}
   .bant.hi{background:#E7F0E8;color:var(--green)} .bant.lo{background:#F6E7E3;color:var(--clay)}
-  .val{margin-left:auto;font-family:'IBM Plex Mono';font-size:12.5px;font-weight:500}
+  .val{margin-left:auto;font-family:'IBM Plex Mono';font-size:12px;font-weight:600;white-space:nowrap}
 
   /* ---- tables ------------------------------------------------------ */
   table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -155,7 +156,7 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
   .banner{background:#FBEFE0;border:1px solid #EAD3B0;color:#7a5a1f;padding:10px 14px;border-radius:9px;font-size:12.5px;margin-bottom:18px}
   /* ---- CRM additions ---- */
-  .lead-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+  .lead-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
   /* Board/Table toggle */
   .viewtoggle{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;background:#fff}
   .viewtoggle button{padding:8px 14px;border:none;background:#fff;font-size:14px;font-weight:600;cursor:pointer;color:var(--ink-soft)}
@@ -255,8 +256,8 @@
   @media(max-width:1000px){.lead-table .hide-lg{display:none}}
   @media(max-width:820px){.lead-table .hide-md{display:none}}
   @media(max-width:600px){.lead-table .hide-sm{display:none}}
-  .lf-in{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:14px}
-  .lf-sel{padding:9px 10px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:14px}
+  .lf-in{flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:13.5px}
+  .lf-sel{padding:8px 10px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:13px;color:var(--ink)}
   .fu-set{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .chip{padding:5px 12px;border:1px solid var(--line-2);border-radius:20px;background:#fff;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--ink)}
   .chip:hover{border-color:var(--brass);color:var(--brass-deep)}
@@ -282,7 +283,7 @@
   .wa-menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 10px;border-radius:7px;font-size:14px;cursor:pointer;color:var(--ink)}
   .wa-menu-item:hover{background:#EAFBF0;color:#0a7a3a}
   .wa-menu-item.edit{border-top:1px solid var(--line);margin-top:4px;color:var(--ink-soft)}
-  .lf-due{font-size:14px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;cursor:pointer}
+  .lf-due{font-size:12.5px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
   .board{grid-template-columns:repeat(7,minmax(170px,1fr))}
   .col-val{font-size:11px;color:var(--ink-soft);padding:0 6px 8px}
   .tagrow{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
@@ -1040,6 +1041,13 @@ let sb = null, me = null, myRole = "interior_designer";
 let myName = "", myAvatar = "", myPhone = "";
 const $ = s => document.querySelector(s);
 const fmt = n => "₹" + Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0});
+// Compact INR for tight spots (board cards): ₹1.31Cr · ₹87.6L · ₹45K
+const fmtC = n => { n=Number(n||0); const a=Math.abs(n); if(!a) return "";
+  const tr=x=>x.replace(/\.0+$/,"").replace(/(\.\d*?)0+$/,"$1");
+  if(a>=1e7) return "₹"+tr((n/1e7).toFixed(2))+"Cr";
+  if(a>=1e5) return "₹"+tr((n/1e5).toFixed(1))+"L";
+  if(a>=1e3) return "₹"+tr((n/1e3).toFixed(1))+"K";
+  return "₹"+Math.round(n); };
 
 /* ---- Role & permission model (6 roles) ----
    admin            : everything
@@ -2828,7 +2836,7 @@ async function drawBoard(){
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l)||coldChipHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${coldChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
         <div class="row2"><span class="bant ${sCls}">${score}</span>${(Number(l.touch_count)||0)?" "+s2lTouchDotsHtml(l):""}
         ${l.next_follow_up?`<span class="fu ${dc}">⏱ ${l.next_follow_up.slice(5)}</span>`:""}
-        <span class="val">${leadPipelineValue(l)?fmt(leadPipelineValue(l)):""}</span></div>
+        <span class="val" title="${leadPipelineValue(l)?esc(fmt(leadPipelineValue(l))):''}">${leadPipelineValue(l)?fmtC(leadPipelineValue(l)):""}</span></div>
         ${(l.pm_id||l.consultant_id)?`<div class="avrow">${[l.consultant_id,l.designer_id,l.pm_id].filter(Boolean).map(id=>`<span class="av" title="${esc(staffName(id))}">${initials(staffName(id))}</span>`).join("")}</div>`:""}`;
       c.onclick=()=>openLead(l.id);
       const waBtn=c.querySelector(".card-wa");
@@ -10572,6 +10580,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b58",date:"20 Sep 2026",title:"Leads board cards no longer overflow",points:[
+    "Lead card values are now compact (₹87.6L, ₹1.31Cr) instead of the full figure, so they fit inside the card and stop spilling into the next column. Hover the value to see the exact amount.",
+    "The score / touch-dots / follow-up / value row wraps neatly, cards clip cleanly, and the Leads filter bar is a little tighter.",
+  ]},
   {build:"b57",date:"20 Sep 2026",title:"Pop-up form alignment fixed",points:[
     "The smaller pop-ups (new client action, change order, snag, and a few others) had their fields sitting flush against the edges, out of line with the labels. They now use the same neat inset as every other dialog, so field boxes line up with their labels.",
   ]},
@@ -12193,7 +12205,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b57 · 20 Sep 2026";
+const APP_BUILD = "b58 · 20 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
