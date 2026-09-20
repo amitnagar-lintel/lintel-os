@@ -138,6 +138,11 @@
   .modal-h{padding:20px 24px;border-bottom:1px solid var(--line);font-family:'Bricolage Grotesque';font-weight:600;font-size:20px}
   .modal-b{padding:22px 24px;display:grid;gap:14px}
   .modal-f{padding:16px 24px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+  /* Ad-hoc modals (raw content, no .modal-b/.modal-h) had zero padding so fields sat
+     flush to the edges and looked misaligned with the labels. Give any such modal the
+     same 20/24 inset the standard modals get; modals that use .modal-b are untouched. */
+  .modal:not(:has(> .modal-b)):not(:has(> .modal-h)){padding:20px 24px}
+  .modal:not(:has(> .modal-b)):not(:has(> .modal-h)) > h3:first-child{margin-top:0}
   .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);margin-bottom:5px;font-weight:600}
   .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;background:#fff;font-size:14px;color:var(--ink)}
   .field select{height:42px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%235B5750' stroke-width='1.5'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
@@ -10563,6 +10568,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b57",date:"20 Sep 2026",title:"Pop-up form alignment fixed",points:[
+    "The smaller pop-ups (new client action, change order, snag, and a few others) had their fields sitting flush against the edges, out of line with the labels. They now use the same neat inset as every other dialog, so field boxes line up with their labels.",
+  ]},
   {build:"b56",date:"20 Sep 2026",title:"Project BOQ is now a list — open by name, make a new BOQ",points:[
     "The project <b>BOQ</b> tab now opens on a <b>list of BOQs</b>: serial no, BOQ name, value, who created it and who last edited it (with date &amp; time). Click a <b style=\'color:var(--brass)\'>BOQ name</b> (shown in brass) to open and edit it.",
     "The design consultant's original BOQ stays <b>🔒 Locked</b> and marked <b>Contract · ✓ Paid</b> after conversion — it can't be changed. Interior designers use <b>＋ New BOQ</b> to build the design / execution BOQ alongside it.",
@@ -12181,7 +12189,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b56 · 20 Sep 2026";
+const APP_BUILD = "b57 · 20 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
