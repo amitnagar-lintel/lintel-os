@@ -4819,6 +4819,7 @@ async function renderProjectWorkspace(pid){
     // leaving BOQ tab → flush + stop autosave
     if(projectTab==="boq" && b.dataset.t!=="boq" && typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); }
     projectTab=b.dataset.t;
+    if(b.dataset.t==="boq") G.boqView="list";   // BOQ tab opens on the list of BOQs
     $("#pwTabs").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
     drawProjectTab(p);
   });
@@ -9482,6 +9483,65 @@ function emptyState(t,s){return `<div class="empty"><div class="display">${t}</d
 /* State for the generator, scoped per open BOQ version */
 let G = { ver:null, rows:[], rates:[], uid:0, tab:'est', dirty:false, projectId:null, leadId:null, boqId:null };
 
+/* ---- BOQ LIST: Sl · name (click to open) · value · created-by · last-edited ---- */
+async function gBoqList(p, body, versions){
+  if(!Object.keys(PROFILE_NAMES||{}).length) await loadProfileNames();
+  let paid=false;
+  try{ const {count}=await sb.from("payment_milestones").select("id",{count:"exact",head:true}).eq("project_id",p.id).eq("status","paid"); paid=!!count; }catch(e){}
+  const locked=versions.filter(v=>v.locked_at);
+  const contractId=locked.length?locked.reduce((a,b)=>(Number(a.version)<=Number(b.version)?a:b)).id:null; // earliest locked = the contract BOQ
+  const who=id=>id?(PROFILE_NAMES[id]||"—"):"—";
+  const dt=iso=>iso?new Date(iso).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+  const w=canWrite();
+  const rowsHtml=versions.map((v,i)=>{
+    const nm=(v.title&&v.title.trim())?v.title.trim():(v.version_label||("v"+v.version));
+    const isContract=String(v.id)===String(contractId);
+    const badges=[
+      v.locked_at?`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">🔒 Locked</span>`:"",
+      isContract?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">Contract</span>`:"",
+      (isContract&&paid)?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✓ Paid</span>`:""
+    ].filter(Boolean).join(" ");
+    return `<tr style="border-bottom:1px solid var(--line)">
+      <td style="padding:9px 10px;color:var(--ink-soft)">${i+1}</td>
+      <td style="padding:9px 10px">
+        <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${w?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(v.version_label||("v"+v.version))}${badges?" · "+badges:""}</div>
+      </td>
+      <td style="padding:9px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${v.total!=null?fmt(Number(v.total)):"—"}</td>
+      <td style="padding:9px 10px">${esc(who(v.created_by))}<div style="font-size:11px;color:var(--ink-soft)">${dt(v.created_at)}</div></td>
+      <td style="padding:9px 10px">${esc(who(v.last_edited_by||v.created_by))}<div style="font-size:11px;color:var(--ink-soft)">${dt(v.last_edited_at||v.created_at)}</div></td>
+    </tr>`;
+  }).join("");
+  body.innerHTML=`<div class="pw-card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div><h3 style="margin:0">BOQs</h3><div class="sub" style="font-size:12.5px;color:var(--ink-soft);margin-top:2px">Click a <b style="color:var(--brass)">BOQ name</b> to open it. The consultant's contract BOQ stays locked &amp; paid; use <b>＋ New BOQ</b> for the design / execution BOQ. Every BOQ autosaves with who created and last edited it.</div></div>
+      ${w?`<button class="primary" id="boqNew">＋ New BOQ</button>`:""}
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="text-align:left;border-bottom:2px solid var(--line-2);color:var(--ink-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px">
+          <th style="padding:8px 10px;width:36px">#</th><th style="padding:8px 10px">BOQ name</th><th style="padding:8px 10px;text-align:right">Value</th><th style="padding:8px 10px">Created by</th><th style="padding:8px 10px">Last edited by</th>
+        </tr></thead>
+        <tbody>${rowsHtml||`<tr><td colspan="5" style="padding:16px;color:var(--ink-soft)">No BOQ yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+  body.querySelectorAll("[data-open]").forEach(a=>a.onclick=()=>{ G.openVersionId=a.dataset.open; G.boqView="sheet"; gStopAutosave(); pwBoq(p,body); });
+  body.querySelectorAll("[data-rename]").forEach(b=>b.onclick=async()=>{
+    const v=versions.find(x=>String(x.id)===String(b.dataset.rename)); if(!v) return;
+    const nm=prompt("BOQ name:", (v.title||v.version_label||("v"+v.version))); if(nm===null) return;
+    const {error}=await sb.from("boq_versions").update({title:nm.trim()||null,last_edited_by:me.id,last_edited_at:new Date().toISOString()}).eq("id",v.id);
+    if(error) return toast(error.message);
+    v.title=nm.trim(); toast("Renamed"); gBoqList(p,body,versions);
+  });
+  if($("#boqNew")) $("#boqNew").onclick=async()=>{
+    const id=await newBoqFor({project_id:p.id,title:"Design / Execution BOQ"});
+    if(!id) return;
+    await sb.from("boq_versions").update({client_name:p.client_name||p.name,client_phone:p.client_phone,client_email:p.client_email,project_name:p.name,property:p.site_address,quote_date:new Date().toISOString().slice(0,10)}).eq("id",id);
+    G.openVersionId=id; G.boqView="sheet"; gStopAutosave(); pwBoq(p,body);
+  };
+}
+
 async function pwBoq(p, body){
   G.projectId = p.id; G.leadId = null;
   // load rate library once
@@ -9499,12 +9559,13 @@ async function pwBoq(p, body){
       if(!id) return;
       // seed meta from project
       await sb.from("boq_versions").update({client_name:p.client_name||p.name,client_phone:p.client_phone,client_email:p.client_email,project_name:p.name,property:p.site_address,quote_date:new Date().toISOString().slice(0,10)}).eq("id",id);
-      pwBoq(p,body);
+      G.openVersionId=id; G.boqView="sheet"; pwBoq(p,body);
     };
     return;
   }
-  // Versions: newest first. Open the one the user picked, else the newest.
+  // Versions: newest first. Default to the BOQ list; open a sheet only when asked.
   G.versions = versions;
+  if(G.boqView!=="sheet"){ return gBoqList(p, body, versions); }
   const picked = versions.find(v=>String(v.id)===String(G.openVersionId));
   G.boqId = (picked||versions[0]).id;
   G.ver   = picked||versions[0];
@@ -9660,12 +9721,18 @@ function gRender(p, body){
   if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
   ${gLockBanner()}
-  ${vers.length>1?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
+  ${isProj?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12.5px;flex-wrap:wrap">
+      <button class="ghost" id="gBackList" style="padding:4px 10px">← All BOQs</button>
+      <span style="color:var(--ink-soft)">Editing</span>
+      <b>${esc((G.ver&&((G.ver.title&&G.ver.title.trim())||G.ver.version_label))||"BOQ")}</b>
+      <span style="color:var(--ink-soft)">${esc((G.ver&&G.ver.version_label)||"")}</span>
+      ${G.ver&&G.ver.locked_at?`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">🔒 Locked</span>`:""}
+    </div>`:(vers.length>1?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px">
       <span style="color:var(--ink-soft)">Version</span>
       <select id="gVerPick" style="padding:6px 9px;border:1px solid var(--line-2);border-radius:8px;font-size:12px">
         ${vers.map(v=>`<option value="${v.id}" ${String(v.id)===String(G.boqId)?"selected":""}>${esc(v.version_label||("v"+v.version))}${v.locked_at?" · locked":""}</option>`).join("")}
       </select>
-    </div>`:""}
+    </div>`:"")}
   <div class="gbar">
     <div class="gsub">
       <button data-g="est" class="${G.tab==='est'?'on':''}">Estimator</button>
@@ -9692,6 +9759,7 @@ function gRender(p, body){
   if($("#gSendProp")) $("#gSendProp").onclick=()=>gSendProposal(p,body);
   if($("#gRevise")) $("#gRevise").onclick=()=>gNewRevision(p,body);
   if($("#gFinal")) $("#gFinal").onclick=()=>gFinaliseLock(p,body);
+  if($("#gBackList")) $("#gBackList").onclick=()=>{ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); G.boqView="list"; pwBoq(p,body); };
   if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); G.projectId?pwBoq(p,body):leadBoqGenerator(p,body); };
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
   if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
@@ -10479,7 +10547,7 @@ async function gNewRevision(p, body){
     if(cErr){ toast("Could not copy the BOQ items: "+cErr.message); return; }
   }
   gLogActivity(p,"New BOQ option created from "+(src.version_label||("v"+src.version)));
-  G.openVersionId=id; gStopAutosave();
+  G.openVersionId=id; G.boqView="sheet"; gStopAutosave();
   toast("New option created — this one is editable");
   if(G.projectId) pwBoq(p,body); else leadBoqGenerator(p,body);
 }
@@ -10495,6 +10563,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b56",date:"20 Sep 2026",title:"Project BOQ is now a list — open by name, make a new BOQ",points:[
+    "The project <b>BOQ</b> tab now opens on a <b>list of BOQs</b>: serial no, BOQ name, value, who created it and who last edited it (with date &amp; time). Click a <b style=\'color:var(--brass)\'>BOQ name</b> (shown in brass) to open and edit it.",
+    "The design consultant's original BOQ stays <b>🔒 Locked</b> and marked <b>Contract · ✓ Paid</b> after conversion — it can't be changed. Interior designers use <b>＋ New BOQ</b> to build the design / execution BOQ alongside it.",
+    "Every BOQ gets an automatic name and version label, autosaves as you work, and records created-by / last-edited-by. Rename any BOQ with the ✎ next to its name.",
+  ]},
   {build:"b55",date:"19 Sep 2026",title:"All leads load (1000+ cap fixed) · on-hold projects go quiet",points:[
     "The Leads board and table now load <b>every</b> lead. Past 1,000 leads the list silently dropped the overflow — contacted leads with no follow-up date were going missing. Both views now page through in full.",
     "A project set to <b>On hold</b> (or Cancelled) no longer gets any automated Priya follow-ups — weekly digest, payment nudges, needs-you chases and PM report nudges all stop until it's Active again.",
@@ -12108,7 +12181,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b55 · 19 Sep 2026";
+const APP_BUILD = "b56 · 20 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
