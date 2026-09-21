@@ -4578,7 +4578,7 @@ async function renderProjects(){
     <div id="projWrap">${skel(3,140)}</div>`;
   if(canWrite()) $("#newProjBtn").onclick=()=>newProjectForm();
   $("#pjQ").oninput=()=>{ renderProjects._q=$("#pjQ").value; drawProjBoard(); };
-  $("#pjMine").onclick=()=>{ renderProjects._mine=!renderProjects._mine; renderProjects(); };
+  $("#pjMine").onclick=()=>{ renderProjects._mine=!renderProjects._mine; $("#pjMine").classList.toggle("on",renderProjects._mine); drawProjBoard(); };
   $("#pjWho").onchange=()=>{ renderProjects._who=$("#pjWho").value; drawProjBoard(); };
   document.querySelectorAll("[data-vw]").forEach(b=>b.onclick=()=>{ localStorage.setItem("lsa_projview",b.dataset.vw); renderProjects(); });
 
@@ -5468,22 +5468,25 @@ async function renderProjectActivity(p){
 
 async function pwOverview(p,body){
   await ensureStaff();
-  const {data:ms}=await sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx");
-  let stones=ms||[];
+  const today=todayISO();
+  // fire every independent read for this tab at once (was 3+ sequential round-trips)
+  const opsP = canSeeOps(p) ? opsRollup(p).catch(()=>null) : Promise.resolve(null);
+  const [msRes,[{data:pays},{data:meets},{data:actions},{data:exacts}]]=await Promise.all([
+    sb.from("project_milestones").select("*").eq("project_id",p.id).order("sort_idx"),
+    Promise.all([
+      sb.from("project_payments").select("amount").eq("project_id",p.id),
+      sb.from("design_meetings").select("*").eq("project_id",p.id).neq("status","cancelled"),
+      sb.from("mom_actions").select("*").eq("project_id",p.id).eq("status","open"),
+      sb.from("project_activities").select("*").eq("project_id",p.id)
+    ])
+  ]);
+  let stones=(msRes&&msRes.data)||[];
   // self-heal: if a project has no milestones yet, seed them client-side
   if(!stones.length){
     const seed=STAGE_FLOW.map((s,i)=>({project_id:p.id,stage:s,sort_idx:i,status:"todo"}));
     const {data:ins}=await sb.from("project_milestones").insert(seed).select();
     stones=ins||seed;
   }
-  // ---- pull live signals from the other tabs ----
-  const today=todayISO();
-  const [{data:pays},{data:meets},{data:actions},{data:exacts}]=await Promise.all([
-    sb.from("project_payments").select("amount").eq("project_id",p.id),
-    sb.from("design_meetings").select("*").eq("project_id",p.id).neq("status","cancelled"),
-    sb.from("mom_actions").select("*").eq("project_id",p.id).eq("status","open"),
-    sb.from("project_activities").select("*").eq("project_id",p.id)
-  ]);
   const received=(pays||[]).reduce((s,r)=>s+Number(r.amount||0),0);
   const invoiced=Number(p.invoiced_total)||Number(p.contract_value)||0;
   const pending=Math.max(invoiced-received,0);
@@ -5496,12 +5499,10 @@ async function pwOverview(p,body){
 
   // Ops margin (procurement): admin-level / PM only — RLS blanks it for others anyway.
   let ops=null;
-  if(canSeeOps(p)){
-    try{
-      const R=await opsRollup(p);
-      const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
-      if(cv||R.committed) ops={committed:R.committed,budget:R.budget,pct:cv?Math.round((cv-R.projCost)/cv*100):null};
-    }catch(e){ ops=null; }
+  const R=await opsP;
+  if(R){
+    const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
+    if(cv||R.committed) ops={committed:R.committed,budget:R.budget,pct:cv?Math.round((cv-R.projCost)/cv*100):null};
   }
 
   const doneCount=stones.filter(s=>s.status==="done").length;
@@ -10607,6 +10608,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b67",date:"21 Sep 2026",title:"Projects open faster",points:[
+    "Opening a project now loads its overview in one go instead of a chain of separate server calls, so it appears noticeably quicker. The \'My projects\' filter also stops reloading the whole list.",
+  ]},
   {build:"b66",date:"21 Sep 2026",title:"Leads board is fast again",points:[
     "Searching and filtering the Leads board no longer reloads every lead from the server on each keystroke. The list loads once when you open Leads, then filters instantly in place. Search is also debounced.",
   ]},
@@ -12245,7 +12249,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b66 · 21 Sep 2026";
+const APP_BUILD = "b67 · 21 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
