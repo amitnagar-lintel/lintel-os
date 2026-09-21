@@ -88,6 +88,8 @@
   .col{background:var(--paper-2);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:120px}
   .col-h{display:flex;align-items:center;gap:7px;padding:4px 6px 10px;font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.05em}
   .dot{width:8px;height:8px;border-radius:50%}
+  .col-more{width:100%;margin-top:6px;padding:7px;border:1px dashed var(--line-2);background:transparent;color:var(--ink-soft);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
+  .col-more:hover{border-color:var(--brass);color:var(--ink)}
   .col-count{margin-left:auto;font-family:'IBM Plex Mono';font-size:11px;color:var(--ink-soft)}
   .card{background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 1px rgba(28,26,23,.03);cursor:pointer;overflow:hidden;transition:border-color .12s,transform .12s}
   .card:hover{border-color:var(--brass);transform:translateY(-1px)}
@@ -2483,6 +2485,7 @@ function lfMoreBadge(){
   else if(c){ c.remove(); }
 }
 function drawLeadsView(){
+  window.__leadTableCap=150;   // fresh filter → start from the top
   if(window.leadView==="table") return drawLeadsTable();
   if(window.leadView==="presales") return drawPresalesSheet();
   return drawBoard();
@@ -2763,8 +2766,10 @@ async function drawLeadsTable(){
   // presales_id is excluded on purpose: auto-assignment now sets it (Maleen) on every
   // lead, so it no longer signals ownership — including it would show her as Owner everywhere.
   const owner=l=>{const id=l.consultant_id||l.designer_id||l.pm_id;return id?staffName(id):"";};
+  const cap=Math.max(150, Number(window.__leadTableCap)||150);   // render at most `cap` rows; Show-more raises it
+  const shown=rows.slice(0,cap);
   host.innerHTML=`
-    <div class="lead-count">${rows.length} of ${(leads||[]).length} leads</div>
+    <div class="lead-count">Showing ${shown.length} of ${rows.length} (${(leads||[]).length} total)</div>
     <div class="ltbl-scroll">
     <table class="lead-table">
       <thead><tr>
@@ -2773,7 +2778,7 @@ async function drawLeadsTable(){
         <th class="hide-lg">Score</th><th class="hide-xl">Owner</th><th class="hide-sm">Follow-up</th><th class="hide-sm" title="Days from creation to today (open) or to close (won/lost)">Age</th>
       </tr></thead>
       <tbody>
-        ${rows.map(l=>{
+        ${shown.map(l=>{
           const pr=l.stage==="won"?projByLead[l.id]:null;
           const score=l.bant_score||bantFromQual(l);
           const sCls=score>=60?"hi":score<35?"lo":"";
@@ -2797,7 +2802,9 @@ async function drawLeadsTable(){
           </tr>`;
         }).join("")||`<tr><td colspan="10"><div class="empty" style="padding:30px">No leads match your filters.</div></td></tr>`}
       </tbody>
-    </table></div>`;
+    </table></div>
+    ${rows.length>cap?`<button type="button" class="col-more" id="lt_more" style="max-width:280px;margin:14px auto 4px;display:block">Show more · ${rows.length-cap} of ${rows.length} left</button>`:""}`;
+  { const _ltm=host.querySelector("#lt_more"); if(_ltm) _ltm.onclick=()=>{ window.__leadTableCap=cap+400; drawLeadsTable(); }; }
   host.querySelectorAll("[data-leadrow]").forEach(tr=>tr.onclick=()=>{
     const pid=tr.dataset.projrow;
     if(pid){ activeProject=Number(pid); projectTab="overview"; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(Number(pid)),60); }
@@ -2838,7 +2845,7 @@ async function drawBoard(){
     col.innerHTML=`<div class="col-h"><span class="dot" style="background:${color}"></span>${label}${(key==="won"||key==="lost")?` <span style="font-size:10.5px;font-weight:500;color:var(--ink-soft)">· ${leadMonthLabel()}</span>`:""}
       <span class="col-count">${items.length}</span></div>
       ${val?`<div class="col-val mono">${fmt(val)}${(key==="won"||key==="lost")?` <span style="font-size:10px;font-weight:400;color:var(--ink-soft)">ex-GST</span>`:""}</div>`:""}`;
-    items.forEach(l=>{
+    const buildCard=(l)=>{
       // WON: show as a compact "converted → project" link, not a full lead card
       if(key==="won"){
         const pr=projByLead[l.id];
@@ -2850,8 +2857,7 @@ async function drawBoard(){
           if(pr){ activeProject=pr.id; projectTab="overview"; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(pr.id),60); }
           else openLead(l.id);
         };
-        col.appendChild(c);
-        return;
+        return c;
       }
       const score=l.bant_score||bantFromQual(l);
       const sCls=score>=60?"hi":score<35?"lo":"";
@@ -2868,8 +2874,19 @@ async function drawBoard(){
       c.onclick=()=>openLead(l.id);
       const waBtn=c.querySelector(".card-wa");
       if(waBtn) waBtn.onclick=(e)=>{ e.stopPropagation(); waMenu(l, waBtn); };
-      col.appendChild(c);
-    });
+      return c;
+    };
+    // Render at most CAP cards per column; a "Show all" button reveals the rest on
+    // demand. The New column alone can hold ~700 leads — building them all every
+    // draw was the remaining Leads-board lag.
+    const CAP=60;
+    (items.length>CAP?items.slice(0,CAP):items).forEach(l=>col.appendChild(buildCard(l)));
+    if(items.length>CAP){
+      const more=document.createElement("button"); more.type="button"; more.className="col-more";
+      more.textContent="Show all "+items.length+" \u2192";
+      more.onclick=()=>{ items.slice(CAP).forEach(l=>col.insertBefore(buildCard(l),more)); more.remove(); if(typeof s2lStartTicker==="function") s2lStartTicker(); };
+      col.appendChild(more);
+    }
     board.appendChild(col);
   });
   s2lStartTicker();
@@ -10608,6 +10625,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b68",date:"21 Sep 2026",title:"Leads board renders instantly",points:[
+    "The board now shows the first 60 leads per column with a <b>Show all</b> button for the rest, instead of drawing every card at once. With ~700 leads in New, that was the last thing making the board feel heavy — it now paints immediately and filters stay snappy.",
+  ]},
   {build:"b67",date:"21 Sep 2026",title:"Projects open faster",points:[
     "Opening a project now loads its overview in one go instead of a chain of separate server calls, so it appears noticeably quicker. The \'My projects\' filter also stops reloading the whole list.",
   ]},
@@ -12249,7 +12269,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b67 · 21 Sep 2026";
+const APP_BUILD = "b68 · 21 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
