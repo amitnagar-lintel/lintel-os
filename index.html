@@ -1535,11 +1535,18 @@ async function enter(session){
     }
     me = session.user;
     let prof = null;
-    try { const r = await sb.from("profiles").select("role,full_name").eq("id",me.id).single(); prof = r.data; } catch(e){}
+    // boot reads run together (were 3 sequential ~220 ms round-trips); the staff list is
+    // warmed here too so the first screen's ensureStaff() returns immediately
+    const [_pr,_tr] = await Promise.all([
+      sb.from("profiles").select("role,full_name").eq("id",me.id).single().then(r=>r,()=>({})),
+      sb.from("team_directory").select("phone").eq("linked_user_id", me.id).limit(1).then(r=>r,()=>({})),
+      ensureStaff().catch(()=>{})
+    ]);
+    prof = (_pr && _pr.data) || null;
     myRole = prof?.role || "interior_designer";
     myName = prof?.full_name || email.split("@")[0];
     myAvatar = (me.user_metadata && me.user_metadata.avatar_url) || "";
-    try { const t = await sb.from("team_directory").select("phone").eq("linked_user_id", me.id).limit(1); myPhone = (t.data && t.data[0] && t.data[0].phone) || ""; } catch(_) {}
+    myPhone = (_tr && _tr.data && _tr.data[0] && _tr.data[0].phone) || "";
     $("#login").style.display="none";
     $("#app").style.display="flex";
     $("#userName").textContent = prof?.full_name || email.split("@")[0];
@@ -2360,12 +2367,15 @@ function invalidateLeadsCache(){ _leadsCache=null; }
 const LEADS_LIST_COLS="id,name,phone,email,source,city,locality,property_type,project_type,budget_band,bant_score,stage,expected_value,owner_id,created_at,updated_at,site_address,next_follow_up,tags,consultant_id,designer_id,pm_id,presales_id,platform,lead_created_at,first_response_at,first_call_at,first_touch_at,sla_breached,sla_due_at,sla_escalated_l1_at,sla_escalated_l2_at,touch_count,last_touch_at,next_touch_due,rnr_count,is_duplicate,nurture_status,won_at,lost_at,activity_status,status_reason,resume_at,expected_close_date,win_probability,s2l_enabled,priya_handoff_at";  // only what the board/table need (was select * = ~2.9MB / 91 cols)
 async function loadLeadsData(force){
   if(!force && _leadsCache && (Date.now()-_leadsCacheAt)<60000) return _leadsCache;
-  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select(LEADS_LIST_COLS).order("id",{ascending:false}).range(a,b));
+  // leads pages + projects + BOQ totals all in one round-trip (were 4 sequential)
+  const [{data:leads,error},{data:projs}]=await Promise.all([
+    sbAllLeads((a,b)=>sb.from("leads").select(LEADS_LIST_COLS).order("id",{ascending:false}).range(a,b)),
+    sb.from("projects").select("id,code,name,lead_id"),
+    loadLeadQuoteTotals()
+  ]);
   if(error) throw error;
   leadAutoResume(leads||[]);
-  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
   const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
-  await loadLeadQuoteTotals();
   _leadsCache={leads:leads||[], projByLead}; _leadsCacheAt=Date.now();
   return _leadsCache;
 }
@@ -2375,10 +2385,14 @@ const LEAD_GROUPS={studio:[["presentations","Moodboard"],["vastu","Vastu"]]};
 const LEAD_SUB2GROUP={presentations:"studio",vastu:"studio",activity:"journal",notes:"journal",review:"journal"};
 let leadSubSel={studio:"presentations",journal:"activity"};
 
+let _staffP=null;   // de-dupes concurrent callers (boot warm-up + first screen)
 async function ensureStaff(){
   if(STAFF.length) return;
-  const {data:dir}=await sb.from("team_directory").select("*").eq("is_active",true).order("full_name");
-  STAFF=(dir||[]).map(d=>({ id:d.id, full_name:d.full_name, email:d.email, role:d.app_role, designation:d.designation, phone:d.phone }));
+  if(!_staffP) _staffP=(async()=>{
+    const {data:dir}=await sb.from("team_directory").select("*").eq("is_active",true).order("full_name");
+    STAFF=(dir||[]).map(d=>({ id:d.id, full_name:d.full_name, email:d.email, role:d.app_role, designation:d.designation, phone:d.phone }));
+  })().finally(()=>{ _staffP=null; });
+  return _staffP;
 }
 function staffName(id){ const s=STAFF.find(x=>String(x.id)===String(id)); return s?(s.full_name||s.email):""; }
 // map a profiles.id (uuid of who logged an activity) to a display name
@@ -2727,13 +2741,19 @@ function psConfetti(host){
 // leads with no follow-up date fell off. Page through in 1000-row chunks with a
 // stable id tiebreaker so every lead loads.
 async function sbAllLeads(build){
-  const out=[]; const size=1000; let from=0;
-  for(;;){
-    const {data,error}=await build(from, from+size-1);
-    if(error) return {data:out,error};
-    if(data&&data.length) out.push(...data);
-    if(!data||data.length<size) break;
-    from+=size;
+  const size=1000;
+  // first two pages together (1,300 leads = 2 pages → one round-trip instead of two)
+  const [a,b]=await Promise.all([build(0,size-1), build(size,2*size-1)]);
+  if(a.error) return {data:[],error:a.error};
+  const out=[...(a.data||[])];
+  if((a.data||[]).length<size) return {data:out,error:null};
+  if(b.error) return {data:out,error:b.error};
+  let last=b.data||[]; out.push(...last);
+  let from=2*size;
+  while(last.length===size){
+    const r=await build(from, from+size-1);
+    if(r.error) return {data:out,error:r.error};
+    last=r.data||[]; out.push(...last); from+=size;
   }
   return {data:out,error:null};
 }
@@ -10625,6 +10645,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b70",date:"21 Sep 2026",title:"Faster everywhere",points:[
+    "Lintel OS now opens instantly from its saved copy and updates itself in the background; after an update it reloads once on its own.",
+    "Sign-in, the dashboard and the Leads list now ask the server for everything at once instead of one request after another, and the database checks your access once per request instead of once per row. Dashboards and lists load several times faster.",
+  ]},
   {build:"b69",date:"21 Sep 2026",title:"Leads loads far less data",points:[
     "Opening Leads used to download ~2.9 MB (every column of every lead) each time. It now fetches only the columns the list shows and keeps them for a minute, so the board opens quickly and re-opening is instant. Opening a single lead still loads its full detail.",
   ]},
@@ -12272,7 +12296,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b69 · 21 Sep 2026";
+const APP_BUILD = "b70 · 21 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
