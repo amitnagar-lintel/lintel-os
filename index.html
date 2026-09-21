@@ -1310,7 +1310,7 @@ async function s2lLogCall(l){
     closeModal(); toast(handedToPriya?"Call logged · handed to Priya to follow up":(outcome==="connected"?"Call logged":"Call logged · retry booked (2 h later in hours, else tomorrow morning)"));
     if(activeLead===l.id) renderLeadWorkspace(l.id);
     else if($("#dashS2lCalls")) renderDashboard();
-    else drawLeadsView();
+    else { invalidateLeadsCache(); drawLeadsView(); }
   };
 }
 // Possession-delay requires a possession month; starts the monthly nurture loop
@@ -2351,6 +2351,21 @@ async function loadLeadQuoteTotals(){
   leadQuoteTotals={}; (data||[]).forEach(v=>{ if(v.lead_id!=null && !(v.lead_id in leadQuoteTotals)) leadQuoteTotals[v.lead_id]=(Number(v.total_ex_gst)>0)?Number(v.total_ex_gst):Math.round((Number(v.total)||0)/1.18); });
 }
 const leadPipelineValue=l=>{ const q=leadQuoteTotals[l.id]; return q>0?q:Number(l.expected_value||0); };
+// Leads-list data cache: fetch leads + projects + BOQ totals ONCE per view entry;
+// filter/search/sort then run in memory (no re-fetch per keystroke). Invalidate on writes.
+let _leadsCache=null;
+function invalidateLeadsCache(){ _leadsCache=null; }
+async function loadLeadsData(force){
+  if(!force && _leadsCache) return _leadsCache;
+  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("id",{ascending:false}).range(a,b));
+  if(error) throw error;
+  leadAutoResume(leads||[]);
+  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
+  const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
+  await loadLeadQuoteTotals();
+  _leadsCache={leads:leads||[], projByLead};
+  return _leadsCache;
+}
 let activeLead = null, leadTab = "overview";
 const LEAD_TABS = [["overview","Overview"],["briefing","Briefing"],["boq","BOQ & Proposal"],["meetings","Meetings & MoM"],["studio","Studio"],["journal","Activity & Notes"]];
 const LEAD_GROUPS={studio:[["presentations","Moodboard"],["vastu","Vastu"]]};
@@ -2412,6 +2427,7 @@ async function renderLeads(){
     }
   }
   if(activeLead) return renderLeadWorkspace(activeLead);
+  invalidateLeadsCache();   // entering the Leads view → refetch once; filters reuse the cache
   const m=$("#main");
   if(!window.leadView) window.leadView = (window.innerWidth<=640 ? "table" : "board");
   const advN=(leadFilters.dueOnly?1:0)+(leadFilters.dupOnly?1:0)+(leadFilters.createdMonth?1:0)+((leadFilters.closeMonth&&leadFilters.closeMonth!==leadMonthNow())?1:0);
@@ -2446,7 +2462,7 @@ async function renderLeads(){
   if(canWrite()) $("#addLead").onclick=()=>leadForm();
   if(canManageLeads()&&$("#importLeads")) $("#importLeads").onclick=()=>leadImportForm();
   $$(".viewtoggle button").forEach(b=>b.onclick=()=>{ window.leadView=b.dataset.lv; renderLeads(); });
-  $("#lf_search").oninput=e=>{leadFilters.search=e.target.value;drawLeadsView();};
+  $("#lf_search").oninput=e=>{leadFilters.search=e.target.value; clearTimeout(window.__leadSearchT); window.__leadSearchT=setTimeout(drawLeadsView,180);};
   $("#lf_channel").onchange=e=>{leadFilters.channel=e.target.value;drawLeadsView();};
   $("#lf_owner").onchange=e=>{leadFilters.owner=e.target.value;drawLeadsView();};
   $("#lf_tag").onchange=e=>{leadFilters.tag=e.target.value;drawLeadsView();};
@@ -2721,14 +2737,11 @@ async function sbAllLeads(build){
 async function drawLeadsTable(){
   const host=$("#board"); if(!host) return;
   host.className="lead-table-wrap";
-  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("updated_at",{ascending:false}).order("id",{ascending:false}).range(a,b));
-  leadAutoResume(leads);
-  if(error){host.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
-  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
-  const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
-  await loadLeadQuoteTotals();
+  let data; try{ data=await loadLeadsData(); }catch(e){ host.innerHTML=`<div class="empty">${esc(e.message)}</div>`; return; }
+  const projByLead=data.projByLead;
+  const leads=data.leads.slice().sort((x,y)=>{ const ax=x.updated_at||"", ay=y.updated_at||""; if(ax!==ay) return ax<ay?1:-1; return (y.id||0)-(x.id||0); });
   const f=leadFilters, q=f.search.toLowerCase();
-  const rows=(leads||[]).filter(l=>{
+  const rows=leads.filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.email||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.channel && channelOf(l).key!==f.channel) return false;
     // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
@@ -2794,16 +2807,12 @@ async function drawLeadsTable(){
 }
 
 async function drawBoard(){
-  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("next_follow_up",{ascending:true,nullsFirst:false}).order("id",{ascending:false}).range(a,b));
-  leadAutoResume(leads);
   const board=$("#board"); if(!board) return;
-  if(error){board.innerHTML=`<div class="empty">${esc(error.message)}</div>`;return;}
-  // fetch projects to link won leads to their converted project
-  const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
-  const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
-  await loadLeadQuoteTotals();
+  let data; try{ data=await loadLeadsData(); }catch(e){ board.innerHTML=`<div class="empty">${esc(e.message)}</div>`; return; }
+  const projByLead=data.projByLead;
+  const leads=data.leads.slice().sort((x,y)=>{ const ax=x.next_follow_up||"\uffff", ay=y.next_follow_up||"\uffff"; if(ax!==ay) return ax<ay?-1:1; return (y.id||0)-(x.id||0); });
   const f=leadFilters, q=f.search.toLowerCase();
-  const filtered=(leads||[]).filter(l=>{
+  const filtered=leads.filter(l=>{
     if(q && !(`${l.name} ${l.phone||""} ${l.locality||""} ${l.site_address||""}`.toLowerCase().includes(q))) return false;
     if(f.channel && channelOf(l).key!==f.channel) return false;
     // "Unassigned" ignores presales_id — it is auto-set to Maleen on every lead now,
@@ -3120,7 +3129,7 @@ async function leadImportForm(){
     closeModal();
     toast(err?`Imported ${added}, then failed: ${err}`:`Imported ${added} lead${added===1?"":"s"}${dup.length?` · ${dup.length} duplicate${dup.length===1?"":"s"} skipped`:""}`);
     if(dup.length) console.info("Lead import — duplicates skipped:\n"+dup.join("\n"));
-    drawLeadsView();
+    invalidateLeadsCache(); drawLeadsView();
   };
 }
 
@@ -3241,7 +3250,7 @@ async function saveLeadRow(row,lead){
     if(res.error) return toast(res.error.message);
     if(!lead && newId) await sb.from("lead_activities").insert({lead_id:newId,type:"created",text:"Lead added via "+(row.source||"—"),by_user:me.id});
     closeModal(); toast(lead?"Lead updated":"Lead created");
-    if(activeLead) renderLeadWorkspace(activeLead); else drawBoard();
+    invalidateLeadsCache(); if(activeLead) renderLeadWorkspace(activeLead); else drawBoard();
 }
 
 /* ===================== LEAD WORKSPACE (full-page, tabbed) ===================== */
@@ -10598,6 +10607,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b66",date:"21 Sep 2026",title:"Leads board is fast again",points:[
+    "Searching and filtering the Leads board no longer reloads every lead from the server on each keystroke. The list loads once when you open Leads, then filters instantly in place. Search is also debounced.",
+  ]},
   {build:"b65",date:"20 Sep 2026",title:"Reverted to the light theme",points:[
     "The dark theme has been removed. Lintel OS uses the single light theme — ivory, navy, and the Lintel logo gold.",
   ]},
@@ -12233,7 +12245,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b65 · 20 Sep 2026";
+const APP_BUILD = "b66 · 21 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
