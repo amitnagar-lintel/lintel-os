@@ -2355,17 +2355,18 @@ async function loadLeadQuoteTotals(){
 const leadPipelineValue=l=>{ const q=leadQuoteTotals[l.id]; return q>0?q:Number(l.expected_value||0); };
 // Leads-list data cache: fetch leads + projects + BOQ totals ONCE per view entry;
 // filter/search/sort then run in memory (no re-fetch per keystroke). Invalidate on writes.
-let _leadsCache=null;
+let _leadsCache=null, _leadsCacheAt=0;
 function invalidateLeadsCache(){ _leadsCache=null; }
+const LEADS_LIST_COLS="id,name,phone,email,source,city,locality,property_type,project_type,budget_band,bant_score,stage,expected_value,owner_id,created_at,updated_at,site_address,next_follow_up,tags,consultant_id,designer_id,pm_id,presales_id,platform,lead_created_at,first_response_at,first_call_at,first_touch_at,sla_breached,sla_due_at,sla_escalated_l1_at,sla_escalated_l2_at,touch_count,last_touch_at,next_touch_due,rnr_count,is_duplicate,nurture_status,won_at,lost_at,activity_status,status_reason,resume_at,expected_close_date,win_probability,s2l_enabled,priya_handoff_at";  // only what the board/table need (was select * = ~2.9MB / 91 cols)
 async function loadLeadsData(force){
-  if(!force && _leadsCache) return _leadsCache;
-  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select("*").order("id",{ascending:false}).range(a,b));
+  if(!force && _leadsCache && (Date.now()-_leadsCacheAt)<60000) return _leadsCache;
+  const {data:leads,error}=await sbAllLeads((a,b)=>sb.from("leads").select(LEADS_LIST_COLS).order("id",{ascending:false}).range(a,b));
   if(error) throw error;
   leadAutoResume(leads||[]);
   const {data:projs}=await sb.from("projects").select("id,code,name,lead_id");
   const projByLead={}; (projs||[]).forEach(pr=>{ if(pr.lead_id) projByLead[pr.lead_id]=pr; });
   await loadLeadQuoteTotals();
-  _leadsCache={leads:leads||[], projByLead};
+  _leadsCache={leads:leads||[], projByLead}; _leadsCacheAt=Date.now();
   return _leadsCache;
 }
 let activeLead = null, leadTab = "overview";
@@ -2429,7 +2430,6 @@ async function renderLeads(){
     }
   }
   if(activeLead) return renderLeadWorkspace(activeLead);
-  invalidateLeadsCache();   // entering the Leads view → refetch once; filters reuse the cache
   const m=$("#main");
   if(!window.leadView) window.leadView = (window.innerWidth<=640 ? "table" : "board");
   const advN=(leadFilters.dueOnly?1:0)+(leadFilters.dupOnly?1:0)+(leadFilters.createdMonth?1:0)+((leadFilters.closeMonth&&leadFilters.closeMonth!==leadMonthNow())?1:0);
@@ -3272,7 +3272,7 @@ async function saveLeadRow(row,lead){
 
 /* ===================== LEAD WORKSPACE (full-page, tabbed) ===================== */
 function openLead(id){ activeLead=id; leadTab="overview"; renderLeadWorkspace(id); }
-function closeLead(){ activeLead=null; renderLeads(); }
+function closeLead(){ activeLead=null; invalidateLeadsCache(); renderLeads(); }
 async function refreshLead(){ renderLeadWorkspace(activeLead); }
 
 async function renderLeadWorkspace(id){
@@ -10625,6 +10625,9 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b69",date:"21 Sep 2026",title:"Leads loads far less data",points:[
+    "Opening Leads used to download ~2.9 MB (every column of every lead) each time. It now fetches only the columns the list shows and keeps them for a minute, so the board opens quickly and re-opening is instant. Opening a single lead still loads its full detail.",
+  ]},
   {build:"b68",date:"21 Sep 2026",title:"Leads board renders instantly",points:[
     "The board now shows the first 60 leads per column with a <b>Show all</b> button for the rest, instead of drawing every card at once. With ~700 leads in New, that was the last thing making the board feel heavy — it now paints immediately and filters stay snappy.",
   ]},
@@ -12269,7 +12272,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b68 · 21 Sep 2026";
+const APP_BUILD = "b69 · 21 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
