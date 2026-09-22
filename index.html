@@ -279,8 +279,6 @@
   .tl-who{font-size:11px;color:var(--ink-soft);margin-top:3px;font-style:italic}
   .tl-empty{color:var(--ink-soft);font-size:14px;padding:14px;background:var(--paper-2);border-radius:8px;text-align:center}
   .nm{display:flex;align-items:center;justify-content:space-between;gap:6px}
-  .card-wa{border:1px solid #25D366;background:#EAFBF0;color:#0a7a3a;border-radius:6px;font-size:11px;font-weight:700;padding:2px 6px;cursor:pointer;flex:none;line-height:1.4}
-  .card-wa:hover{background:#25D366;color:#fff}
   .wa-menu{position:absolute;z-index:200;background:#fff;border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.18);width:240px;padding:6px;overflow:hidden}
   .wa-menu-h{font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.5px;padding:6px 10px 4px}
   .wa-menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 10px;border-radius:7px;font-size:14px;cursor:pointer;color:var(--ink)}
@@ -2883,7 +2881,7 @@ async function drawBoard(){
       const sCls=score>=60?"hi":score<35?"lo":"";
       const dc=dueClass(l.next_follow_up);
       const c=document.createElement("div");c.className="card";
-      c.innerHTML=`<div class="nm">${esc(l.name)}${l.phone?`<button class="card-wa" title="WhatsApp">‎🟢 WA</button>`:""}</div>
+      c.innerHTML=`<div class="nm">${esc(l.name)}</div>
         <div class="meta">${[esc(l.locality||l.city||""),l.project_type?esc(l.project_type):"",`<span title="Lead age in days">${leadAgeDays(l)}d</span>`,leadAvailBadge(l)].filter(Boolean).join(" · ")}</div>
         <div class="tagrow">${channelChipHtml(l)}${(l.tags||[]).slice(0,3).map(t=>`<span class="tg">${esc(t)}</span>`).join("")}${l.s2l_enabled===false?`<span class="tg" title="Consultant-handled · Priya silent">🤝</span>`:""}</div>
         ${(s2lSlaChipHtml(l)||s2lDupBadgeHtml(l)||coldChipHtml(l))?`<div class="s2l-row" style="margin:6px 0 2px">${s2lSlaChipHtml(l)} ${coldChipHtml(l)} ${s2lDupBadgeHtml(l)}</div>`:""}
@@ -2892,8 +2890,6 @@ async function drawBoard(){
         <span class="val" title="${leadPipelineValue(l)?esc(fmt(leadPipelineValue(l))):''}">${leadPipelineValue(l)?fmtC(leadPipelineValue(l)):""}</span></div>
         ${(l.pm_id||l.consultant_id)?`<div class="avrow">${[l.consultant_id,l.designer_id,l.pm_id].filter(Boolean).map(id=>`<span class="av" title="${esc(staffName(id))}">${initials(staffName(id))}</span>`).join("")}</div>`:""}`;
       c.onclick=()=>openLead(l.id);
-      const waBtn=c.querySelector(".card-wa");
-      if(waBtn) waBtn.onclick=(e)=>{ e.stopPropagation(); waMenu(l, waBtn); };
       return c;
     };
     // Render at most CAP cards per column; a "Show all" button reveals the rest on
@@ -12296,7 +12292,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b70 · 21 Sep 2026";
+const APP_BUILD = "b71 · 22 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
