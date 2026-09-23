@@ -1863,8 +1863,8 @@ async function renderPostSales(hostSel){
 /* ===================== DASHBOARD ===================== */
 function dashAttnSync(){
   const a=$("#dashAttn"); if(!a) return;
-  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal"), sq=$("#dashSla"), mc=$("#dashCloseout"), lt=$("#dashLeadTasks");
-  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim())||(sq&&sq.innerHTML.trim())||(mc&&mc.innerHTML.trim())||(lt&&lt.innerHTML.trim()))?"":"none";
+  const cr=$("#dashClientReplies"), s2=$("#dashS2lCalls"), ps=$("#dashPostSales"), dr=$("#dashDelivery"), cs=$("#dashCsatLow"), cp=$("#dashClientPortal"), sq=$("#dashSla"), mc=$("#dashCloseout"), lt=$("#dashLeadTasks"), ba=$("#dashBoqApprovals");
+  a.style.display=((cr&&cr.innerHTML.trim())||(s2&&s2.innerHTML.trim())||(ps&&ps.innerHTML.trim())||(dr&&dr.innerHTML.trim())||(cs&&cs.innerHTML.trim())||(cp&&cp.innerHTML.trim())||(sq&&sq.innerHTML.trim())||(mc&&mc.innerHTML.trim())||(lt&&lt.innerHTML.trim())||(ba&&ba.innerHTML.trim()))?"":"none";
 }
 /* CSAT on the dashboard: KPI tile (avg ★ this month) + low-score watchlist strip */
 /* Monthly sales — booked (converted) value ex-GST per month, FY-to-date from April.
@@ -1998,6 +1998,7 @@ async function renderDashboard(){
       <div class="sec-label">Needs attention</div>
       <div id="dashSla"></div>
       <div id="dashLeadTasks"></div>
+      <div id="dashBoqApprovals"></div>
       <div id="dashCloseout"></div>
       <div id="dashClientReplies"></div>
       <div id="dashClientPortal"></div>
@@ -2055,7 +2056,7 @@ async function renderDashboard(){
   const S = stats||{}; const L = leads||[];
   renderSlaQueue(Array.isArray(slaQ)?slaQ:[]);
   renderCloseoutStrip(Array.isArray(toClose)?toClose:[]);
-  renderDirectives(); renderLeadSources(); renderLeadTasksStrip();
+  renderDirectives(); renderLeadSources(); renderLeadTasksStrip(); renderBoqApprovalsStrip();
   renderPrintQueue();
   const SC=(score&&score.rows)||[];
 
@@ -2258,6 +2259,25 @@ async function renderLeadTasksStrip(){
   host.querySelectorAll("[data-ltdone]").forEach(b=>b.onclick=async e=>{ e.stopPropagation(); const {error}=await sb.from("lead_tasks").update({status:"done"}).eq("id",Number(b.dataset.ltdone)); if(error) return toast(error.message); toast("Task done"); renderLeadTasksStrip(); });
   dashAttnSync();
 }
+/* PARTNER-07: design-partner BOQs waiting for my approval (project consultant; admins see all) */
+async function renderBoqApprovalsStrip(){
+  const host=$("#dashBoqApprovals"); if(!host||!canWrite()) return;
+  const {data}=await sb.rpc("boqs_awaiting_my_approval"); const list=Array.isArray(data)?data:[];
+  if(!list.length){ host.innerHTML=""; dashAttnSync(); return; }
+  host.innerHTML=`<div style="margin-bottom:14px">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#B7791F;font-weight:600;margin-bottom:10px">BOQs awaiting your approval <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--ink-soft)">· from design partners</span></div>
+    <div class="s2l-call-list">${list.map(b=>`<div class="s2l-call" data-bap="${b.project_id}" data-bav="${b.id}">
+      <span class="s2l-chip s2l-amber" style="animation:none;min-width:84px;justify-content:center">${b.submitted_at?new Date(b.submitted_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):"—"}</span>
+      <div class="s2l-call-main"><div class="s2l-call-nm">${esc(b.title)} <span style="font-weight:400;color:var(--ink-soft)">· 🏗 ${esc(b.project||"")}</span></div><div class="s2l-call-sub">${esc(b.partner||"Design partner")}${b.total!=null?" · "+esc(fmt(Number(b.total))):""}${b.consultant?" · for "+esc(b.consultant):""}</div></div>
+      <button class="s2l-call-btn log">Review</button></div>`).join("")}</div></div>`;
+  host.querySelectorAll("[data-bap]").forEach(el=>el.onclick=()=>{
+    G.openVersionId=Number(el.dataset.bav); G.boqView="sheet";
+    activeProject=Number(el.dataset.bap); projectTab="boq"; activeLead=null; render("projects");
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    setTimeout(()=>renderProjectWorkspace(activeProject),60);
+  });
+  dashAttnSync();
+}
 /* SOURCE-01: where the money comes from — per source, FY to date */
 async function renderSourceRoi(){
   const host=$("#dashRoiBody"); if(!host) return;
@@ -2403,9 +2423,10 @@ function staffNameByProfile(uid){
   if(me && uid===me.id) return (me.email?me.email.split("@")[0]:"You");
   return PROFILE_NAMES[uid] || "";
 }
+let PROFILE_ROLES = {};
 async function loadProfileNames(){
-  const {data}=await sb.from("profiles").select("id,full_name,email");
-  (data||[]).forEach(p=>{ PROFILE_NAMES[p.id]=p.full_name||(p.email?p.email.split("@")[0]:""); });
+  const {data}=await sb.from("profiles").select("id,full_name,email,role");
+  (data||[]).forEach(p=>{ PROFILE_NAMES[p.id]=p.full_name||(p.email?p.email.split("@")[0]:""); PROFILE_ROLES[p.id]=p.role; });
 }
 function staffOpts(sel){ return `<option value="" ${!sel?"selected":""}>— unassigned —</option>`+STAFF.map(s=>`<option value="${s.id}" ${String(s.id)===String(sel)?"selected":""}>${esc(s.full_name||s.email)}${s.designation?" · "+esc(s.designation):""}</option>`).join(""); }
 function initials(n){ return (n||"?").split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase(); }
@@ -9581,12 +9602,13 @@ async function gBoqList(p, body, versions){
     const badges=[
       v.locked_at?`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">🔒 Locked</span>`:"",
       isContract?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">Contract</span>`:"",
-      (isContract&&paid)?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✓ Paid</span>`:""
+      (isContract&&paid)?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✓ Paid</span>`:"",
+      (gIsPartnerBoq(v)&&!v.locked_at)?({submitted:`<span class="s2l-chip s2l-amber" style="animation:none;padding:1px 7px;font-size:10px">⏳ Awaiting approval</span>`,approved:`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✅ Approved</span>`,returned:`<span class="s2l-chip s2l-red" style="animation:none;padding:1px 7px;font-size:10px">↩ Sent back</span>`}[gReviewStatus(v)]||`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">✍ Partner draft</span>`):""
     ].filter(Boolean).join(" ");
     return `<tr style="border-bottom:1px solid var(--line)">
       <td style="padding:9px 10px;color:var(--ink-soft)">${i+1}</td>
       <td style="padding:9px 10px">
-        <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${(canWrite()||gPartnerOwns(v))?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
+        <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${(canWrite()||gPartnerCanEdit(v))?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
         <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(v.version_label||("v"+v.version))}${badges?" · "+badges:""}</div>
       </td>
       <td style="padding:9px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${v.total!=null?fmt(Number(v.total)):"—"}</td>
@@ -9779,7 +9801,14 @@ function gLocked(){ return !!((G.ver||{}).locked_at); }
 // The single source of truth for "may this user change this BOQ version?"
 // Partners edit only BOQs they created themselves; older BOQs on the project are read-only.
 function gPartnerOwns(v){ return !!(G.partnerBoq && v && me && String(v.created_by||"")===String(me.id)); }
-function gCanEdit(){ return (canWrite()||gPartnerOwns(G.ver)) && (!gLocked() || isBoqAdmin()); }
+/* PARTNER-07: a partner's BOQ goes none → submitted → approved | returned. The partner
+   edits only while none/returned; staff share it with the client only once approved. */
+function gReviewStatus(v){ return ((v||G.ver||{}).review_status)||"none"; }
+function gPartnerCanEdit(v){ return gPartnerOwns(v) && ["none","returned"].includes(gReviewStatus(v)); }
+function gIsPartnerBoq(v){ v=v||G.ver||{}; return PROFILE_ROLES[v.created_by]==="design_partner"; }
+function gNeedsApproval(v){ v=v||G.ver||{}; return gIsPartnerBoq(v) && gReviewStatus(v)!=="approved"; }
+function gCanApprove(p){ return canWrite() && (isAdminLevel() || (p&&p.consultant_id&&String(p.consultant_id)===String(myTeamId()))); }
+function gCanEdit(){ return (canWrite()||gPartnerCanEdit(G.ver)) && (!gLocked() || isBoqAdmin()); }
 
 function gLockBanner(){
   const L=gLockInfo();
@@ -9787,6 +9816,16 @@ function gLockBanner(){
   const when=L.lockedAt?new Date(L.lockedAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
   const why=LOCK_REASON_TEXT[L.reason]||"the client committed";
   const sent=L.sentAt?` · proposal emailed ${new Date(L.sentAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}`:"";
+  const rs=gReviewStatus(), rv=G.ver||{}, rwho=PROFILE_NAMES[rv.reviewed_by]||"the consultant";
+  const rdt=iso=>iso?new Date(iso).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):"";
+  if(gIsPartnerBoq()&&rs==="submitted"&&!L.locked)
+    return box("#FBF5E6","#D4B06A",`⏳ <b>Submitted for approval</b> by ${esc(PROFILE_NAMES[rv.submitted_by]||"the design partner")} on ${esc(rdt(rv.submitted_at))}. ${G.partnerBoq?"It is read-only until the design consultant approves it or sends it back.":"Approve it to allow sharing with the client, or send it back with a note."}`);
+  if(gIsPartnerBoq()&&rs==="returned"&&!L.locked)
+    return box("#F6E7E3","#D9A79B",`↩ <b>Sent back</b> by ${esc(rwho)} on ${esc(rdt(rv.reviewed_at))}${rv.review_note?`: <i>${esc(rv.review_note)}</i>`:""}. ${G.partnerBoq?"Make the changes and submit again.":""}`);
+  if(gIsPartnerBoq()&&rs==="approved"&&!L.locked)
+    return box("#EAF3EC","#9CC5A6",`✅ <b>Approved</b> by ${esc(rwho)} on ${esc(rdt(rv.reviewed_at))}. ${G.partnerBoq?"Your design consultant will share it with the client.":"It can now be shared with the client."}`);
+  if(gIsPartnerBoq()&&rs==="none"&&G.partnerBoq&&!L.locked)
+    return box("#EAF0F6","#A9C2DA",`✍ <b>Draft.</b> When the BOQ is complete, press <b>📨 Submit for approval</b> — your design consultant reviews it and shares it with the client.`);
   if(G.partnerBoq && !gPartnerOwns(G.ver) && !L.locked)
     return box("#EAF0F6","#A9C2DA",`👁 <b>Read-only.</b> This BOQ was created by ${esc(PROFILE_NAMES[(G.ver||{}).created_by]||"a colleague")}. You can view it; use <b>＋ New BOQ</b> on the BOQ list to build your own design BOQ for this project.`);
   if(L.locked && !isBoqAdmin())
@@ -9828,14 +9867,17 @@ function gRender(p, body){
     </div>
     <div class="gact">
       ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
-      ${canWrite()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
-      ${!ro&&!L.locked?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
+      ${(G.partnerBoq&&gPartnerCanEdit(G.ver)&&!L.locked)?`<button class="primary" id="gSubmit" title="Send this BOQ to the project's design consultant for approval">📨 Submit for approval</button>`:''}
+      ${(gCanApprove(p)&&gIsPartnerBoq()&&gReviewStatus()==="submitted")?`<button class="primary" id="gApprove" title="Approve this design partner BOQ — it can then be shared with the client">✅ Approve</button><button class="ghost" id="gReturn" title="Send it back to the design partner with a note">↩ Send back</button>`:''}
+      ${canWrite()&&gNeedsApproval()?`<span class="s2l-chip s2l-queued" style="animation:none;align-self:center" title="Design partner BOQ — the project's design consultant must approve it before it is shared with the client">⏳ Approval needed before sharing</span>`:''}
+      ${canWrite()&&!gNeedsApproval()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
+      ${!ro&&!L.locked&&!G.partnerBoq?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
       ${(canWrite()||G.partnerBoq)&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
-      <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
+      ${G.partnerBoq?'':`<button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>`}
       <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
       ${canWrite()?`<button class="ghost" id="gStudio" title="Send the client quotation to the Canon printer in the studio">🖨 Print at studio</button>`:''}
-      <button class="primary" id="gPrint">Print / PDF</button>
+      ${G.partnerBoq?'':`<button class="primary" id="gPrint">Print / PDF</button>`}
     </div>
   </div>
   <div id="gBody"></div>`;
@@ -9843,6 +9885,9 @@ function gRender(p, body){
   $$(".gsub button").forEach(b=>b.onclick=()=>{ G.tab=b.dataset.g; gRender(p,body); });
   if(!ro&&$("#gSave")) $("#gSave").onclick=()=>gSave(p);
   if($("#gSendProp")) $("#gSendProp").onclick=()=>gSendProposal(p,body);
+  if($("#gSubmit")) $("#gSubmit").onclick=()=>gReviewAction(p,body,"submitted");
+  if($("#gApprove")) $("#gApprove").onclick=()=>gReviewAction(p,body,"approved");
+  if($("#gReturn")) $("#gReturn").onclick=()=>gReviewAction(p,body,"returned");
   if($("#gRevise")) $("#gRevise").onclick=()=>gNewRevision(p,body);
   if($("#gFinal")) $("#gFinal").onclick=()=>gFinaliseLock(p,body);
   if($("#gBackList")) $("#gBackList").onclick=()=>{ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); G.boqView="list"; pwBoq(p,body); };
@@ -10030,6 +10075,7 @@ async function gPdfBlob(p){
    as it was sent, and means the BOQ money math is never duplicated anywhere. */
 const QUOTE_VIEW_BASE="https://os.lintelspace.com/quote.html";
 async function gMakeQuoteLink(p){
+  if(gNeedsApproval()) throw new Error("Design partner BOQ awaiting consultant approval — it cannot be shared with the client yet.");
   const body=G.bodyEl||$("#pwBody");
   const prev=G.tab;
   if(prev!=="cli"){ G.tab="cli"; gRender(p,body); await new Promise(r=>setTimeout(r,300)); }
@@ -10552,8 +10598,36 @@ function gClientEmail(p){
     .map(x=>String(x||"").trim()).find(x=>x) || "";
   return (raw.split(/[\s,;]+/).find(e=>/.+@.+\..+/.test(e)) || "").trim();
 }
+/* PARTNER-07: submit / approve / send back a design partner's BOQ. */
+async function gReviewAction(p, body, next){
+  const v=G.ver||{}; if(!G.boqId) return;
+  const nm=(v.title&&v.title.trim())||v.version_label||("v"+v.version);
+  const cons=p&&p.consultant_id?staffName(p.consultant_id):"the design consultant";
+  let patch={review_status:next}, note=null, msg="";
+  if(next==="submitted"){
+    if(!gPartnerCanEdit(v)) return;
+    if(!confirm(`Submit "${nm}" to ${cons} for approval?\n\nYou won't be able to edit it until it is approved or sent back.`)) return;
+    if(typeof gStopAutosave==="function") gStopAutosave();
+    try{ await gSave(p,true); }catch(e){}
+    patch=Object.assign(patch,{submitted_by:me.id,submitted_at:new Date().toISOString(),reviewed_by:null,reviewed_at:null,review_note:null});
+    msg=`BOQ "${nm}" submitted for approval to ${cons} by ${myName||"design partner"}`;
+  }else{
+    if(!gCanApprove(p)) return toast("Only the project's design consultant (or an admin) can review this BOQ.");
+    if(next==="returned"){ note=prompt("What should the design partner change?"); if(note===null) return; }
+    else if(!confirm(`Approve "${nm}"? It can then be shared with the client.`)) return;
+    patch=Object.assign(patch,{reviewed_by:me.id,reviewed_at:new Date().toISOString(),review_note:note||null});
+    msg=next==="approved"?`BOQ "${nm}" approved by ${myName||"consultant"}`:`BOQ "${nm}" sent back to the design partner by ${myName||"consultant"}${note?": "+note:""}`;
+  }
+  const {error}=await sb.from("boq_versions").update(patch).eq("id",G.boqId);
+  if(error) return toast(error.message);
+  Object.assign(v,patch); if(G.versions){ const gv=G.versions.find(x=>String(x.id)===String(G.boqId)); if(gv) Object.assign(gv,patch); }
+  gLogActivity(p,msg);
+  toast(next==="submitted"?"Submitted for approval":next==="approved"?"Approved":"Sent back");
+  gRender(p,body);
+}
 async function gSendProposal(p, body){
   if(!canWrite()||!G.boqId) return;
+  if(gNeedsApproval()) return toast("This BOQ was built by a design partner — the design consultant must approve it before it is shared with the client.");
   const v=G.ver||{};
   const to=gClientEmail(p);
   if(!to) return toast("No client email on this BOQ, its project or its lead — add one in Client Details first.");
@@ -10593,7 +10667,7 @@ async function gSendProposal(p, body){
    team raises a NEW option (e.g. a different finish) alongside it. The DB lock
    guard allows any editor to LOCK an unlocked version; unlocking is admin-only. */
 async function gFinaliseLock(p, body){
-  if(!(canWrite()||gPartnerOwns(G.ver))||!G.boqId||gLocked()) return;
+  if(!canWrite()||!G.boqId||gLocked()) return;
   const v=G.ver||{};
   if(!confirm("Finalise & lock this BOQ?\n\nIt freezes "+(v.version_label||"this version")+" exactly as it is — the sheet stops changing and only Amit can edit it afterwards. Use ＋ New option to quote a different finish alongside it.")) return;
   await gSave(p, true);                     // commit pending edits BEFORE the freeze
@@ -12300,7 +12374,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b73 · 23 Sep 2026";
+const APP_BUILD = "b74 · 24 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
