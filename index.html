@@ -9586,7 +9586,7 @@ async function gBoqList(p, body, versions){
     return `<tr style="border-bottom:1px solid var(--line)">
       <td style="padding:9px 10px;color:var(--ink-soft)">${i+1}</td>
       <td style="padding:9px 10px">
-        <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${w?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
+        <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${(canWrite()||gPartnerOwns(v))?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
         <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(v.version_label||("v"+v.version))}${badges?" · "+badges:""}</div>
       </td>
       <td style="padding:9px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${v.total!=null?fmt(Number(v.total)):"—"}</td>
@@ -9777,7 +9777,9 @@ function gLockInfo(){
 }
 function gLocked(){ return !!((G.ver||{}).locked_at); }
 // The single source of truth for "may this user change this BOQ version?"
-function gCanEdit(){ return (canWrite()||G.partnerBoq) && (!gLocked() || isBoqAdmin()); }
+// Partners edit only BOQs they created themselves; older BOQs on the project are read-only.
+function gPartnerOwns(v){ return !!(G.partnerBoq && v && me && String(v.created_by||"")===String(me.id)); }
+function gCanEdit(){ return (canWrite()||gPartnerOwns(G.ver)) && (!gLocked() || isBoqAdmin()); }
 
 function gLockBanner(){
   const L=gLockInfo();
@@ -9785,6 +9787,8 @@ function gLockBanner(){
   const when=L.lockedAt?new Date(L.lockedAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
   const why=LOCK_REASON_TEXT[L.reason]||"the client committed";
   const sent=L.sentAt?` · proposal emailed ${new Date(L.sentAt).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}`:"";
+  if(G.partnerBoq && !gPartnerOwns(G.ver) && !L.locked)
+    return box("#EAF0F6","#A9C2DA",`👁 <b>Read-only.</b> This BOQ was created by ${esc(PROFILE_NAMES[(G.ver||{}).created_by]||"a colleague")}. You can view it; use <b>＋ New BOQ</b> on the BOQ list to build your own design BOQ for this project.`);
   if(L.locked && !isBoqAdmin())
     return box("#F6E7E3","#D9A79B",`🔒 <b>This BOQ is locked.</b> Frozen on ${esc(when)} because ${esc(why)}${sent}. Only Amit can change it — use <b>New revision</b> to quote a variation.`);
   if(L.locked && isBoqAdmin())
@@ -10589,7 +10593,7 @@ async function gSendProposal(p, body){
    team raises a NEW option (e.g. a different finish) alongside it. The DB lock
    guard allows any editor to LOCK an unlocked version; unlocking is admin-only. */
 async function gFinaliseLock(p, body){
-  if(!(canWrite()||G.partnerBoq)||!G.boqId||gLocked()) return;
+  if(!(canWrite()||gPartnerOwns(G.ver))||!G.boqId||gLocked()) return;
   const v=G.ver||{};
   if(!confirm("Finalise & lock this BOQ?\n\nIt freezes "+(v.version_label||"this version")+" exactly as it is — the sheet stops changing and only Amit can edit it afterwards. Use ＋ New option to quote a different finish alongside it.")) return;
   await gSave(p, true);                     // commit pending edits BEFORE the freeze
@@ -12296,7 +12300,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b72 · 23 Sep 2026";
+const APP_BUILD = "b73 · 23 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
