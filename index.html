@@ -1092,6 +1092,9 @@ const isDesignPartner = () => myRole === "design_partner";
 // activity feed). Partners qualify — but only their assigned projects are
 // reachable/writable (RLS PARTNER-04). Payments/BOQ/WOs stay canWrite()-only.
 const canWorkProject = () => canWrite() || isDesignPartner();
+// PARTNER-05: a design partner may build BOQs only on projects where THEY are the
+// assigned designer (projects.designer_id). RLS enforces the same rule server-side.
+const canBoqProject = p => canWrite() || (isDesignPartner() && !!(p&&p.designer_id) && String(p.designer_id)===String(myTeamId()));
 const roleLabel = r => ROLE_LABELS[r] || r || "—";
 
 const STAGES = [
@@ -4164,7 +4167,7 @@ function shareAdvance(l,total,advance){
 
 /* ---- BOQ generator on a lead (reuses module G, keyed by lead_id) ---- */
 async function leadBoqGenerator(l, host){
-  G.projectId=null; G.leadId=l.id;
+  G.projectId=null; G.leadId=l.id; G.partnerBoq=false;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
     G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
@@ -4864,19 +4867,20 @@ const PROJ_GROUPS={
   site:[["kom","Kick-off"],["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
 const PROJ_SUB2GROUP={payments:"finance",packages:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
-// Design partners: no Client / BOQ / Payments / Work Orders (RLS blocks the data anyway)
+// Design partners: no Client / Payments / Work Orders (RLS blocks the data anyway).
+// BOQ appears only on projects where the partner is the assigned designer (canBoqProject).
 const PARTNER_PROJ_TABS=["overview","design","moodboard","canvas","kom","progress","execution","snags","documents","team","support"];
 const projGroupSubs=g=>isDesignPartner()?PROJ_GROUPS[g].filter(s=>PARTNER_PROJ_TABS.includes(s[0])):PROJ_GROUPS[g];
-const projTabsFor=()=>PROJ_TABS.filter(t=>PROJ_GROUPS[t[0]]?projGroupSubs(t[0]).length:(!isDesignPartner()||PARTNER_PROJ_TABS.includes(t[0])));
+const projTabsFor=(p)=>PROJ_TABS.filter(t=>PROJ_GROUPS[t[0]]?projGroupSubs(t[0]).length:(!isDesignPartner()||PARTNER_PROJ_TABS.includes(t[0])||(t[0]==="boq"&&canBoqProject(p))));
 
 async function renderProjectWorkspace(pid){
   await ensureStaff();
   // legacy deep-links (payments/design/execution/...) land on their new group tab
   if(PROJ_SUB2GROUP[projectTab]){ projSubSel[PROJ_SUB2GROUP[projectTab]]=projectTab; projectTab=PROJ_SUB2GROUP[projectTab]; }
-  if(!projTabsFor().some(t=>t[0]===projectTab)) projectTab="overview";
   const m=$("#main");
   const {data:p,error}=await sb.from("projects").select("*").eq("id",pid).single();
   if(error||!p){ activeProject=null; return renderProjects(); }
+  if(!projTabsFor(p).some(t=>t[0]===projectTab)) projectTab="overview";
   m.innerHTML=`
     <div class="pw-top">
       <span style="display:inline-flex;align-items:center"><button class="crumb" id="pwBack">Projects</button><span class="crumb-sep">›</span></span>
@@ -4887,7 +4891,7 @@ async function renderProjectWorkspace(pid){
       ${canWrite()?`<button class="ghost" id="pwJourney" title="Generate the client's journey plan">📄 Journey plan</button>`:""}
     </div>
     <nav class="pw-tabs" id="pwTabs">
-      ${projTabsFor().map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
+      ${projTabsFor(p).map(t=>`<button data-t="${t[0]}" class="${projectTab===t[0]?"active":""}">${t[1]}</button>`).join("")}
     </nav>
     <div id="pwBody">${skel(3,110)}</div>`;
   $("#pwBack").onclick=()=>{ if(typeof gStopAutosave==="function"){ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); } activeProject=null; renderProjects(); };
@@ -9570,7 +9574,7 @@ async function gBoqList(p, body, versions){
   const contractId=locked.length?locked.reduce((a,b)=>(Number(a.version)<=Number(b.version)?a:b)).id:null; // earliest locked = the contract BOQ
   const who=id=>id?(PROFILE_NAMES[id]||"—"):"—";
   const dt=iso=>iso?new Date(iso).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
-  const w=canWrite();
+  const w=canBoqProject(p);
   const rowsHtml=versions.map((v,i)=>{
     const nm=(v.title&&v.title.trim())?v.title.trim():(v.version_label||("v"+v.version));
     const isContract=String(v.id)===String(contractId);
@@ -9621,7 +9625,7 @@ async function gBoqList(p, body, versions){
 }
 
 async function pwBoq(p, body){
-  G.projectId = p.id; G.leadId = null;
+  G.projectId = p.id; G.leadId = null; G.partnerBoq = isDesignPartner() && canBoqProject(p);
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
@@ -9631,8 +9635,8 @@ async function pwBoq(p, body){
   const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
     body.innerHTML=`<div class="pw-card">${emptyState("No BOQ on this project yet","Start the full BOQ generator for this project.")}
-      ${canWrite()?`<div style="text-align:center"><button class="primary" id="pwNewBoq">+ Start project BOQ</button></div>`:""}</div>`;
-    if(canWrite()) $("#pwNewBoq").onclick=async()=>{
+      ${canBoqProject(p)?`<div style="text-align:center"><button class="primary" id="pwNewBoq">+ Start project BOQ</button></div>`:""}</div>`;
+    if(canBoqProject(p)) $("#pwNewBoq").onclick=async()=>{
       const id=await newBoqFor({project_id:p.id,title:p.name});
       if(!id) return;
       // seed meta from project
@@ -9773,7 +9777,7 @@ function gLockInfo(){
 }
 function gLocked(){ return !!((G.ver||{}).locked_at); }
 // The single source of truth for "may this user change this BOQ version?"
-function gCanEdit(){ return canWrite() && (!gLocked() || isBoqAdmin()); }
+function gCanEdit(){ return (canWrite()||G.partnerBoq) && (!gLocked() || isBoqAdmin()); }
 
 function gLockBanner(){
   const L=gLockInfo();
@@ -9822,7 +9826,7 @@ function gRender(p, body){
       ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
       ${canWrite()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
       ${!ro&&!L.locked?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
-      ${canWrite()&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
+      ${(canWrite()||G.partnerBoq)&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
       <button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>
       <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
@@ -10585,7 +10589,7 @@ async function gSendProposal(p, body){
    team raises a NEW option (e.g. a different finish) alongside it. The DB lock
    guard allows any editor to LOCK an unlocked version; unlocking is admin-only. */
 async function gFinaliseLock(p, body){
-  if(!canWrite()||!G.boqId||gLocked()) return;
+  if(!(canWrite()||G.partnerBoq)||!G.boqId||gLocked()) return;
   const v=G.ver||{};
   if(!confirm("Finalise & lock this BOQ?\n\nIt freezes "+(v.version_label||"this version")+" exactly as it is — the sheet stops changing and only Amit can edit it afterwards. Use ＋ New option to quote a different finish alongside it.")) return;
   await gSave(p, true);                     // commit pending edits BEFORE the freeze
@@ -10602,7 +10606,7 @@ async function gFinaliseLock(p, body){
 
 /* Copy the current BOQ into a fresh, unlocked option/revision (lead or project). */
 async function gNewRevision(p, body){
-  if(!canWrite()||!G.boqId) return;
+  if(!(canWrite()||G.partnerBoq)||!G.boqId) return;
   const src=G.ver||{};
   if(!confirm("Create a new BOQ option?\n\nIt copies this BOQ's line items into a new version that starts unlocked — change finishes or rates there while the version the client already has stays untouched.")) return;
   const label=prompt("Name this option (shown on the quotation), e.g. Option B — Acrylic finish. Leave blank for an automatic version label:","");
@@ -10783,7 +10787,7 @@ const WHATS_NEW=[
   {build:"b19",date:"21 Jul 2026",title:"Item notes now appear on the quotation",points:[
     "Type a note in the estimator's <b>note</b> column (e.g. brand, finish, site condition) and save — it prints in italics under the item name on the client sheet, the PDF, print, and the emailed proposal."]},
   {build:"b18",date:"21 Jul 2026",title:"Design Partner role for external partners",points:[
-    "Partners added with the <b>design_partner</b> role see ONLY the projects assigned to them — projects-only view with design tabs and Studio, no leads or financials."]},
+    "Partners added with the <b>design_partner</b> role see ONLY the projects assigned to them — projects-only view with design tabs and Studio, no leads or financials. On projects where the partner is the <b>assigned designer</b> they also get the BOQ tab: they can create and edit the design / execution BOQ, but the locked contract BOQ stays read-only."]},
   {build:"b17",date:"21 Jul 2026",title:"Fix a wrongly-mapped project stage",points:[
     "Admins: the Projects list now has a stage-correction dropdown — pick the right stage and the timeline resyncs."]},
   {build:"b16",date:"21 Jul 2026",title:"Project lifecycle tabs with payment gates",points:[
@@ -12292,7 +12296,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b71 · 22 Sep 2026";
+const APP_BUILD = "b72 · 23 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
