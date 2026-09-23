@@ -10622,6 +10622,9 @@ async function gReviewAction(p, body, next){
   if(error) return toast(error.message);
   Object.assign(v,patch); if(G.versions){ const gv=G.versions.find(x=>String(x.id)===String(G.boqId)); if(gv) Object.assign(gv,patch); }
   gLogActivity(p,msg);
+  // Priya WhatsApps the consultant (on submit) or the partner (on approve / send back)
+  try{ fetch(PRIYA_SERVER+"/notify/boq-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({boq_version_id:G.boqId,event:next})})
+    .then(r=>r.json()).then(j=>{ if(!j||!j.ok) toast("Heads-up: the WhatsApp nudge may not have been delivered"+(j&&j.error?" ("+j.error+")":"")); }).catch(()=>{}); }catch(_){}
   toast(next==="submitted"?"Submitted for approval":next==="approved"?"Approved":"Sent back");
   gRender(p,body);
 }
@@ -12374,7 +12377,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b74 · 24 Sep 2026";
+const APP_BUILD = "b75 · 24 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
