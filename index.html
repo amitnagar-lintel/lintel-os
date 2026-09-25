@@ -9886,6 +9886,7 @@ function gRender(p, body){
       <button class="ghost" id="gCsv">Export CSV</button>
       ${G.partnerBoq?'':`<button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>`}
       <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
+      ${canWrite()&&!G.partnerBoq?`<button class="ghost" id="gShareCfg" title="Mint a live client link for a catalog module — the client resizes it within your limits and the estimate reprices live">🧩 Share configurator</button>`:''}
       ${canWrite()?`<button class="ghost" id="gStudio" title="Send the client quotation to the Canon printer in the studio">🖨 Print at studio</button>`:''}
       ${G.partnerBoq?'':`<button class="primary" id="gPrint">Print / PDF</button>`}
     </div>
@@ -9895,6 +9896,7 @@ function gRender(p, body){
   $$(".gsub button").forEach(b=>b.onclick=()=>{ G.tab=b.dataset.g; gRender(p,body); });
   if(!ro&&$("#gSave")) $("#gSave").onclick=()=>gSave(p);
   if($("#gSendProp")) $("#gSendProp").onclick=()=>gSendProposal(p,body);
+  if($("#gShareCfg")) $("#gShareCfg").onclick=()=>gShareConfigurator(p);
   if($("#gSubmit")) $("#gSubmit").onclick=()=>gReviewAction(p,body,"submitted");
   if($("#gApprove")) $("#gApprove").onclick=()=>gReviewAction(p,body,"approved");
   if($("#gReturn")) $("#gReturn").onclick=()=>gReviewAction(p,body,"returned");
@@ -10106,6 +10108,74 @@ async function gMakeQuoteLink(p){
   }).select("token").single();
   if(error) throw new Error("Could not create the quotation link: "+error.message);
   return { token:data.token, url:QUOTE_VIEW_BASE+"?t="+data.token };
+}
+
+/* ── Modular catalog: client configurator links ─────────────────────────
+   Mints a tokenised link to /configurator.html (house pattern: the token is
+   the credential, like quote.html). The client resizes a catalog module
+   (skus.kind='module') within the limits set here and the estimate reprices
+   live — priced by the module-configurator edge function from sku_prices
+   SELL rates only (cost_rate never leaves the server). Rows live in
+   module_config_shares (RLS: staff read, can_write() writes); switch a link
+   off with active=false. */
+const CONFIGURATOR_BASE="https://os.lintelspace.com/configurator.html";
+async function gShareConfigurator(p){
+  if(!canWrite()) return;
+  const [mods,pls]=await Promise.all([
+    sb.from("skus").select("id,code,name,dims").eq("kind","module").eq("active",true).order("name"),
+    sb.from("price_lists").select("id,name").eq("active",true).order("name")
+  ]);
+  if(mods.error||!(mods.data||[]).length) return toast("No catalog modules yet — add SKUs with kind 'module' first.");
+  if(pls.error||!(pls.data||[]).length) return toast("No active price lists found.");
+  const retail=(pls.data.find(x=>/retail/i.test(x.name))||pls.data[0]).id;
+  const limFor=m=>{ const d=m.dims||{};
+    const r=(v,lo,f)=>{ v=Number(v); return Math.max(lo,Math.round(isFinite(v)&&v>0?v:f)); };
+    return { w:{min:r(d.w*0.5,300,600), max:r(d.w*1.6,600,1200)},
+             d:{min:r(d.d*0.7,250,350), max:r(d.d*1.2,350,550)},
+             h:{min:r(d.h*0.7,250,500), max:r(d.h*1.3,400,1000)} }; };
+  openModal(`<div class="modal-h">🧩 Share configurator</div><div class="modal-b">
+    <div class="s2l-hint" style="margin:0 0 10px">The client opens a live Atelier page, adjusts the module's size within your limits, and the estimate reprices as they type — indicative, materials &amp; hardware, ex-GST. Sell rates only.</div>
+    <div class="field"><label>Module</label><select id="cfg_mod" class="lf-sel" style="width:100%">${mods.data.map(m=>`<option value="${m.id}">${esc(m.name)} · ${esc(m.code)}</option>`).join("")}</select></div>
+    <div class="field"><label>Title the client sees</label><input id="cfg_title" value=""></div>
+    <div class="field"><label>Price list</label><select id="cfg_pl" class="lf-sel" style="width:100%">${pls.data.map(x=>`<option value="${x.id}" ${x.id===retail?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>
+    <div class="field"><label>Size limits (mm) · min above, max below</label>
+      <div class="grid2" style="grid-template-columns:repeat(3,1fr)">
+        <div><input id="cfg_wmin" type="number" title="Width min"><input id="cfg_wmax" type="number" title="Width max" style="margin-top:4px"></div>
+        <div><input id="cfg_dmin" type="number" title="Depth min"><input id="cfg_dmax" type="number" title="Depth max" style="margin-top:4px"></div>
+        <div><input id="cfg_hmin" type="number" title="Height min"><input id="cfg_hmax" type="number" title="Height max" style="margin-top:4px"></div>
+      </div>
+      <div class="s2l-hint">Columns: width · depth · height</div>
+    </div>
+  </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cfg_make">Create link</button></div>`);
+  const fill=()=>{ const m=mods.data.find(x=>String(x.id)===$("#cfg_mod").value)||mods.data[0];
+    $("#cfg_title").value=(m.name||"Your module")+" — configure your size";
+    const L=limFor(m);
+    $("#cfg_wmin").value=L.w.min; $("#cfg_wmax").value=L.w.max;
+    $("#cfg_dmin").value=L.d.min; $("#cfg_dmax").value=L.d.max;
+    $("#cfg_hmin").value=L.h.min; $("#cfg_hmax").value=L.h.max; };
+  fill(); $("#cfg_mod").onchange=fill;
+  $("#cfg_make").onclick=async()=>{
+    const m=mods.data.find(x=>String(x.id)===$("#cfg_mod").value);
+    const n=id=>Number($(id).value)||0;
+    const lim={ w:{min:n("#cfg_wmin"),max:n("#cfg_wmax")},
+                d:{min:n("#cfg_dmin"),max:n("#cfg_dmax")},
+                h:{min:n("#cfg_hmin"),max:n("#cfg_hmax")} };
+    for(const k of ["w","d","h"]) if(!(lim[k].min>0&&lim[k].max>=lim[k].min)) return toast("Check the size limits — each max must be ≥ its min.");
+    const {data,error}=await sb.from("module_config_shares").insert({
+      sku_id:$("#cfg_mod").value, price_list_id:$("#cfg_pl").value,
+      title:$("#cfg_title").value.trim()||((m&&m.name)||"Module"),
+      dim_limits:lim, created_by:me.id
+    }).select("token").single();
+    if(error) return toast("Could not create the link: "+error.message);
+    const url=CONFIGURATOR_BASE+"?t="+data.token;
+    if(p){ try{ gLogActivity(p,"Configurator link created · "+((m&&m.name)||"module")); }catch(_){} }
+    openModal(`<div class="modal-h">🧩 Configurator link ready</div><div class="modal-b">
+      <div class="s2l-hint" style="margin:0 0 10px">${esc((m&&m.name)||"Module")} · stays live until you switch it off.</div>
+      <div class="field"><label>Client link</label><input id="cfg_url" value="${esc(url)}" readonly onclick="this.select()"></div>
+    </div><div class="modal-f"><button class="ghost" onclick="closeModal()">Close</button><button class="ghost" id="cfg_copy">🔗 Copy link</button><button class="primary" id="cfg_wa">WhatsApp →</button></div>`);
+    $("#cfg_copy").onclick=()=>{ navigator.clipboard.writeText(url).then(()=>toast("Link copied"),()=>toast("Copy failed — select the link and copy manually")); };
+    $("#cfg_wa").onclick=()=>{ window.open("https://wa.me/?text="+encodeURIComponent("Configure your "+((m&&m.name)||"module")+" and see the live estimate: "+url),"_blank"); };
+  };
 }
 
 /* ===================== CLIENT JOURNEY PLAN =====================
@@ -10736,6 +10806,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b77",date:"25 Sep 2026",title:"Live configurator links for clients",points:[
+    "In any BOQ toolbar, press <b>🧩 Share configurator</b>: pick a catalog module (window seat, L-workstation, low storage…), adjust the size limits, and Lintel OS mints a client link. The client opens a live Atelier page, resizes the module within your limits, and watches the estimate reprice instantly — sell rates only, marked indicative &amp; ex-GST.",
+    "Copy the link or send it on WhatsApp, exactly like quote links. A link stays live until it is switched off.",
+  ]},
   {build:"b70",date:"21 Sep 2026",title:"Faster everywhere",points:[
     "Lintel OS now opens instantly from its saved copy and updates itself in the background; after an update it reloads once on its own.",
     "Sign-in, the dashboard and the Leads list now ask the server for everything at once instead of one request after another, and the database checks your access once per request instead of once per row. Dashboards and lists load several times faster.",
@@ -12387,7 +12461,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b76 · 25 Sep 2026";
+const APP_BUILD = "b77 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
