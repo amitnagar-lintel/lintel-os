@@ -9,7 +9,7 @@
      an offline fallback, document requests bypass the HTTP cache.
    - Cross-origin requests (Supabase API, CDNs) are never intercepted or cached.
    - Only successful (res.ok) responses are cached. */
-const CACHE = "lintel-os-shell-v72";
+const CACHE = "lintel-os-shell-v73";
 
 self.addEventListener("install", () => { self.skipWaiting(); });
 
