@@ -4191,7 +4191,7 @@ async function leadBoqGenerator(l, host){
   G.projectId=null; G.leadId=l.id; G.partnerBoq=false;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:(r.space==='wardrobe'?'bedroom':r.space)||null,trade:r.trade||null}));
     if(RATE_LIB_LOCKED===null) sb.rpc("rate_library_locked").then(({data})=>{ RATE_LIB_LOCKED=!!data; });
   }
   const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
@@ -9836,7 +9836,7 @@ async function pwBoq(p, body){
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:(r.space==='wardrobe'?'bedroom':r.space)||null,trade:r.trade||null}));
     if(RATE_LIB_LOCKED===null) sb.rpc("rate_library_locked").then(({data})=>{ RATE_LIB_LOCKED=!!data; });
   }
   // find or offer to create a BOQ version for this project
@@ -9882,7 +9882,11 @@ const STREAM_LABEL=Object.fromEntries(STREAMS);
 const STREAM_DEFAULTS={fee:9,gst:18,disc:0,boost:0}; // owner default: 9% fee / 18% GST on every section
 const FURNISHING='furnishing'; // the only section with per-line discount
 // Spaces scope the item pickers. 'all' = no filter; 'general' items surface under every space.
-const SPACES=[['all','All spaces'],['kitchen','Kitchen'],['wardrobe','Wardrobe'],['general','General (all spaces)']];
+// TAG-01 (25 Sep 2026): one space per library item. 'general' = any room, 'whole_home' = services that span rooms; both show in every space filter.
+const SPACES=[['all','All spaces'],['kitchen','Kitchen'],['bedroom','Bedrooms & Wardrobes'],['living','Living & Dining'],['bathroom','Bathrooms'],['foyer_utility','Foyer, Pooja & Utility'],['study_kids','Study & Kids'],['balcony','Balcony & Outdoor'],['general','Any room'],['whole_home','Whole home']];
+const SPACE_ALL=sp=>sp==='general'||sp==='whole_home';
+const TRADES=[['modular','Modular'],['hardware','Hardware & accessories'],['carpentry','Carpentry'],['mep','Electrical & plumbing'],['ceiling_walls','Ceiling & walls'],['stone_tiles','Stone & tiles'],['civil_demolition','Civil & demolition'],['decor_soft','Décor & soft furnishing'],['loose_appliances','Loose furniture & appliances'],['site_handover','Site, protection & handover']];
+const TRADE_LABEL=Object.fromEntries(TRADES);
 const SPACE_KEYS=SPACES.map(s=>s[0]);
 const SPACE_LABEL=Object.fromEntries(SPACES);
 function normStream(s){ return STREAM_KEYS.indexOf(s)>=0?s:'modular'; }
@@ -9903,7 +9907,7 @@ function catsForSpace(space){
   return [...new Set(G.rates.filter(r=>{
     if(!space||space==='all') return true;
     const sp=r.space||null;
-    return sp===space || sp==='general';
+    return sp===space || SPACE_ALL(sp);
   }).map(r=>r.cat))];
 }
 // Items available for a category + space (used by the item dropdown).
@@ -9912,7 +9916,7 @@ function itemsFor(cat, space){
     if(r.cat!==cat) return false;
     if(!space||space==='all') return true;
     const sp=r.space||null;
-    return sp===space || sp==='general';
+    return sp===space || SPACE_ALL(sp);
   });
 }
 // Resolved section for a row: persisted stream wins; else classify from its category.
@@ -12173,7 +12177,7 @@ function gRates(p){
       const costCell=canEditRates()
         ?`<input class="ii" style="width:90px" type="number" min="0" placeholder="—" value="${Number(r.cost)>0?r.cost:''}" data-rcost="${r.id}">`
         :(Number(r.cost)>0?gFmt(r.cost):'<span style="color:var(--ink-soft)">—</span>');
-      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canEditRates()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td><td>${costCell}</td><td class="mgc" style="font-size:11px">${mgHtml(r)}</td>${canEditRates()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
+      return `<tr><td><span class="tg">${esc(r.cat)}</span>${r.trade?`<div style="font-size:10.5px;color:var(--ink-soft);margin-top:2px">${esc(TRADE_LABEL[r.trade]||r.trade)}</div>`:""}</td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canEditRates()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td><td>${costCell}</td><td class="mgc" style="font-size:11px">${mgHtml(r)}</td>${canEditRates()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
     }).join("")||`<tr><td colspan="${nCols}" class="empty">No items match</td></tr>`;
     if(canEditRates()){
       $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr){rr.rate=nr; const c=inp.closest("tr").querySelector(".mgc"); if(c) c.innerHTML=mgHtml(rr);} toast("Rate updated"); });
@@ -12677,7 +12681,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b79 · 25 Sep 2026";
+const APP_BUILD = "b80 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
