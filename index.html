@@ -4192,6 +4192,7 @@ async function leadBoqGenerator(l, host){
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
     G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    if(RATE_LIB_LOCKED===null) sb.rpc("rate_library_locked").then(({data})=>{ RATE_LIB_LOCKED=!!data; });
   }
   const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
@@ -9836,6 +9837,7 @@ async function pwBoq(p, body){
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
     G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    if(RATE_LIB_LOCKED===null) sb.rpc("rate_library_locked").then(({data})=>{ RATE_LIB_LOCKED=!!data; });
   }
   // find or offer to create a BOQ version for this project
   const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
@@ -10024,6 +10026,8 @@ function gLockBanner(){
 /* RATE-01 (25 Sep 2026): library rates carry an effective date. A BOQ created before a
    rate revision keeps pricing from the previous rates (rate_prev) so old drafts, revisions
    and add-on lines stay consistent; BOQs created on/after the date use the new rates. */
+let RATE_LIB_LOCKED=null;                // null = not checked yet this session
+function canEditRates(){ return canWrite() && !RATE_LIB_LOCKED; }
 function gLegacyRates(ver){ const c=(ver||G.ver||{}).created_at; return !!c && G.rates.some(r=>r.effFrom && new Date(c) < new Date(r.effFrom+"T00:00:00+05:30")); }
 function gApplyRateEra(){ const legacy=gLegacyRates(); G.rateEra=legacy?"previous":"current"; G.rates.forEach(r=>{ r.rate=(legacy&&r.ratePrev!=null)?r.ratePrev:r.rateNew; }); }
 function gRender(p, body){
@@ -11782,7 +11786,7 @@ function gAddCustom(){
   kgSuggest(G.rows[G.rows.length-1].id,item,cat,room);
   // Feature 4: auto-save to rate library if not already there (tagged to the chosen section)
   if(!G.rates.find(r=>r.item===item&&r.cat===cat)){
-    sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream,space:space}).select().single().then(({data,error})=>{
+    if(canEditRates()) sb.from("rate_library").insert({category:cat,item:item,uom:'LS',rate:rate,is_active:true,stream:stream,space:space}).select().single().then(({data,error})=>{
       if(!error&&data){ G.rates.push({cat,item,unit:'LS',rate,cost:0,id:data.id,stream:stream,space:space}); toast("Added to rate library: "+item); }
       else if(error) console.error("Library add error:",error.message);
     });
@@ -12121,21 +12125,24 @@ function gClient(p){
 
 /* ================= RATES (library editor) ================= */
 function gRates(p){
-  const b=$("#gBody"); const cats=[...new Set(G.rates.map(r=>r.cat))];
+  const b=$("#gBody");
+  // RATE-02: the library locks at a set time (app_flags.rate_library_lock); admins are exempt.
+  if(RATE_LIB_LOCKED===null){ sb.rpc("rate_library_locked").then(({data})=>{ RATE_LIB_LOCKED=!!data; if(G.tab==='rate') gRates(p); }); RATE_LIB_LOCKED=false; } const cats=[...new Set(G.rates.map(r=>r.cat))];
   const otherSpaces=SPACES.filter(s=>s[0]!=='all');           // Kitchen, General (+ future)
   const rowSpaceOpts=(cur)=>`<option value=""${!cur?' selected':''}>— untagged —</option>`+otherSpaces.map(s=>`<option value="${s[0]}"${cur===s[0]?' selected':''}>${esc(s[1])}</option>`).join("");
-  const nCols=canWrite()?9:8;
+  const nCols=canEditRates()?9:8;
   b.innerHTML=`<div class="pw-card">
+    ${(RATE_LIB_LOCKED&&canWrite())?`<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #D9A79B;background:#F6E7E3;border-radius:10px;font-size:12.5px">🔒 <b>Rate library locked.</b> Rates, costs and items can no longer be changed here — only Amit can revise the library. BOQs keep working as usual.</div>`:""}
     <div class="mrcbar"><input id="rsearch" placeholder="Search items…" class="lf-in" style="max-width:240px">
       <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select>
       <select id="rspace" class="lf-sel"><option value="">All spaces</option>${otherSpaces.map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}<option value="__none">Untagged</option></select>
       <select id="rcost" class="lf-sel"><option value="">Cost: any</option><option value="miss">Missing cost</option><option value="has">Has cost</option></select>
-      ${canWrite()?`<button class="ghost" id="rPasteCost" title="Fill many cost rates at once from a pasted list">Paste cost rates</button>`:''}</div>
+      ${canEditRates()?`<button class="ghost" id="rPasteCost" title="Fill many cost rates at once from a pasted list">Paste cost rates</button>`:''}</div>
     <div id="rcover"></div>
-    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Space</th><th>Item</th><th>Unit</th><th>Rate ₹</th><th>Cost ₹</th><th>Margin</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
+    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Space</th><th>Item</th><th>Unit</th><th>Rate ₹</th><th>Cost ₹</th><th>Margin</th>${canEditRates()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
     <div class="hint">Editing a rate updates the shared library. <b>Cost ₹</b> is what the item costs <i>us</i> — every BOQ line added from the library inherits it, and it is the only thing that makes project budgets, variance and margin real. Set <b>Space</b> to scope an item to a room type (e.g. Kitchen) in the estimator's space filter.</div>
   </div>
-  ${canWrite()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
+  ${canEditRates()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add new item to library</div>
     <div class="addgrid">
       <div class="field"><label>Category</label><input id="rl-cat" list="rlcatdl" placeholder="Carpentry"><datalist id="rlcatdl">${cats.map(c=>`<option value="${esc(c)}">`).join("")}</datalist></div>
@@ -12162,13 +12169,13 @@ function gRates(p){
     const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q))&&(!fs||(fs==='__none'?!r.space:r.space===fs))
       &&(!fk||(fk==='miss'?!(Number(r.cost)>0):Number(r.cost)>0)));
     $("#rbody").innerHTML=rows.map(r=>{
-      const spCell=canWrite()?`<select class="ii" style="width:120px" data-rspace="${r.id}">${rowSpaceOpts(r.space)}</select>`:(r.space?esc(SPACE_LABEL[r.space]||r.space):'—');
-      const costCell=canWrite()
+      const spCell=canEditRates()?`<select class="ii" style="width:120px" data-rspace="${r.id}">${rowSpaceOpts(r.space)}</select>`:(r.space?esc(SPACE_LABEL[r.space]||r.space):'—');
+      const costCell=canEditRates()
         ?`<input class="ii" style="width:90px" type="number" min="0" placeholder="—" value="${Number(r.cost)>0?r.cost:''}" data-rcost="${r.id}">`
         :(Number(r.cost)>0?gFmt(r.cost):'<span style="color:var(--ink-soft)">—</span>');
-      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td><td>${costCell}</td><td class="mgc" style="font-size:11px">${mgHtml(r)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
+      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canEditRates()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td><td>${costCell}</td><td class="mgc" style="font-size:11px">${mgHtml(r)}</td>${canEditRates()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
     }).join("")||`<tr><td colspan="${nCols}" class="empty">No items match</td></tr>`;
-    if(canWrite()){
+    if(canEditRates()){
       $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr){rr.rate=nr; const c=inp.closest("tr").querySelector(".mgc"); if(c) c.innerHTML=mgHtml(rr);} toast("Rate updated"); });
       // Cost edits refresh the row's margin and the coverage strip in place — a full redraw
       // here would steal focus while someone is working down the Missing-cost list.
@@ -12186,8 +12193,8 @@ function gRates(p){
   };
   $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; $("#rspace").onchange=draw; $("#rcost").onchange=draw;
   draw(); drawCover();
-  if(canWrite()&&$("#rPasteCost")) $("#rPasteCost").onclick=()=>gPasteCosts(()=>{draw();drawCover();});
-  if(canWrite()&&$("#rl-add")) $("#rl-add").onclick=async()=>{
+  if(canEditRates()&&$("#rPasteCost")) $("#rPasteCost").onclick=()=>gPasteCosts(()=>{draw();drawCover();});
+  if(canEditRates()&&$("#rl-add")) $("#rl-add").onclick=async()=>{
     const cat=$("#rl-cat").value.trim(), item=$("#rl-item").value.trim(), unit=$("#rl-unit").value.trim()||'nos', rate=parseFloat($("#rl-rate").value)||0;
     const costRaw=String($("#rl-cost").value).trim(), cost=costRaw===''?null:(parseFloat(costRaw)||0);
     const space=($("#rl-space")&&$("#rl-space").value)?$("#rl-space").value:null;
@@ -12670,7 +12677,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b78 · 25 Sep 2026";
+const APP_BUILD = "b79 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
