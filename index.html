@@ -9966,7 +9966,7 @@ function gLineNet(r){ const cfg=gStreamSettings(rowStream(r)); return gBoosted(r
 function gLineGM(r){ const c=Number(r.cost)||0, n=gLineNet(r); if(!(c>0)||!(n>0)) return null; return Math.round(1000*(n-c*(Number(r.qty)||0))/n)/10; }
 function gGMCell(gm,tag){ if(gm===null) return `<${tag} style="color:var(--ink-mute)" title="No cost on file">—</${tag}>`; const col=gm<20?'#B4453A':gm<32?'#B7791F':'#2E7D5B'; return `<${tag} style="color:${col};font-weight:600;font-variant-numeric:tabular-nums">${gm}%</${tag}>`; }
 // Margin over a set of rows: net revenue vs cost, plus how much of that revenue is costed at all.
-function gMarginOf(rows){ let net=0,cost=0,costed=0; rows.forEach(r=>{ if(gScope(r)!=='included') return; const n=gLineNet(r); net+=n; const c=(Number(r.cost)||0)*(Number(r.qty)||0); if(c>0){ cost+=c; costed+=n; } }); return {net,cost,cover:net>0?Math.round(100*costed/net):0,gm:net>0&&costed>0?Math.round(1000*(net-cost)/net)/10:null}; }
+function gMarginOf(rows){ let net=0,cost=0,costed=0; rows.forEach(r=>{ if(gScope(r)!=='included') return; const n=gLineNet(r); net+=n; const c=(Number(r.cost)||0)*(Number(r.qty)||0); if(c>0){ cost+=c; costed+=n; } }); return {net,cost,cover:net>0?Math.round(100*costed/net):0,gm:costed>0?Math.round(1000*(costed-cost)/costed)/10:null}; }   // margin measured on the costed value only — uncosted lines never inflate it
 function gMarginHtml(m,label){ if(!gShowMargin()) return ''; const gm=m.gm; const col=gm===null?'var(--ink-mute)':gm<20?'#B4453A':gm<32?'#B7791F':'#2E7D5B'; return `<div class="fcell" title="Internal — never shown to the client. Net revenue after discount vs cost on file; ${m.cover}% of this value has a cost."><div class="fl">${label||'Margin'} <span style="font-weight:400">· internal</span></div><div class="fv" style="color:${col}">${gm===null?'—':gm+'%'}<span style="font-size:11px;color:var(--ink-soft);font-weight:400"> ${m.cover<100?`(${m.cover}% costed)`:''}</span></div></div>`; }
 // Section discount actually applied to THIS line (the section % trimmed to the line's cap, after its own line discount).
 function gLineSectionDisc(r,cfg){
@@ -12734,7 +12734,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b82 · 25 Sep 2026";
+const APP_BUILD = "b83 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
