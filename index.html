@@ -4191,7 +4191,7 @@ async function leadBoqGenerator(l, host){
   G.projectId=null; G.leadId=l.id; G.partnerBoq=false;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
   }
   const {data:versions}=await sb.from("boq_versions").select("*").eq("lead_id",l.id).order("version",{ascending:false}).order("id",{ascending:false});
   if(!versions||!versions.length){
@@ -4470,6 +4470,9 @@ async function loadSheet(id){
   const {data:v}=await sb.from("boq_versions").select("*").eq("id",id).single();
   const {data:items}=await sb.from("boq_items").select("*").eq("boq_version_id",id).order("sort_order");
   const total=(items||[]).filter(i=>i.scope!=='excluded'&&i.scope!=='optional').reduce((s,i)=>s+Number(i.amount||0),0); // A2: excluded/optional never sum
+  // RATE-01: sheets created before a library revision keep the previous rates
+  const _legacyEra=(v&&v.created_at)?rateLib.some(x=>x.rate_effective_from&&new Date(v.created_at)<new Date(x.rate_effective_from+"T00:00:00+05:30")):false;
+  const libRate=x=>(_legacyEra&&x.rate_prev!=null)?Number(x.rate_prev):Number(x.rate);
   sheet.innerHTML=`<div class="sheet">
     <div class="sheet-top"><div class="t">${esc(v.title||"BOQ")} <span class="pill ${v.status}">${v.status}</span></div>
       <div class="tot"><div class="lbl">Sheet total</div><div class="amt">${fmt(total)}</div></div></div>
@@ -4480,7 +4483,7 @@ async function loadSheet(id){
     ${canWrite()?`<div class="addbar">
       <select id="pickItem" style="flex:1;min-width:200px;padding:9px;border:1px solid var(--line-2);border-radius:8px">
         <option value="">+ Add from rate library…</option>
-        ${rateLib.map(r=>`<option value="${r.id}">${esc(r.category)} · ${esc(r.description)} (${fmt(r.rate)}/${r.uom})</option>`).join("")}
+        ${rateLib.map(r=>`<option value="${r.id}">${esc(r.category)} · ${esc(r.description)} (${fmt(libRate(r))}/${r.uom})</option>`).join("")}
       </select>
       <button class="ghost" id="addBlank">+ Blank row</button>
     </div>`:""}</div>`;
@@ -4490,7 +4493,7 @@ async function loadSheet(id){
   if(canWrite()){
     $("#addBlank").onclick=()=>addItem(id,{description:"New item",uom:"nos",qty:1,rate:0});
     $("#pickItem").onchange=e=>{const r=rateLib.find(x=>x.id==e.target.value);if(r)
-      addItem(id,{category:r.category,item_code:r.item_code,description:r.description,uom:r.uom,qty:1,rate:r.rate,cost_rate:r.cost_rate});};
+      addItem(id,{category:r.category,item_code:r.item_code,description:r.description,uom:r.uom,qty:1,rate:libRate(r),cost_rate:r.cost_rate});};
   }
 }
 
@@ -5570,7 +5573,10 @@ async function pwOverview(p,body){
   const R=await opsP;
   if(R){
     const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
-    if(cv||R.committed) ops={committed:R.committed,budget:R.budget,pct:cv?Math.round((cv-R.projCost)/cv*100):null};
+    if(cv||R.committed){
+      const known = cv>0 && R.coverPct!=null && R.coverPct>=MARGIN_MIN_COVER;
+      ops={committed:R.committed,budget:R.budget,cover:R.coverPct,pct:known?Math.round((cv-R.projCost)/cv*100):null};
+    }
   }
 
   const doneCount=stones.filter(s=>s.status==="done").length;
@@ -5601,10 +5607,10 @@ async function pwOverview(p,body){
         <div class="ccv">${lateActs.length?lateActs.length:"On track"}</div>
         <div class="ccs">${lateActs.length?"activities delayed":"no delays"}</div>
       </div>
-      ${ops?`<div class="cc ${ops.pct!==null&&ops.pct<0?"alert":"good"}">
+      ${ops?`<div class="cc ${ops.pct===null?"":(ops.pct<0?"alert":"good")}">
         <div class="ccl">Projected margin</div>
         <div class="ccv">${ops.pct===null?"—":ops.pct+"%"}</div>
-        <div class="ccs">committed ${fmt(ops.committed)} · budget ${fmt(ops.budget)}</div>
+        <div class="ccs">${ops.pct===null?`needs cost rates · ${ops.cover==null?0:ops.cover}% of value costed`:`committed ${fmt(ops.committed)} · budget ${fmt(ops.budget)}`}</div>
       </div>`:''}
     </div>
     <div class="ov-grid">
@@ -6791,6 +6797,10 @@ const DIVISIONS=[
 ];
 const divisionOfStream=s=>{const n=normStream(s);return n==='modular'?'modular':n==='furnishing'?'decor':'onsite';};
 const VPO_COMMITTED=['approved','sent','in_progress','delivered','closed'];
+/* Margin honesty gate. Budget = BOQ cost_rate x qty, so an uncosted BOQ yields budget≈0
+   and margin≈100% — a confident-looking number that is simply false. Below this much
+   cost-rate coverage (as a share of quoted VALUE) we report no margin at all and say why. */
+const MARGIN_MIN_COVER=80;
 const VPO_EDITABLE=['draft','pending_approval'];
 const vpoTotal=o=>Math.round(Number(o.subtotal||0)*(1+Number(o.gst_pct||0)/100));
 function myTeamId(){ const em=(me&&me.email?me.email:'').toLowerCase(); const hit=(STAFF||[]).find(s=>(s.email||'').toLowerCase()===em); return hit?hit.id:null; }
@@ -6807,16 +6817,19 @@ async function opsRollup(p){
   const {data:vers}=await sb.from("boq_versions").select("id,version").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   const ver=(vers||[])[0]||null;
   const [{data:its},{data:pos}]=await Promise.all([
-    ver?sb.from("boq_items").select("stream,cost_rate,qty,scope").eq("boq_version_id",ver.id):Promise.resolve({data:[]}),
+    ver?sb.from("boq_items").select("stream,rate,cost_rate,qty,scope").eq("boq_version_id",ver.id):Promise.resolve({data:[]}),
     sb.from("vendor_pos").select("id,division,status,subtotal,gst_pct").eq("project_id",p.id)
   ]);
   const D={}; DIVISIONS.forEach(d=>D[d.key]={budget:0,committed:0,paid:0,noCost:0});
+  let sellInc=0, sellCosted=0;
   (its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional').forEach(r=>{
     const d=D[divisionOfStream(r.stream)];
     const c=Number(r.cost_rate)||0,q=Number(r.qty)||0;
     if(!c&&q) d.noCost++;
     d.budget+=Math.round(c*q);
+    if(q){ const sell=(Number(r.rate)||0)*q; sellInc+=sell; if(c) sellCosted+=sell; }
   });
+  const coverPct = sellInc>0 ? Math.round(100*sellCosted/sellInc) : null;
   const list=pos||[];
   const ids=list.map(o=>o.id);
   if(ids.length){
@@ -6828,7 +6841,7 @@ async function opsRollup(p){
   const sum=k=>DIVISIONS.reduce((s,dv)=>s+D[dv.key][k],0);
   // Projected cost per division = the worse of budget vs committed (conservative).
   const projCost=DIVISIONS.reduce((s,dv)=>s+Math.max(D[dv.key].budget,D[dv.key].committed),0);
-  return {ver,D,budget:sum('budget'),committed:sum('committed'),paid:sum('paid'),noCost:sum('noCost'),projCost};
+  return {ver,D,budget:sum('budget'),committed:sum('committed'),paid:sum('paid'),noCost:sum('noCost'),projCost,coverPct};
 }
 
 async function pwProcurement(p,body){
@@ -6843,16 +6856,18 @@ async function pwProcurement(p,body){
   const {data:pos}=await sb.from("vendor_pos").select("*, vendors(name)").eq("project_id",p.id).order("created_at",{ascending:false});
   const list=pos||[];
   const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
-  const marginPct=cv?Math.round((cv-R.projCost)/cv*100):null;
+  const cover=R.coverPct;
+  const marginKnown = cv>0 && cover!=null && cover>=MARGIN_MIN_COVER;
+  const marginPct = marginKnown ? Math.round((cv-R.projCost)/cv*100) : null;
   body.innerHTML=`
     <div class="wallet">
       <div class="wcell"><div class="wl">Contract value</div><div class="wv mono">${fmt(cv)}</div></div>
       <div class="wcell"><div class="wl">Cost budget</div><div class="wv mono">${fmt(R.budget)}</div></div>
       <div class="wcell ${R.budget&&R.committed>R.budget?'wdue':''}"><div class="wl">Committed (POs)</div><div class="wv mono">${fmt(R.committed)}</div></div>
       <div class="wcell"><div class="wl">Paid out</div><div class="wv mono">${fmt(R.paid)}</div></div>
-      <div class="wcell ${marginPct!==null&&marginPct<0?'wdue':'wgood'}"><div class="wl">Projected margin</div><div class="wv">${marginPct===null?'—':marginPct+'%'}</div><div style="font-size:10px;color:var(--ink-soft)">${fmt(Math.max(cv-R.projCost,0))}</div></div>
+      <div class="wcell ${marginKnown?(marginPct<0?'wdue':'wgood'):''}"><div class="wl">Projected margin</div><div class="wv">${marginKnown?marginPct+'%':'—'}</div><div style="font-size:10px;color:var(--ink-soft)">${marginKnown?fmt(Math.max(cv-R.projCost,0)):(cv?`${cover==null?0:cover}% of value costed`:'no contract value')}</div></div>
     </div>
-    ${R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — the budget is understated. Fill cost rates in the BOQ / rate library.</div>`:''}
+    ${(cover!=null&&cover<MARGIN_MIN_COVER)?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>Margin not measurable yet.</b> Only ${cover}% of this BOQ's quoted value carries a cost rate${R.noCost?` — ${R.noCost} included line${R.noCost===1?'':'s'} are priced to the client with no cost against them`:''}, so budget, variance and margin are all understated and stay blank. Fix it once in <b>BOQ → Rate library</b> (the <b>Cost ₹</b> column, or <b>Paste cost rates</b>) and every future quote inherits the cost.</div>`:(R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — those budgets are understated. Fill them in the rate library.</div>`:'')}
     <div class="gbar"><div style="font-size:12px;color:var(--ink-soft)">Commit-before-spend: vendors are paid only against approved POs. Approval is admin-only.</div>
       <div class="gact">${isAdminLevel()?`<button class="ghost" id="vpVendors">Vendors</button>`:''}</div></div>
     ${DIVISIONS.map(dv=>{
@@ -7226,7 +7241,7 @@ async function packageRollup(p){
   const {data:vers}=await sb.from("boq_versions").select("id,version,version_label,locked_at").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
   const ver=(vers||[])[0]||null;
   const [{data:its},{data:pos},{data:prog},{data:exps}]=await Promise.all([
-    ver?sb.from("boq_items").select("id,room,room_tag,category,item_name,description,uom,stream,cost_rate,qty,scope").eq("boq_version_id",ver.id).order("sort_idx"):Promise.resolve({data:[]}),
+    ver?sb.from("boq_items").select("id,room,room_tag,category,item_name,description,uom,stream,rate,cost_rate,qty,scope").eq("boq_version_id",ver.id).order("sort_idx"):Promise.resolve({data:[]}),
     sb.from("vendor_pos").select("id,po_number,division,status,subtotal,gst_pct, vendors(name)").eq("project_id",p.id),
     sb.from("project_progress").select("room,stream,percent").eq("project_id",p.id),
     sb.from("project_expenses").select("*").eq("project_id",p.id).order("spend_date",{ascending:false}).order("id",{ascending:false})
@@ -7241,6 +7256,16 @@ async function packageRollup(p){
     P[code].budget+=amt; P[code].lines++; if(!(Number(r.cost_rate)||0)&&(Number(r.qty)||0)) P[code].noCost++;
     const rm=roomKey(r); (R[rm]=R[rm]||blank()); R[rm].budget+=amt; R[rm].lines++;
   });
+  // Cost-rate coverage, weighted by SELL value: a missing cost on a big line matters far more
+  // than on a small one. Budget (and therefore margin) is only trustworthy when most of the
+  // quoted value carries a cost rate — pwPackages refuses to show a margin below the threshold.
+  let sellInc=0, sellCosted=0;
+  items.forEach(r=>{
+    const q=Number(r.qty)||0; if(!q) return;
+    const sell=(Number(r.rate)||0)*q; sellInc+=sell;
+    if(Number(r.cost_rate)||0) sellCosted+=sell;
+  });
+  const coverPct = sellInc>0 ? Math.round(100*sellCosted/sellInc) : null;
   // committed + paid, attributed per PO line (pro-rata by line amount)
   const list=pos||[]; const poIds=list.map(o=>o.id);
   let poItems=[], pays=[];
@@ -7299,6 +7324,7 @@ async function packageRollup(p){
   // projected cost: per package, the worst of budget / committed / already paid out
   const projCost=allCodes.reduce((s,c)=>s+Math.max(P[c].budget,P[c].committed,P[c].paid),0);
   return {ver,items,P,R,pctPkg,pctRoom,budget,committed,paid,expTotal,projCost,noCost:sum('noCost'),
+    linesInc:items.length,sellInc:Math.round(sellInc),coverPct,
     pkgOrder:allCodes.filter(c=>P[c]&&(P[c].budget>0||P[c].committed>0.5||P[c].paid>0.5)),
     roomOrder:Object.keys(R).filter(rm=>R[rm].budget>0||R[rm].committed>0.5||R[rm].paid>0.5).sort()};
 }
@@ -7310,7 +7336,9 @@ async function pwPackages(p,body){
   const R=await packageRollup(p);
   if(!R.ver){ body.innerHTML=`<div class="pw-card">${emptyState("No BOQ yet","Build and price the BOQ first — each package budget is the sum of cost rates × qty for that trade.")}</div>`; return; }
   const cv=Number(p.contract_value)||Number(p.invoiced_total)||0;
-  const marginPct=cv?Math.round((cv-R.projCost)/cv*100):null;
+  const cover=R.coverPct;
+  const marginKnown = cv>0 && cover!=null && cover>=MARGIN_MIN_COVER;
+  const marginPct = marginKnown ? Math.round((cv-R.projCost)/cv*100) : null;
   const w=canWrite(); const axis=pkgAxis;
   const rows = axis==='room'
     ? R.roomOrder.map(rm=>({key:rm,label:rm,d:R.R[rm],pct:(R.pctRoom[rm]==null?null:R.pctRoom[rm]),color:null,isRoom:true}))
@@ -7364,16 +7392,16 @@ async function pwPackages(p,body){
       <div class="wcell"><div class="wl">Cost budget</div><div class="wv mono">${fmt(R.budget)}</div></div>
       <div class="wcell ${R.budget&&R.committed>R.budget?'wdue':''}"><div class="wl">Committed</div><div class="wv mono">${fmt(R.committed)}</div></div>
       <div class="wcell"><div class="wl">Paid out</div><div class="wv mono">${fmt(R.paid)}</div><div style="font-size:10px;color:var(--ink-soft)">incl ${fmt(R.expTotal)} direct exp</div></div>
-      <div class="wcell ${marginPct!==null&&marginPct<0?'wdue':'wgood'}"><div class="wl">Projected margin</div><div class="wv">${marginPct===null?'—':marginPct+'%'}</div><div style="font-size:10px;color:var(--ink-soft)">${fmt(Math.max(cv-R.projCost,0))}</div></div>
+      <div class="wcell ${marginKnown?(marginPct<0?'wdue':'wgood'):''}"><div class="wl">Projected margin</div><div class="wv">${marginKnown?marginPct+'%':'—'}</div><div style="font-size:10px;color:var(--ink-soft)">${marginKnown?fmt(Math.max(cv-R.projCost,0)):(cv?`${cover==null?0:cover}% of value costed`:'no contract value')}</div></div>
     </div>
-    ${R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — those trade budgets are understated. Fill cost rates in the BOQ / rate library.</div>`:''}
+    ${(cover!=null&&cover<MARGIN_MIN_COVER)?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>Margin not measurable yet.</b> Only ${cover}% of this BOQ's quoted value carries a cost rate${R.noCost?` — ${R.noCost} included line${R.noCost===1?'':'s'} are priced to the client with no cost against them`:''}, so budget, variance and margin are all understated and stay blank. Fix it once in <b>BOQ → Rate library</b> (the <b>Cost ₹</b> column, or <b>Paste cost rates</b>) and every future quote inherits the cost.</div>`:(R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — those budgets are understated. Fill them in the rate library.</div>`:'')}
     <div class="gbar">
       <div class="gsub" style="display:inline-flex">
         <button data-setaxis="trade" class="${axis==='trade'?'on':''}">By trade</button>
         <button data-setaxis="room" class="${axis==='room'?'on':''}">By room</button>
       </div>
       <div style="font-size:12px;color:var(--ink-soft)">Budget = BOQ cost × qty · Committed = approved POs · Paid = PO payments + direct expenses</div>
-      ${w?`<div class="gact"><button class="primary sm" id="pkgAddExp">+ Expense</button></div>`:''}
+      ${w?`<div class="gact"><button class="ghost sm" id="pkgImpExp" title="Bulk-import tagged bank transactions">Import expenses</button> <button class="primary sm" id="pkgAddExp">+ Expense</button></div>`:''}
     </div>
     <div class="pw-card">
       <table><thead><tr><th>${axis==='room'?'Room / area':'Trade package'}</th><th class="num">Budget</th><th class="num">Committed</th><th class="num">Paid</th><th class="num">Variance</th><th>Progress</th><th></th></tr></thead>
@@ -7390,6 +7418,7 @@ async function pwPackages(p,body){
   body.querySelectorAll("[data-wo]").forEach(b=>b.onclick=e=>{ e.stopPropagation();
     generatePOs(p,body, b.dataset.axis==='room'?{room:b.dataset.wo}:{pkg:b.dataset.wo}); });
   if($("#pkgAddExp")) $("#pkgAddExp").onclick=()=>expenseForm(p,{},()=>pwPackages(p,body));
+  if($("#pkgImpExp")) $("#pkgImpExp").onclick=()=>expenseImport(p,()=>pwPackages(p,body));
   body.querySelectorAll("[data-exp]").forEach(b=>b.onclick=e=>{ e.stopPropagation();
     const pre=b.dataset.axis==='room'?{room:b.dataset.exp}:{package_code:b.dataset.exp==='_unalloc'?'':b.dataset.exp};
     expenseForm(p,pre,()=>pwPackages(p,body)); });
@@ -7440,6 +7469,151 @@ function expenseForm(p,pre,onDone){
       note:note||null, created_by:me.id });
     if(error){ btn.disabled=false; return toast("Could not save: "+error.message); }
     closeModal(); toast("Expense logged · "+fmt(amt));
+    if(typeof onDone==="function") onDone();
+  };
+}
+
+/* ---- Bulk expense import. The month's site spend already exists, tagged, in the
+   Expense Desk export (and in any spreadsheet shaped the same way); typing 400 rows
+   through the single-expense modal is why project_expenses stayed empty. Scope is
+   deliberately ONE project — the project whose tab you are on — so a stray paste can
+   never scatter spend across the portfolio. Nothing is written until review. ---- */
+const EXP_IMPORT_COLS={
+  spend_date:["spend_date","date","spend date","txn date","transaction date","value date"],
+  amount:["amount","amt","debit","value","₹","rs"],
+  category:["category","cat","type"],
+  package_code:["package_code","package","trade","trade package"],
+  room:["room","area","room / area"],
+  vendor_name:["vendor_name","vendor","paid to","payee","who","beneficiary"],
+  paid_via:["paid_via","via","mode","paid via","payment mode"],
+  reference:["reference","ref","utr","reference / utr","cheque","chq"],
+  note:["note","notes","description","narration","particulars","remarks","what"]
+};
+/* Tolerant of the three date shapes Indian bank exports actually use. Day-first is
+   assumed for ambiguous numeric dates (15/09/2026), which is the Indian convention. */
+function expParseDate(v){
+  const s=String(v||'').trim(); if(!s) return null;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if(m){ let y=Number(m[3]); if(y<100) y+=2000; return `${y}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; }
+  m=s.match(/^(\d{1,2})[\s\-]([A-Za-z]{3,})[\s\-](\d{2,4})$/);
+  if(m){ const mo=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(m[2].slice(0,3).toLowerCase());
+    if(mo<0) return null; let y=Number(m[3]); if(y<100) y+=2000;
+    return `${y}-${String(mo+1).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`; }
+  return null;
+}
+/* Minimal RFC4180-ish split: handles quoted fields containing the delimiter. */
+function expSplitRow(line,delim){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(q){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else if(ch==='"') q=true;
+    else if(ch===delim){ out.push(cur); cur=''; }
+    else cur+=ch;
+  }
+  out.push(cur);
+  return out.map(x=>x.trim());
+}
+function expenseImport(p,onDone){
+  const catKeys=Object.keys(EXP_CAT_LABEL);
+  const pkgCodes=new Set(PACKAGES.map(x=>x.code));
+  openModal(`<div class="modal-h">Import expenses · ${esc(p.code||p.name)}</div>
+    <div class="modal-b">
+      <div class="banner" style="font-size:12px">Paste or choose a CSV/TSV of <b>already-tagged</b> spend for <b>this project only</b>. A header row is required; column order does not matter. Recognised: <span class="mono" style="font-size:11px">spend_date, amount, category, package_code, room, vendor_name, paid_via, reference, note</span>.<br>
+      Rows already in this project with the same date, amount and reference are flagged as duplicates and skipped, so re-importing a month is safe. <b>PO-related spend belongs on the PO as a payment</b> — one ledger, no double counting.</div>
+      <div class="grid2">
+        <div class="field"><label>Choose a file <span style="font-weight:400;color:var(--ink-soft)">(optional)</span></label><input id="xi_file" type="file" accept=".csv,.tsv,.txt"></div>
+        <div class="field"><label>Default category for untagged rows</label><select id="xi_defcat">${catKeys.map(k=>`<option value="${k}"${k==='site_expense'?' selected':''}>${esc(EXP_CAT_LABEL[k])}</option>`).join("")}</select></div>
+      </div>
+      <div class="field"><label>…or paste the rows</label><textarea id="xi_in" rows="7" style="width:100%;font-family:var(--mono,monospace);font-size:11px" placeholder="spend_date,amount,category,vendor_name,note&#10;2026-09-04,12500,materials,Sri Balaji Plywood,18mm ply — 15 sheets"></textarea></div>
+      <div class="field"><button class="ghost" id="xi_check">Check rows →</button></div>
+      <div id="xi_out"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="xi_go" disabled>Import</button></div>`);
+  let plan=[];
+  $("#xi_file").onchange=()=>{
+    const f=$("#xi_file").files&&$("#xi_file").files[0]; if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>{ $("#xi_in").value=String(rd.result||''); toast("File loaded — press Check rows"); };
+    rd.onerror=()=>toast("Could not read that file");
+    rd.readAsText(f);
+  };
+  $("#xi_check").onclick=async()=>{
+    const raw=String($("#xi_in").value||'').trim();
+    if(!raw) return toast("Paste some rows, or choose a file");
+    const defCat=$("#xi_defcat").value;
+    const lines=raw.split(/\r?\n/).filter(l=>l.trim());
+    if(lines.length<2) return toast("Needs a header row plus at least one data row");
+    const delim=(lines[0].match(/\t/)?'\t':',');
+    const head=expSplitRow(lines[0],delim).map(h=>h.trim().toLowerCase().replace(/^"|"$/g,''));
+    const idx={};
+    Object.keys(EXP_IMPORT_COLS).forEach(key=>{
+      const i=head.findIndex(h=>EXP_IMPORT_COLS[key].includes(h));
+      if(i>=0) idx[key]=i;
+    });
+    if(idx.amount==null||idx.spend_date==null){
+      return toast("Could not find a date column and an amount column in the header");
+    }
+    // Existing rows for this project, so a re-import of the same month is a no-op.
+    const {data:have}=await sb.from("project_expenses").select("spend_date,amount,reference").eq("project_id",p.id);
+    const seen=new Set((have||[]).map(r=>`${r.spend_date}|${Number(r.amount)}|${String(r.reference||'').trim().toLowerCase()}`));
+    const within=new Set();
+    plan=[];
+    lines.slice(1).forEach(line=>{
+      const c=expSplitRow(line,delim);
+      const get=k=>idx[k]==null?'':String(c[idx[k]]||'').trim();
+      const date=expParseDate(get('spend_date'));
+      const amount=Math.round(parseFloat(String(get('amount')).replace(/[₹,\s]/g,''))*100)/100;
+      const rowNote=get('note'), rowWho=get('vendor_name');
+      if(!date) return plan.push({line,status:'bad',why:'unreadable date',date:get('spend_date'),amount:isFinite(amount)?amount:null,note:rowNote||rowWho});
+      if(!(amount>0)) return plan.push({line,status:'bad',why:'amount must be a positive number',date,amount:null,note:rowNote||rowWho});
+      const rawCat=get('category').toLowerCase().replace(/\s+/g,'_');
+      let cat=catKeys.includes(rawCat)?rawCat:null, catDefaulted=false;
+      if(!cat){ const byLabel=catKeys.find(k=>EXP_CAT_LABEL[k].toLowerCase()===get('category').toLowerCase()); cat=byLabel||defCat; catDefaulted=!byLabel; }
+      const rawPkg=get('package_code');
+      const pkg=pkgCodes.has(rawPkg)?rawPkg:null;
+      const ref=get('reference');
+      const key=`${date}|${amount}|${ref.toLowerCase()}`;
+      const row={project_id:p.id,spend_date:date,amount,category:cat,package_code:pkg,
+        room:get('room')||null,vendor_name:rowWho||null,paid_via:get('paid_via')||null,
+        reference:ref||null,note:rowNote||null};
+      if(seen.has(key)) return plan.push({line,status:'dupe',why:'already imported',row,date,amount,note:rowNote||rowWho});
+      if(within.has(key)) return plan.push({line,status:'dupe',why:'repeated inside this paste',row,date,amount,note:rowNote||rowWho});
+      within.add(key);
+      plan.push({line,status:'ok',row,date,amount,note:rowNote||rowWho,catDefaulted,pkgDropped:!!rawPkg&&!pkg,cat,pkg});
+    });
+    const ok=plan.filter(x=>x.status==='ok'), dupe=plan.filter(x=>x.status==='dupe'), bad=plan.filter(x=>x.status==='bad');
+    const tot=ok.reduce((s,x)=>s+x.amount,0);
+    const defaulted=ok.filter(x=>x.catDefaulted).length, dropped=ok.filter(x=>x.pkgDropped).length;
+    const pill=s=>s==='ok'?'<span class="ex-st in_progress">will import</span>':s==='dupe'?'<span class="ex-st done">duplicate</span>':'<span class="ex-st todo">rejected</span>';
+    $("#xi_out").innerHTML=`<div class="hint" style="margin:6px 0 10px"><b>${ok.length}</b> to import · ${fmt(Math.round(tot))} · ${dupe.length} duplicate${dupe.length===1?'':'s'} skipped · <b>${bad.length}</b> rejected</div>
+      ${defaulted?`<div class="hint" style="margin:0 0 8px;border-color:#D4B06A;background:#FBF5E6">⚠ ${defaulted} row${defaulted===1?' has':'s have'} no recognised category and will be filed as <b>${esc(EXP_CAT_LABEL[defCat])}</b>. Tag them in the source sheet if that is wrong — categories are how spend maps to a trade.</div>`:''}
+      ${dropped?`<div class="hint" style="margin:0 0 8px">${dropped} row${dropped===1?'':'s'} named a trade package that does not exist here — those import as <b>unallocated</b>.</div>`:''}
+      <div class="table-wrap" style="max-height:240px;overflow:auto"><table><thead><tr><th>Date</th><th class="num">Amount</th><th>Category</th><th>What / who</th><th>Status</th></tr></thead><tbody>
+      ${plan.map(x=>`<tr><td style="font-size:11px" class="mono">${esc(x.date||'—')}</td><td class="num mono">${x.amount==null?'—':fmt(Math.round(x.amount))}</td>
+        <td style="font-size:11px">${esc(x.cat?EXP_CAT_LABEL[x.cat]:'—')}${x.catDefaulted?' <span style="color:var(--brass-deep)">(default)</span>':''}</td>
+        <td style="font-size:11px">${esc((x.note||'').slice(0,60)||'—')}</td>
+        <td>${pill(x.status)}${x.why?`<div style="font-size:10px;color:var(--ink-soft)">${esc(x.why)}</div>`:''}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    $("#xi_go").disabled = ok.length===0;
+    $("#xi_go").textContent = ok.length?`Import ${ok.length} expense${ok.length===1?'':'s'}`:'Import';
+  };
+  $("#xi_go").onclick=async()=>{
+    const todo=plan.filter(x=>x.status==='ok');
+    if(!todo.length) return;
+    const btn=$("#xi_go"); btn.disabled=true;
+    let done=0, failed=0, firstErr='';
+    for(let i=0;i<todo.length;i+=50){
+      const chunk=todo.slice(i,i+50).map(x=>Object.assign({},x.row,{created_by:me.id}));
+      const {error}=await sb.from("project_expenses").insert(chunk);
+      if(error){ failed+=chunk.length; if(!firstErr) firstErr=error.message; }
+      else done+=chunk.length;
+      btn.textContent=`Importing… ${done}/${todo.length}`;
+    }
+    closeModal();
+    toast(failed?`${done} imported · ${failed} failed: ${firstErr}`:`${done} expense${done===1?'':'s'} imported`);
     if(typeof onDone==="function") onDone();
   };
 }
@@ -9661,7 +9835,7 @@ async function pwBoq(p, body){
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
-    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
+    G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:r.space||null}));
   }
   // find or offer to create a BOQ version for this project
   const {data:versions}=await sb.from("boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
@@ -9847,8 +10021,14 @@ function gLockBanner(){
   return "";
 }
 
+/* RATE-01 (25 Sep 2026): library rates carry an effective date. A BOQ created before a
+   rate revision keeps pricing from the previous rates (rate_prev) so old drafts, revisions
+   and add-on lines stay consistent; BOQs created on/after the date use the new rates. */
+function gLegacyRates(ver){ const c=(ver||G.ver||{}).created_at; return !!c && G.rates.some(r=>r.effFrom && new Date(c) < new Date(r.effFrom+"T00:00:00+05:30")); }
+function gApplyRateEra(){ const legacy=gLegacyRates(); G.rateEra=legacy?"previous":"current"; G.rates.forEach(r=>{ r.rate=(legacy&&r.ratePrev!=null)?r.ratePrev:r.rateNew; }); }
 function gRender(p, body){
   G.bodyEl=body;                    // remembered so the PDF builder can re-render tabs
+  gApplyRateEra();
   const ro=!gCanEdit();
   const L=gLockInfo();
   const isProj=!!G.projectId;
@@ -9856,6 +10036,7 @@ function gRender(p, body){
   if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
   ${gLockBanner()}
+  ${G.rateEra==="previous"?`<div style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--line-2);background:var(--paper-2);border-radius:8px;font-size:12px;color:var(--ink-soft)">📌 Created before the library rate revision of ${esc(((G.rates.find(r=>r.effFrom)||{}).effFrom)||"")} — this BOQ keeps the earlier rates; new BOQs use the revised ones.</div>`:""}
   ${isProj?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12.5px;flex-wrap:wrap">
       <button class="ghost" id="gBackList" style="padding:4px 10px">← All BOQs</button>
       <span style="color:var(--ink-soft)">Editing</span>
@@ -10736,6 +10917,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b78",date:"25 Sep 2026",title:"Real cost rates, real margins",points:[
+    "The rate library now has a <b>Cost ₹</b> column beside Rate — enter what an item costs <i>us</i> and every BOQ line added from the library carries that cost. This is the one thing that makes a project's budget, variance and margin real. Open <b>BOQ → Rate library</b>; the strip at the top tells you how much of the library is costed.",
+    "You do not have to fill 600 items by hand: set <b>Cost: missing cost</b> to list only the blank ones, or press <b>Paste cost rates</b> and paste an item-and-cost list straight out of a spreadsheet — it shows you exactly what it matched, and what it could not, before anything is written.",
+    "<b>Projected margin</b> now shows a dash and the reason on any project whose BOQ is mostly uncosted, instead of the near-100% figure it used to show. A margin was being calculated against an empty cost budget, so it read like profit that was never there. It returns automatically once 80% of a BOQ's quoted value carries a cost rate.",
+    "Press <b>Import expenses</b> on a project's <b>Finance → Packages</b> tab to load a month of tagged site spend from a CSV or spreadsheet paste in one pass, instead of one expense at a time. Re-running the same file is safe — anything already recorded is flagged as a duplicate and skipped."]},
   {build:"b70",date:"21 Sep 2026",title:"Faster everywhere",points:[
     "Lintel OS now opens instantly from its saved copy and updates itself in the background; after an update it reloads once on its own.",
     "Sign-in, the dashboard and the Leads list now ask the server for everything at once instead of one request after another, and the database checks your access once per request instead of once per row. Dashboards and lists load several times faster.",
@@ -11938,12 +12124,16 @@ function gRates(p){
   const b=$("#gBody"); const cats=[...new Set(G.rates.map(r=>r.cat))];
   const otherSpaces=SPACES.filter(s=>s[0]!=='all');           // Kitchen, General (+ future)
   const rowSpaceOpts=(cur)=>`<option value=""${!cur?' selected':''}>— untagged —</option>`+otherSpaces.map(s=>`<option value="${s[0]}"${cur===s[0]?' selected':''}>${esc(s[1])}</option>`).join("");
+  const nCols=canWrite()?9:8;
   b.innerHTML=`<div class="pw-card">
     <div class="mrcbar"><input id="rsearch" placeholder="Search items…" class="lf-in" style="max-width:240px">
       <select id="rfilter" class="lf-sel"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select>
-      <select id="rspace" class="lf-sel"><option value="">All spaces</option>${otherSpaces.map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}<option value="__none">Untagged</option></select></div>
-    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Space</th><th>Item</th><th>Unit</th><th>Rate ₹</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
-    <div class="hint">Editing a rate updates the shared library. Set <b>Space</b> to scope an item to a room type (e.g. Kitchen) in the estimator's space filter.</div>
+      <select id="rspace" class="lf-sel"><option value="">All spaces</option>${otherSpaces.map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}<option value="__none">Untagged</option></select>
+      <select id="rcost" class="lf-sel"><option value="">Cost: any</option><option value="miss">Missing cost</option><option value="has">Has cost</option></select>
+      ${canWrite()?`<button class="ghost" id="rPasteCost" title="Fill many cost rates at once from a pasted list">Paste cost rates</button>`:''}</div>
+    <div id="rcover"></div>
+    <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Category</th><th>Section</th><th>Space</th><th>Item</th><th>Unit</th><th>Rate ₹</th><th>Cost ₹</th><th>Margin</th>${canWrite()?'<th></th>':''}</tr></thead><tbody id="rbody"></tbody></table></div>
+    <div class="hint">Editing a rate updates the shared library. <b>Cost ₹</b> is what the item costs <i>us</i> — every BOQ line added from the library inherits it, and it is the only thing that makes project budgets, variance and margin real. Set <b>Space</b> to scope an item to a room type (e.g. Kitchen) in the estimator's space filter.</div>
   </div>
   ${canWrite()?`<div class="pw-card" style="background:#FBF5E6;border-color:#D4B06A">
     <div class="sec-label" style="color:var(--brass-deep);border:none;padding-top:0">Add new item to library</div>
@@ -11953,34 +12143,127 @@ function gRates(p){
       <div class="field"><label>Space</label><select id="rl-space"><option value="general" selected>General (all spaces)</option>${otherSpaces.filter(s=>s[0]!=='general').map(s=>`<option value="${s[0]}">${esc(s[1])}</option>`).join("")}</select></div>
       <div class="field"><label>Unit</label><input id="rl-unit" placeholder="sqft" value="sqft"></div>
       <div class="field"><label>Rate ₹</label><input id="rl-rate" type="number" placeholder="850"></div>
+      <div class="field"><label>Cost ₹</label><input id="rl-cost" type="number" placeholder="600"></div>
       <button class="primary" id="rl-add">+ Add to library</button>
     </div>
   </div>`:''}`;
+  /* Library-wide cost coverage. Shown here because this screen is the only place it can be
+     fixed, and because every blank margin elsewhere in the OS traces back to this number. */
+  const drawCover=()=>{
+    const el=$("#rcover"); if(!el) return;
+    const tot=G.rates.length, withCost=G.rates.filter(r=>Number(r.cost)>0).length, pct=tot?Math.round(100*withCost/tot):0;
+    el.innerHTML=`<div class="hint" style="margin:10px 0 0${pct<MARGIN_MIN_COVER?';border-color:#D4B06A;background:#FBF5E6':''}">
+      <b>Cost coverage ${pct}%</b> · ${withCost} of ${tot} items priced at cost.${pct<MARGIN_MIN_COVER?` The other ${tot-withCost} are quoted to clients with no cost behind them, so their projects cannot show a margin. Filter to <b>Missing cost</b> to work through them.`:''}</div>`;
+  };
+  const marginOf=r=>(Number(r.rate)>0&&Number(r.cost)>0)?Math.round((Number(r.rate)-Number(r.cost))/Number(r.rate)*100):null;
+  const mgHtml=r=>{const m=marginOf(r);return m==null?'<span style="color:var(--ink-soft)">—</span>':`<span style="color:${m<0?'var(--danger,#B4453A)':'var(--ink-soft)'}">${m}%</span>`;};
   const draw=()=>{
-    const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value, fs=$("#rspace").value;
-    const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q))&&(!fs||(fs==='__none'?!r.space:r.space===fs)));
+    const q=($("#rsearch").value||'').toLowerCase(), fc=$("#rfilter").value, fs=$("#rspace").value, fk=$("#rcost").value;
+    const rows=G.rates.filter(r=>(!fc||r.cat===fc)&&(!q||r.item.toLowerCase().includes(q)||r.cat.toLowerCase().includes(q))&&(!fs||(fs==='__none'?!r.space:r.space===fs))
+      &&(!fk||(fk==='miss'?!(Number(r.cost)>0):Number(r.cost)>0)));
     $("#rbody").innerHTML=rows.map(r=>{
       const spCell=canWrite()?`<select class="ii" style="width:120px" data-rspace="${r.id}">${rowSpaceOpts(r.space)}</select>`:(r.space?esc(SPACE_LABEL[r.space]||r.space):'—');
-      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
-    }).join("")||'<tr><td colspan="7" class="empty">No items match</td></tr>';
+      const costCell=canWrite()
+        ?`<input class="ii" style="width:90px" type="number" min="0" placeholder="—" value="${Number(r.cost)>0?r.cost:''}" data-rcost="${r.id}">`
+        :(Number(r.cost)>0?gFmt(r.cost):'<span style="color:var(--ink-soft)">—</span>');
+      return `<tr><td><span class="tg">${esc(r.cat)}</span></td><td style="font-size:11px;color:var(--ink-soft)">${esc(STREAM_LABEL[normStream(r.stream||classifyStream(r.cat))])}</td><td>${spCell}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${canWrite()?`<input class="ii" style="width:90px" type="number" value="${r.rate}" data-rid="${r.id}">`:gFmt(r.rate)}</td><td>${costCell}</td><td class="mgc" style="font-size:11px">${mgHtml(r)}</td>${canWrite()?`<td><button class="linkbtn del" data-rldel="${r.id}">×</button></td>`:''}</tr>`;
+    }).join("")||`<tr><td colspan="${nCols}" class="empty">No items match</td></tr>`;
     if(canWrite()){
-      $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.rate=nr; toast("Rate updated"); });
+      $$("#rbody [data-rid]").forEach(inp=>inp.onchange=async()=>{ const nr=parseFloat(inp.value)||0; const rid=inp.dataset.rid; await sb.from("rate_library").update({rate:nr}).eq("id",rid); const rr=G.rates.find(x=>x.id==rid); if(rr){rr.rate=nr; const c=inp.closest("tr").querySelector(".mgc"); if(c) c.innerHTML=mgHtml(rr);} toast("Rate updated"); });
+      // Cost edits refresh the row's margin and the coverage strip in place — a full redraw
+      // here would steal focus while someone is working down the Missing-cost list.
+      $$("#rbody [data-rcost]").forEach(inp=>inp.onchange=async()=>{
+        const raw=String(inp.value).trim(); const nc=raw===''?null:(parseFloat(raw)||0); const rid=inp.dataset.rcost;
+        const {error}=await sb.from("rate_library").update({cost_rate:nc}).eq("id",rid);
+        if(error) return toast(error.message);
+        const rr=G.rates.find(x=>x.id==rid); if(rr) rr.cost=nc||0;
+        const c=inp.closest("tr").querySelector(".mgc"); if(c&&rr) c.innerHTML=mgHtml(rr);
+        drawCover(); toast(nc==null?"Cost rate cleared":"Cost rate updated");
+      });
       $$("#rbody [data-rspace]").forEach(sel=>sel.onchange=async()=>{ const sp=sel.value||null; const rid=sel.dataset.rspace; const {error}=await sb.from("rate_library").update({space:sp}).eq("id",rid); if(error) return toast(error.message); const rr=G.rates.find(x=>x.id==rid); if(rr)rr.space=sp; toast("Space updated"); });
-      $$("#rbody [data-rldel]").forEach(btn=>btn.onclick=async()=>{ if(!confirm("Remove this item from the library?")) return; await sb.from("rate_library").update({is_active:false}).eq("id",btn.dataset.rldel); G.rates=G.rates.filter(x=>x.id!=btn.dataset.rldel); draw(); toast("Removed from library"); });
+      $$("#rbody [data-rldel]").forEach(btn=>btn.onclick=async()=>{ if(!confirm("Remove this item from the library?")) return; await sb.from("rate_library").update({is_active:false}).eq("id",btn.dataset.rldel); G.rates=G.rates.filter(x=>x.id!=btn.dataset.rldel); draw(); drawCover(); toast("Removed from library"); });
     }
   };
-  $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; $("#rspace").onchange=draw; draw();
+  $("#rsearch").oninput=draw; $("#rfilter").onchange=draw; $("#rspace").onchange=draw; $("#rcost").onchange=draw;
+  draw(); drawCover();
+  if(canWrite()&&$("#rPasteCost")) $("#rPasteCost").onclick=()=>gPasteCosts(()=>{draw();drawCover();});
   if(canWrite()&&$("#rl-add")) $("#rl-add").onclick=async()=>{
     const cat=$("#rl-cat").value.trim(), item=$("#rl-item").value.trim(), unit=$("#rl-unit").value.trim()||'nos', rate=parseFloat($("#rl-rate").value)||0;
+    const costRaw=String($("#rl-cost").value).trim(), cost=costRaw===''?null:(parseFloat(costRaw)||0);
     const space=($("#rl-space")&&$("#rl-space").value)?$("#rl-space").value:null;
     if(!cat||!item) return toast("Category and Item name needed");
     if(G.rates.find(r=>r.item===item&&r.cat===cat)) return toast("This item already exists in the library");
     const stream=classifyStream(cat);
-    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,is_active:true,stream:stream,space:space}).select().single();
+    const {data,error}=await sb.from("rate_library").insert({category:cat,item,uom:unit,rate,cost_rate:cost,is_active:true,stream:stream,space:space}).select().single();
     if(error) return toast(error.message);
-    G.rates.push({cat,item,unit,rate,cost:0,id:data.id,stream:stream,space:space});
-    ["rl-cat","rl-item","rl-unit","rl-rate"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
-    draw(); toast("Added to library: "+item);
+    G.rates.push({cat,item,unit,rate,cost:cost||0,id:data.id,stream:stream,space:space});
+    ["rl-cat","rl-item","rl-unit","rl-rate","rl-cost"].forEach(i=>$("#"+i).value=''); $("#rl-unit").value='sqft';
+    draw(); drawCover(); toast("Added to library: "+item);
+  };
+}
+
+/* Bulk cost-rate fill. 600-odd library items cannot realistically be costed one input at a
+   time, and the costs already exist in purchase bills and vendor rate sheets — so accept a
+   pasted two-column list, match it by item name, and show exactly what will change first. */
+function gPasteCosts(onDone){
+  openModal(`<div class="modal-h">Paste cost rates</div>
+    <div class="modal-b">
+      <div class="banner" style="font-size:12px">One item per line, <b>item name</b> then <b>cost</b>. Copying two columns straight out of a spreadsheet gives tab-separated rows and is the most reliable — many item names contain commas, so in a comma-separated list either quote the name or use tabs. Put the <b>category</b> in front (<b>category, item, cost</b>) to pin down items that share a name.<br>Sell rates are never touched, and nothing is written until you review the match below.</div>
+      <div class="field"><label>Pasted list</label><textarea id="pc_in" rows="8" style="width:100%;font-family:var(--mono,monospace);font-size:12px" placeholder="Wardrobe with laminate finish	600&#10;False ceiling — gypsum, plain	85"></textarea></div>
+      <div class="field"><button class="ghost" id="pc_match">Match against library →</button></div>
+      <div id="pc_out"></div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="pc_go" disabled>Apply cost rates</button></div>`);
+  let plan=[];
+  const norm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  $("#pc_match").onclick=()=>{
+    const raw=String($("#pc_in").value||'');
+    const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    // One delimiter for the whole paste — tabs win when present, which is what a
+    // spreadsheet copy gives us and the only safe choice when item names contain commas.
+    const delim=raw.indexOf('\t')>=0?'\t':',';
+    const knownCats=new Set(G.rates.map(r=>String(r.cat||'').trim().toLowerCase()));
+    plan=[];
+    lines.forEach(line=>{
+      const parts=expSplitRow(line,delim);
+      if(parts.length<2) return plan.push({line,status:'bad',why:'need item and cost'});
+      const cost=parseFloat(String(parts[parts.length-1]).replace(/[₹,\s]/g,''));
+      if(!(cost>=0)) return plan.push({line,status:'bad',why:'cost is not a number'});
+      // Leading field is a category only when it actually names one — otherwise the
+      // extra fields are an item name that happened to contain the delimiter.
+      const rest=parts.slice(0,-1), glue=(delim===','?', ':' ');
+      const hasCat=rest.length>=2&&knownCats.has(rest[0].toLowerCase());
+      const itemTxt=(hasCat?rest.slice(1):rest).join(glue);
+      const catTxt=hasCat?rest[0]:null;
+      let hits=G.rates.filter(r=>norm(r.item)===norm(itemTxt));
+      if(catTxt&&hits.length>1) hits=hits.filter(r=>norm(r.cat)===norm(catTxt));
+      if(!hits.length) return plan.push({line,item:itemTxt,cost,status:'nomatch',why:'no library item with that name'});
+      if(hits.length>1) return plan.push({line,item:itemTxt,cost,status:'ambig',why:hits.length+' items share this name — add the category as a first column'});
+      const r=hits[0];
+      plan.push({line,item:r.item,cat:r.cat,id:r.id,was:Number(r.cost)||0,cost,status:Number(r.cost)===cost?'same':'ok'});
+    });
+    const ok=plan.filter(x=>x.status==='ok'), bad=plan.filter(x=>x.status!=='ok'&&x.status!=='same'), same=plan.filter(x=>x.status==='same');
+    const pill=s=>s==='ok'?'<span class="ex-st in_progress">will set</span>':s==='same'?'<span class="ex-st done">unchanged</span>':'<span class="ex-st todo">skipped</span>';
+    $("#pc_out").innerHTML=`<div class="hint" style="margin:6px 0 10px"><b>${ok.length}</b> to set · ${same.length} already correct · <b>${bad.length}</b> skipped</div>
+      <div class="table-wrap" style="max-height:260px;overflow:auto"><table><thead><tr><th>Item</th><th>Category</th><th class="num">Current</th><th class="num">New cost</th><th>Status</th></tr></thead><tbody>
+      ${plan.map(x=>`<tr><td>${esc(x.item||x.line)}</td><td style="font-size:11px;color:var(--ink-soft)">${esc(x.cat||'—')}</td><td class="num mono">${x.was==null?'—':(x.was?gFmt(x.was):'—')}</td><td class="num mono">${x.cost==null?'—':gFmt(x.cost)}</td><td>${pill(x.status)}${x.why?`<div style="font-size:10px;color:var(--ink-soft)">${esc(x.why)}</div>`:''}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    $("#pc_go").disabled = ok.length===0;
+  };
+  $("#pc_go").onclick=async()=>{
+    const todo=plan.filter(x=>x.status==='ok');
+    if(!todo.length) return;
+    const btn=$("#pc_go"); btn.disabled=true; btn.textContent="Applying…";
+    let done=0, failed=0;
+    for(let i=0;i<todo.length;i+=20){
+      const chunk=todo.slice(i,i+20);
+      const res=await Promise.all(chunk.map(x=>sb.from("rate_library").update({cost_rate:x.cost}).eq("id",x.id)));
+      res.forEach((r,k)=>{ if(r.error){failed++;} else { done++; const rr=G.rates.find(y=>y.id==chunk[k].id); if(rr) rr.cost=chunk[k].cost; } });
+      btn.textContent=`Applying… ${done}/${todo.length}`;
+    }
+    closeModal();
+    toast(`${done} cost rate${done===1?'':'s'} set${failed?` · ${failed} failed`:''}`);
+    if(typeof onDone==="function") onDone();
   };
 }
 
@@ -12387,7 +12670,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b76 · 25 Sep 2026";
+const APP_BUILD = "b78 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
