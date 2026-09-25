@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drawings · Lintel OS</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* DRAW-01 · 3D model → 2D CAD drawings. Staff page; same tokens as the app shell (index.html :root). */
+  :root{
+    --paper:#F7F4EE; --paper-2:#EFE9DB; --ink:#0D0D27; --ink-soft:#565571;
+    --line:#DDD3C1; --line-2:#CFC4AD; --brass:#D7A758; --brass-deep:#B98A42;
+    --navy:#0D0D27; --navy-soft:#1C1C3A; --slate:#565571; --green:#4F7D52; --clay:#A4503E; --blue:#5B86B3;
+    --radius:10px; --shadow:0 1px 2px rgba(13,13,39,.06),0 8px 24px rgba(13,13,39,.08);
+    --lyr-plan:#A4503E; --lyr-front:#5B86B3; --lyr-side:#4F7D52; --lyr-top:#7C8DA0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .display{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.01em}
+  button{font-family:inherit;cursor:pointer}
+  input,select{font-family:inherit;font-size:14px}
+  a{color:var(--brass-deep)}
+  h1,h2,h3{margin:0}
+
+  /* top bar — house pattern (quote.html / configurator.html) */
+  .top{background:var(--navy);border-bottom:3px solid var(--brass);color:#F7F2E9;padding:12px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:16px;font-weight:600;letter-spacing:2px;text-transform:uppercase;display:flex;align-items:baseline;gap:8px}
+  .brand small{font-family:Inter;font-size:9px;letter-spacing:2.4px;color:var(--brass);font-weight:500}
+  .top .proj{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;color:#E9E3D6;min-width:0}
+  .top .proj b{font-family:'IBM Plex Mono',monospace;color:var(--brass);font-weight:500}
+  .top .proj span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
+  .top .build{font-size:10px;letter-spacing:.4px;color:#B9B3C6;opacity:.8;white-space:nowrap}
+  .top .back{color:#F7F2E9;text-decoration:none;font-size:12.5px;border:1px solid rgba(255,255,255,.22);padding:5px 11px;border-radius:8px}
+  .top .back:hover{border-color:var(--brass)}
+
+  .wrap{max-width:1360px;margin:0 auto;padding:16px}
+  .workspace{display:grid;grid-template-columns:330px 1fr;gap:16px}
+  @media (max-width:940px){ .workspace{grid-template-columns:1fr} }
+
+  .rail{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .pw-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .pw-card h3{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep);font-weight:600;display:flex;align-items:center;gap:8px}
+  .pw-card h3 .n{width:18px;height:18px;border-radius:5px;background:var(--paper-2);color:var(--navy);display:grid;place-items:center;font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+
+  .primary{background:var(--brass);color:var(--navy);border:none;padding:10px 16px;border-radius:9px;font-weight:600;box-shadow:var(--shadow)}
+  .primary:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  .btn{background:#fff;color:var(--ink);border:1px solid var(--line-2);padding:9px 14px;border-radius:9px;font-weight:600;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .btn:hover{border-color:var(--brass-deep)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn svg,.primary svg{width:14px;height:14px}
+  .rowbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .rowbtns>*{flex:1}
+  .linkbtn{border:none;background:none;color:var(--brass-deep);font-weight:600;cursor:pointer;font-size:13px;padding:0}
+  .uphint{font-size:12.5px;color:var(--ink-soft)}
+  .uphint code{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--paper-2);padding:1px 5px;border-radius:4px}
+  .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);margin-bottom:5px;font-weight:600}
+  input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#FDFCFA;color:var(--ink)}
+  input:focus,select:focus{outline:none;border-color:var(--brass)}
+
+  .drop{border:1.5px dashed var(--line-2);border-radius:10px;padding:16px 12px;text-align:center;cursor:pointer;background:#FDFCFA;transition:border-color .15s,background .15s}
+  .drop:hover,.drop.hot{border-color:var(--brass);background:#FBF6EA}
+  .drop .di{width:26px;height:26px;color:var(--ink-soft);margin:0 auto 6px}
+  .drop p{margin:0;font-size:13px;color:var(--ink-soft)}
+  .drop .fmt{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-soft);opacity:.8;margin-top:5px}
+  .fname{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);word-break:break-all;display:flex;align-items:center;gap:7px}
+  .fname .dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  .notice{border-left:3px solid var(--brass);background:#FBF6EA;padding:10px 12px;border-radius:0 8px 8px 0;font-size:12.5px;color:var(--ink)}
+  .notice.warn{border-color:var(--clay);background:#F8EEEB}
+  .notice b{color:var(--navy)}
+  .notice ol{margin:6px 0 0;padding-left:18px}
+  .notice li{margin-bottom:3px}
+
+  .seg{display:flex;background:#FDFCFA;border:1px solid var(--line);border-radius:9px;padding:3px;gap:3px}
+  .seg button{flex:1;border:none;background:none;color:var(--ink-soft);font-size:12.5px;font-weight:600;padding:7px 6px;border-radius:7px}
+  .seg button[aria-pressed=true]{background:var(--navy);color:#fff}
+
+  .slider-head{display:flex;justify-content:space-between;align-items:baseline}
+  .slider-head .val{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--brass-deep);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--brass-deep);margin:0}
+  .rangelbl{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft)}
+  .num-row{display:flex;gap:8px;align-items:center}
+  .num-row input{max-width:120px}
+  .num-row span{font-size:12px;color:var(--ink-soft)}
+
+  .chk{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:13.5px;cursor:pointer}
+  .chk input{width:16px;height:16px;accent-color:var(--brass-deep);cursor:pointer}
+  .chk .sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--ink-soft)}
+
+  .pfl{display:flex;flex-direction:column;gap:4px;max-height:170px;overflow:auto}
+  .pfl button{display:flex;justify-content:space-between;gap:8px;align-items:center;width:100%;text-align:left;border:1px solid var(--line);background:#FDFCFA;border-radius:8px;padding:7px 10px;font-size:12.5px;color:var(--ink)}
+  .pfl button:hover{border-color:var(--brass-deep)}
+  .pfl .ext{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;flex:none}
+
+  .stage{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .panel-head{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .panel-head h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600}
+  .panel-head .sub{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);opacity:.85}
+  .panel-head .sp{margin-left:auto}
+  #view3d{width:100%;height:360px;display:block;background:linear-gradient(180deg,#FDFCFA,var(--paper))}
+  @media (max-width:520px){ #view3d{height:290px} }
+  .legend{display:flex;flex-wrap:wrap;gap:14px;padding:9px 16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-soft)}
+  .legend .li{display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px}
+  .legend .li .sw{width:14px;height:3px;border-radius:2px}
+  .legend .li.plane .sw{height:11px;width:11px;border-radius:3px;background:rgba(215,167,88,.45);border:1px solid var(--brass-deep)}
+
+  .sheet-wrap{padding:14px;background:var(--paper);overflow:auto;max-height:560px}
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:6px;width:100%;height:auto;display:block}
+  .sheet text{font-family:'IBM Plex Mono',monospace}
+  .l-plan{stroke:var(--lyr-plan)} .l-front{stroke:var(--lyr-front)} .l-side{stroke:var(--lyr-side)} .l-top{stroke:var(--lyr-top)}
+  .l-lbl{fill:var(--ink-soft)} .l-title{fill:#8f8ba0}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line)}
+  .stat{background:#fff;padding:10px 16px}
+  .stat .k{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+  .stat .v{font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums}
+
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(16px);background:var(--navy);color:#F7F2E9;padding:10px 16px;border-radius:9px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:40;max-width:90vw;text-align:center;box-shadow:var(--shadow)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  :focus-visible{outline:2px solid var(--brass-deep);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">Lintel<span style="color:var(--brass)">OS</span><small>Drawings · 3D → 2D CAD</small></div>
+  <div class="proj" id="projStrip"><span id="projTxt">Loading project…</span></div>
+  <span class="build">DRAW-01</span>
+  <a class="back" href="./">← Lintel OS</a>
+</header>
+
+<div class="wrap">
+  <div class="workspace">
+    <aside class="rail">
+      <div class="pw-card" id="projCard">
+        <h3><span class="n">·</span>Project</h3>
+        <div id="projBody" class="uphint">Checking sign-in…</div>
+      </div>
+
+      <div class="pw-card">
+        <h3><span class="n">1</span>3D model</h3>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a 3D model file">
+          <svg class="di" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13M8 7l4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>
+          <p><b>Drop a model</b> or click to browse</p>
+          <div class="fmt">.obj · .dae · .fbx · .gltf · .glb · .stl · .ply · (.skp / .max — see note)</div>
+        </div>
+        <input type="file" id="file" class="sr" accept=".obj,.fbx,.dae,.gltf,.glb,.stl,.ply,.skp,.max">
+        <div id="skpNote" hidden></div>
+        <div id="pfWrap" hidden>
+          <div class="uphint" style="margin-bottom:5px">Already in this project's Design files:</div>
+          <div class="pfl" id="pfList"></div>
+        </div>
+        <div class="rowbtns">
+          <button class="btn" id="sampleBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21v-6h6v6"/></svg>
+            Sample room
+          </button>
+        </div>
+        <div class="fname"><span class="dot"></span><span id="fnameTxt">study-room.sample</span></div>
+      </div>
+
+      <div class="pw-card">
+        <h3><span class="n">2</span>Up axis</h3>
+        <div class="seg" role="group" aria-label="Up axis">
+          <button id="upZ" aria-pressed="true" data-up="z">Z-up</button>
+          <button id="upY" aria-pressed="false" data-up="y">Y-up</button>
+        </div>
+        <div class="uphint">Model lying on its side in the 3D view? Switch this. OBJ / DAE / FBX / glTF exports from Max and SketchUp are normally <b>Y-up</b>; STL is Z-up.</div>
+      </div>
+
+      <div class="pw-card">
+        <h3><span class="n">3</span>Floor-plan cut</h3>
+        <div class="slider-head">
+          <span class="uphint">Section height</span>
+          <span class="val" id="secVal">—</span>
+        </div>
+        <input type="range" id="secRange" min="0" max="100" value="45" step="0.5">
+        <div class="rangelbl"><span id="secMin">0</span><span id="secMax">0</span></div>
+        <div class="num-row"><input type="number" id="secNum" step="10"><span id="secUnit">mm</span></div>
+        <div class="toggle-row">
+          <span>Show the cut plane in 3D</span>
+          <label class="chk" style="padding:0"><input type="checkbox" id="planeChk" checked></label>
+        </div>
+      </div>
+
+      <div class="pw-card">
+        <h3><span class="n">4</span>Views</h3>
+        <label class="chk"><input type="checkbox" data-view="plan" checked><span class="sw" style="background:var(--lyr-plan)"></span>Plan (section cut)</label>
+        <label class="chk"><input type="checkbox" data-view="front" checked><span class="sw" style="background:var(--lyr-front)"></span>Front elevation</label>
+        <label class="chk"><input type="checkbox" data-view="side" checked><span class="sw" style="background:var(--lyr-side)"></span>Side elevation</label>
+        <label class="chk"><input type="checkbox" data-view="top" checked><span class="sw" style="background:var(--lyr-top)"></span>Top view (projection)</label>
+      </div>
+
+      <div class="pw-card">
+        <h3><span class="n">5</span>Units, export &amp; save</h3>
+        <div class="field"><label for="units">Model units</label>
+          <select id="units">
+            <option value="mm" selected>Millimetres (mm)</option>
+            <option value="cm">Centimetres (cm)</option>
+            <option value="m">Metres (m)</option>
+            <option value="in">Inches (in)</option>
+            <option value="ft">Feet (ft)</option>
+          </select></div>
+        <div class="rowbtns">
+          <button class="btn" id="dxfBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M4 21h16"/></svg>
+            Download DXF
+          </button>
+          <button class="btn" id="svgBtn">Download SVG</button>
+        </div>
+        <div class="field"><label for="sv_title">Title in project files</label><input type="text" id="sv_title" placeholder="e.g. Living room — plan &amp; elevations"></div>
+        <div class="num-row"><div class="field" style="flex:1"><label for="sv_ver">Version</label><input type="text" id="sv_ver" placeholder="V1" style="max-width:110px"></div></div>
+        <label class="chk"><input type="checkbox" id="sv_keep" checked>Also keep the source 3D model in the project</label>
+        <button class="primary" id="saveBtn" disabled>Save to project</button>
+        <div class="uphint" id="saveHint">Saves the DXF and SVG into <b>Studio → Design → Files</b> for this project.</div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>3D model</h2>
+          <span class="sub">drag to orbit · scroll to zoom · shift-drag to pan</span>
+          <span class="sp"></span>
+          <button class="btn" id="resetBtn" style="padding:5px 10px;font-size:12px">Reset view</button>
+        </div>
+        <canvas id="view3d"></canvas>
+        <div class="legend"><span class="li plane"><span class="sw"></span>section plane at the floor-plan cut height</span></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>2D drawing</h2>
+          <span class="sub">DXF preview · not to scale · one CAD layer per view</span>
+        </div>
+        <div class="sheet-wrap">
+          <svg class="sheet" id="sheet" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div class="legend">
+          <span class="li"><span class="sw" style="background:var(--lyr-plan)"></span>PLAN</span>
+          <span class="li"><span class="sw" style="background:var(--lyr-front)"></span>ELEV_FRONT</span>
+          <span class="li"><span class="sw" style="background:var(--lyr-side)"></span>ELEV_SIDE</span>
+          <span class="li"><span class="sw" style="background:var(--lyr-top)"></span>TOP_VIEW</span>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="k">Triangles</div><div class="v" id="stTris">—</div></div>
+          <div class="stat"><div class="k">Bounds (X·Y·Z)</div><div class="v" id="stBox">—</div></div>
+          <div class="stat"><div class="k">Plan segments</div><div class="v" id="stPlan">—</div></div>
+          <div class="stat"><div class="k">DXF lines</div><div class="v" id="stLines">—</div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ================= Lintel OS session (same origin as index.html → same stored session) ================= */
+const SUPABASE_URL="https://cxgxmqspvpuizvwfbnjq.supabase.co";
+const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN4Z3htcXNwdnB1aXp2d2ZibmpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDEwMDUsImV4cCI6MjA5Njk3NzAwNX0.cPbcB9m-WSAC2e8nOD_vdp2mrAeDaisk4-nET5eo8lE";
+const BUCKET="project-files";
+const MODEL_EXTS=["obj","fbx","dae","gltf","glb","stl","ply"];
+const CLOSED_EXTS={skp:"SketchUp",max:"3ds Max"};
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const toast=m=>{ const t=$("#toast"); t.textContent=m; t.classList.add("show"); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove("show"),2800); };
+
+const S={ name:"study-room.sample", file:null, rawTris:null, up:"z", units:"mm", secPct:45,
+  views:{plan:true,front:true,side:true,top:true}, showPlane:true,
+  zup:null, box:null, maxDim:1, sheet:null, dxf:"", svg:"", dxfLines:0, secHeight:0 };
+const CTX={ sb:null, session:null, pid:null, project:null };
+window.__drawings=S;
+
+/* ================= geometry core ================= */
+function bboxOf(t){ let a=[Infinity,Infinity,Infinity],b=[-Infinity,-Infinity,-Infinity];
+  for(let i=0;i<t.length;i+=3){ for(let k=0;k<3;k++){ const v=t[i+k]; if(v<a[k])a[k]=v; if(v>b[k])b[k]=v; } } return {min:a,max:b}; }
+function toZup(t,up){ if(up==="z") return t; const o=new Float32Array(t.length);
+  for(let i=0;i<t.length;i+=3){ o[i]=t[i]; o[i+1]=-t[i+2]; o[i+2]=t[i+1]; } return o; } // Y-up → Z-up: (x,y,z)→(x,−z,y)
+function sectionCut(t,h){ const segs=[];
+  for(let i=0;i<t.length;i+=9){
+    const P=[[t[i],t[i+1],t[i+2]],[t[i+3],t[i+4],t[i+5]],[t[i+6],t[i+7],t[i+8]]];
+    const d=[P[0][2]-h,P[1][2]-h,P[2][2]-h]; const pts=[];
+    for(const [a,b] of [[0,1],[1,2],[2,0]]){ const da=d[a],db=d[b];
+      if((da<0&&db>0)||(da>0&&db<0)){ const s=da/(da-db); pts.push([P[a][0]+s*(P[b][0]-P[a][0]),P[a][1]+s*(P[b][1]-P[a][1])]); }
+      else if(da===0) pts.push([P[a][0],P[a][1]]); }
+    if(pts.length>=2){ const a=pts[0]; let b=null;
+      for(let k=1;k<pts.length;k++){ if(Math.abs(pts[k][0]-a[0])>1e-7||Math.abs(pts[k][1]-a[1])>1e-7){ b=pts[k]; break; } }
+      if(b) segs.push([a[0],a[1],b[0],b[1]]); }
+  } return segs; }
+function projEdges(t,mode,q){ const seen=new Set(),segs=[];
+  const p2=(x,y,z)=>mode==="top"?[x,y]:mode==="front"?[x,z]:[y,z];
+  const key=(a,b)=>{ const ka=Math.round(a[0]/q)+","+Math.round(a[1]/q),kb=Math.round(b[0]/q)+","+Math.round(b[1]/q); return ka<kb?ka+"|"+kb:kb+"|"+ka; };
+  for(let i=0;i<t.length;i+=9){
+    const v=[p2(t[i],t[i+1],t[i+2]),p2(t[i+3],t[i+4],t[i+5]),p2(t[i+6],t[i+7],t[i+8])];
+    for(const [a,b] of [[0,1],[1,2],[2,0]]){ const A=v[a],B=v[b];
+      if(Math.abs(A[0]-B[0])<q*0.5&&Math.abs(A[1]-B[1])<q*0.5) continue;
+      const k=key(A,B); if(seen.has(k)) continue; seen.add(k); segs.push([A[0],A[1],B[0],B[1]]); }
+  } return segs; }
+const shift=(segs,dx,dy)=>segs.map(s=>[s[0]+dx,s[1]+dy,s[2]+dx,s[3]+dy]);
+
+function computeSheet(){
+  const t=S.zup,b=S.box; const W=b.max[0]-b.min[0],D=b.max[1]-b.min[1],H=b.max[2]-b.min[2];
+  const maxDim=Math.max(W,D,H,1e-6); S.maxDim=maxDim; const q=Math.max(1e-6,maxDim*1e-4);
+  const h=b.min[2]+H*S.secPct/100; S.secHeight=h;
+  const plan=sectionCut(t,h).map(s=>[s[0]-b.min[0],s[1]-b.min[1],s[2]-b.min[0],s[3]-b.min[1]]);
+  const front=projEdges(t,"front",q).map(s=>[s[0]-b.min[0],s[1]-b.min[2],s[2]-b.min[0],s[3]-b.min[2]]);
+  const side=projEdges(t,"side",q).map(s=>[s[0]-b.min[1],s[1]-b.min[2],s[2]-b.min[1],s[3]-b.min[2]]);
+  const top=projEdges(t,"top",q).map(s=>[s[0]-b.min[0],s[1]-b.min[1],s[2]-b.min[0],s[3]-b.min[1]]);
+  const textH=Math.max(maxDim*0.045,1e-4), colGap=Math.max(W,D)*0.20+textH*2, rowGap=Math.max(H,D)*0.20+textH*4;
+  const oF=[0,0],oS=[W+colGap,0],oP=[0,H+rowGap],oT=[W+colGap,H+rowGap]; // FRONT | SIDE below, PLAN | TOP above
+  const ent=[],labels=[]; const uh=fmtLen(h,S.units);
+  if(S.views.front){ ent.push({layer:"ELEV_FRONT",cls:"l-front",segs:shift(front,...oF)}); labels.push({x:oF[0]+W/2,y:oF[1]-textH*1.4,t:"FRONT ELEVATION"}); }
+  if(S.views.side){ ent.push({layer:"ELEV_SIDE",cls:"l-side",segs:shift(side,...oS)}); labels.push({x:oS[0]+D/2,y:oS[1]-textH*1.4,t:"SIDE ELEVATION"}); }
+  if(S.views.plan){ ent.push({layer:"PLAN",cls:"l-plan",segs:shift(plan,...oP)}); labels.push({x:oP[0]+W/2,y:oP[1]-textH*1.4,t:"PLAN @ "+uh}); }
+  if(S.views.top){ ent.push({layer:"TOP_VIEW",cls:"l-top",segs:shift(top,...oT)}); labels.push({x:oT[0]+W/2,y:oT[1]-textH*1.4,t:"TOP VIEW"}); }
+  const proj=CTX.project?(CTX.project.code||CTX.project.name||""):"";
+  const title={x:oF[0],y:oF[1]-textH*3.4,t:("LINTEL OS - "+(proj?proj+" - ":"")+S.name+" - units "+S.units+" - NOT TO SCALE").replace(/[^\x20-\x7E]/g,"-")}; // ASCII only for DXF TEXT
+  S.sheet={ent,labels,title,textH,W,D,H}; return S.sheet;
+}
+
+/* ================= DXF (AutoCAD R12) ================= */
+const UNIT_CODE={mm:4,cm:5,m:6,in:1,ft:2};
+function fmtLen(v,u){ const r=Math.round(v*100)/100; return (Number.isInteger(r)?r:r.toFixed(2))+" "+u; }
+function num(v){ if(!isFinite(v)) v=0; const r=Math.round(v*1e4)/1e4; return Number.isInteger(r)?String(r):r.toFixed(4); }
+function buildDXF(){
+  const sh=S.sheet,L=[]; const g=(c,v)=>{ L.push(String(c)); L.push(typeof v==="number"?num(v):String(v)); };
+  let mnx=Infinity,mny=Infinity,mxx=-Infinity,mxy=-Infinity;
+  for(const e of sh.ent) for(const s of e.segs){ mnx=Math.min(mnx,s[0],s[2]); mny=Math.min(mny,s[1],s[3]); mxx=Math.max(mxx,s[0],s[2]); mxy=Math.max(mxy,s[1],s[3]); }
+  if(!isFinite(mnx)){ mnx=mny=0; mxx=mxy=1; }
+  g(0,"SECTION");g(2,"HEADER"); g(9,"$ACADVER");g(1,"AC1009"); g(9,"$INSUNITS");g(70,UNIT_CODE[S.units]??0);
+  g(9,"$EXTMIN");g(10,mnx);g(20,mny);g(30,0); g(9,"$EXTMAX");g(10,mxx);g(20,mxy);g(30,0); g(0,"ENDSEC");
+  g(0,"SECTION");g(2,"TABLES");
+  g(0,"TABLE");g(2,"LTYPE");g(70,1); g(0,"LTYPE");g(2,"CONTINUOUS");g(70,0);g(3,"Solid line");g(72,65);g(73,0);g(40,0); g(0,"ENDTAB");
+  const layers=[["PLAN",1],["ELEV_FRONT",5],["ELEV_SIDE",3],["TOP_VIEW",8],["TEXT",7]];
+  g(0,"TABLE");g(2,"LAYER");g(70,layers.length); for(const [n,c] of layers){ g(0,"LAYER");g(2,n);g(70,0);g(62,c);g(6,"CONTINUOUS"); } g(0,"ENDTAB");
+  g(0,"TABLE");g(2,"STYLE");g(70,1); g(0,"STYLE");g(2,"STANDARD");g(70,0);g(40,0);g(41,1);g(50,0);g(71,0);g(42,sh.textH);g(3,"txt");g(4,""); g(0,"ENDTAB");
+  g(0,"ENDSEC");
+  g(0,"SECTION");g(2,"ENTITIES"); let n=0;
+  for(const e of sh.ent) for(const s of e.segs){ g(0,"LINE");g(8,e.layer);g(10,s[0]);g(20,s[1]);g(30,0);g(11,s[2]);g(21,s[3]);g(31,0); n++; }
+  const txt=(x,y,h,str)=>{ g(0,"TEXT");g(8,"TEXT");g(10,x);g(20,y);g(30,0);g(40,h);g(1,str); };
+  for(const l of sh.labels) txt(l.x,l.y,sh.textH,l.t); txt(sh.title.x,sh.title.y,sh.textH*0.7,sh.title.t);
+  g(0,"ENDSEC");g(0,"EOF"); S.dxfLines=n; return L.join("\n");
+}
+
+/* ================= SVG preview ================= */
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||"#000"; }
+function buildSVG(){
+  const sh=S.sheet; let mnx=Infinity,mny=Infinity,mxx=-Infinity,mxy=-Infinity;
+  const acc=(x,y)=>{ mnx=Math.min(mnx,x); mny=Math.min(mny,y); mxx=Math.max(mxx,x); mxy=Math.max(mxy,y); };
+  for(const e of sh.ent) for(const s of e.segs){ acc(s[0],s[1]); acc(s[2],s[3]); }
+  for(const l of sh.labels) acc(l.x,l.y); acc(sh.title.x,sh.title.y);
+  if(!isFinite(mnx)){ mnx=mny=0; mxx=mxy=1; }
+  const pad=Math.max(sh.textH*1.6,(mxx-mnx+mxy-mny)*0.03); mnx-=pad; mny-=pad; mxx+=pad; mxy+=pad;
+  const w=mxx-mnx,hgt=mxy-mny, fy=y=>num(mny+mxy-y);
+  let out="";
+  for(const e of sh.ent){ out+=`<g class="${e.cls}" fill="none" stroke-width="${e.layer==="PLAN"?1.7:0.9}" vector-effect="non-scaling-stroke" stroke-linecap="round">`;
+    for(const s of e.segs) out+=`<line x1="${num(s[0])}" y1="${fy(s[1])}" x2="${num(s[2])}" y2="${fy(s[3])}"/>`; out+="</g>"; }
+  const th=sh.textH*0.9;
+  for(const l of sh.labels) out+=`<text class="l-lbl" x="${num(l.x)}" y="${fy(l.y)}" font-size="${num(th)}" text-anchor="middle">${esc(l.t)}</text>`;
+  out+=`<text class="l-title" x="${num(sh.title.x)}" y="${fy(sh.title.y)}" font-size="${num(th*0.72)}">${esc(sh.title.t)}</text>`;
+  const svg=$("#sheet"); svg.setAttribute("viewBox",`${num(mnx)} ${num(mny)} ${num(w)} ${num(hgt)}`); svg.innerHTML=out;
+  const st=`.l-plan{stroke:${cssVar("--lyr-plan")}}.l-front{stroke:${cssVar("--lyr-front")}}.l-side{stroke:${cssVar("--lyr-side")}}.l-top{stroke:${cssVar("--lyr-top")}}.l-lbl{fill:${cssVar("--ink-soft")}}.l-title{fill:#8f8ba0}text{font-family:monospace}`;
+  S.svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${num(mnx)} ${num(mny)} ${num(w)} ${num(hgt)}"><style>${st}</style>${out}</svg>`;
+}
+
+/* ================= pipeline ================= */
+function regen(){ if(!S.box) return; computeSheet(); S.dxf=buildDXF(); buildSVG(); updateStats(); updatePlane(); }
+function recompute(){ if(!S.rawTris) return; S.zup=toZup(S.rawTris,S.up); S.box=bboxOf(S.zup); syncSectionUI(); regen(); update3DModel(); }
+function updateStats(){ const b=S.box;
+  $("#stTris").textContent=(S.rawTris.length/9).toLocaleString("en-IN");
+  const d=[b.max[0]-b.min[0],b.max[1]-b.min[1],b.max[2]-b.min[2]].map(v=>Math.round(v*10)/10);
+  $("#stBox").textContent=`${d[0]}·${d[1]}·${d[2]} ${S.units}`;
+  const pl=S.sheet.ent.find(e=>e.layer==="PLAN"); $("#stPlan").textContent=(pl?pl.segs.length:0).toLocaleString("en-IN");
+  $("#stLines").textContent=(S.dxfLines||0).toLocaleString("en-IN"); }
+function syncSectionUI(){ const b=S.box,H=b.max[2]-b.min[2],h=b.min[2]+H*S.secPct/100;
+  $("#secVal").textContent=fmtLen(h,S.units); $("#secMin").textContent=fmtLen(b.min[2],S.units); $("#secMax").textContent=fmtLen(b.max[2],S.units); $("#secUnit").textContent=S.units;
+  const n=$("#secNum"); if(document.activeElement!==n) n.value=Math.round(h*100)/100; }
+
+/* ================= 3D viewer ================= */
+let V={};
+function init3D(){
+  const canvas=$("#view3d"); const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  const scene=new THREE.Scene(); const cam=new THREE.PerspectiveCamera(45,1,0.1,1e7); cam.up.set(0,0,1);
+  const controls=new OrbitControls(cam,canvas); controls.enableDamping=true; controls.dampingFactor=0.08;
+  scene.add(new THREE.HemisphereLight(0xffffff,0x7a7466,1.05)); const dir=new THREE.DirectionalLight(0xffffff,1.0); dir.position.set(1,-1.4,2); scene.add(dir);
+  V={renderer,scene,cam,controls,model:null,plane:null,grid:null};
+  const resize=()=>{ const r=canvas.getBoundingClientRect(); const w=Math.max(r.width,10),h=Math.max(r.height,10); renderer.setSize(w,h,false); cam.aspect=w/h; cam.updateProjectionMatrix(); };
+  new ResizeObserver(resize).observe(canvas); resize();
+  (function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene,cam); })();
+}
+function update3DModel(){
+  const {scene}=V;
+  if(V.model){ scene.remove(V.model); V.model.traverse(o=>{ o.geometry&&o.geometry.dispose(); o.material&&o.material.dispose&&o.material.dispose(); }); }
+  if(V.grid) scene.remove(V.grid);
+  const geo=new THREE.BufferGeometry(); geo.setAttribute("position",new THREE.BufferAttribute(S.zup.slice(0),3)); geo.computeVertexNormals();
+  const mesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xd9d0bc,metalness:0.02,roughness:0.88,side:THREE.DoubleSide,flatShading:true}));
+  const grp=new THREE.Group(); grp.add(mesh);
+  if(S.zup.length/9<50000){ grp.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo,28),new THREE.LineBasicMaterial({color:0x565571,transparent:true,opacity:0.4}))); }
+  scene.add(grp); V.model=grp;
+  const b=S.box,size=Math.max(b.max[0]-b.min[0],b.max[1]-b.min[1])*1.6||10;
+  const grid=new THREE.GridHelper(size,20,0xb98a42,0xddd3c1); grid.material.transparent=true; grid.material.opacity=0.5; grid.rotation.x=Math.PI/2;
+  grid.position.set((b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,b.min[2]); scene.add(grid); V.grid=grid;
+  fitCamera(); buildPlane();
+}
+function buildPlane(){
+  const {scene}=V; if(V.plane){ scene.remove(V.plane); V.plane.traverse(o=>{ o.geometry&&o.geometry.dispose(); o.material&&o.material.dispose(); }); }
+  const b=S.box,W=(b.max[0]-b.min[0])*1.25||1,D=(b.max[1]-b.min[1])*1.25||1;
+  const grp=new THREE.Group(); const pg=new THREE.PlaneGeometry(W,D);
+  grp.add(new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:0xd7a758,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false})));
+  grp.add(new THREE.LineSegments(new THREE.EdgesGeometry(pg),new THREE.LineBasicMaterial({color:0xb98a42})));
+  grp.position.set((b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,S.secHeight); grp.visible=S.showPlane; scene.add(grp); V.plane=grp;
+}
+function updatePlane(){ if(V.plane){ V.plane.position.z=S.secHeight; V.plane.visible=S.showPlane; } }
+function fitCamera(){ const b=S.box,{cam,controls}=V;
+  const cx=(b.min[0]+b.max[0])/2,cy=(b.min[1]+b.max[1])/2,cz=(b.min[2]+b.max[2])/2;
+  const ext=Math.max(b.max[0]-b.min[0],b.max[1]-b.min[1],b.max[2]-b.min[2])||10; controls.target.set(cx,cy,cz);
+  const d=ext*1.9; cam.position.set(cx+d*0.8,cy-d,cz+d*0.7); cam.near=ext*0.01; cam.far=ext*40; cam.updateProjectionMatrix(); controls.update(); }
+
+/* ================= sample model (mm, Z-up) ================= */
+function addBox(a,cx,cy,cz,sx,sy,sz){ const x0=cx-sx/2,x1=cx+sx/2,y0=cy-sy/2,y1=cy+sy/2,z0=cz-sz/2,z1=cz+sz/2;
+  const v=[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
+  for(const t of [[0,1,2],[0,2,3],[4,6,5],[4,7,6],[0,4,5],[0,5,1],[1,5,6],[1,6,2],[2,6,7],[2,7,3],[3,7,4],[3,4,0]]) for(const i of t) a.push(v[i][0],v[i][1],v[i][2]); }
+function sampleModel(){ const a=[],wt=120,H=2800;
+  addBox(a,2000,-wt/2,H/2,4000+2*wt,wt,H); addBox(a,-wt/2,1500,H/2,wt,3000,H); addBox(a,4000+wt/2,1500,H/2,wt,3000,H);
+  addBox(a,900,3000+wt/2,H/2,1800,wt,H); addBox(a,3100,3000+wt/2,H/2,1800,wt,H);
+  addBox(a,3350,600,375,1200,600,750); addBox(a,3350,1150,250,480,480,500); addBox(a,3110,1150,650,480,120,300);
+  addBox(a,250,1500,900,300,1200,1800); addBox(a,1000,600,400,900,500,800); return new Float32Array(a); }
+
+/* ================= loaders ================= */
+function trisFromObject(obj){ obj.updateMatrixWorld(true); const out=[],v=new THREE.Vector3();
+  obj.traverse(o=>{ if(!o.isMesh||!o.geometry) return; const pos=o.geometry.attributes.position; if(!pos) return; const idx=o.geometry.index,m=o.matrixWorld;
+    const push=i=>{ v.fromBufferAttribute(pos,i).applyMatrix4(m); out.push(v.x,v.y,v.z); };
+    if(idx){ for(let i=0;i<idx.count;i++) push(idx.getX(i)); } else { for(let i=0;i<pos.count;i++) push(i); } });
+  return new Float32Array(out); }
+function skpNotice(ext){
+  const app=CLOSED_EXTS[ext]||"That"; const el=$("#skpNote"); el.hidden=false;
+  el.innerHTML = ext==="skp"
+    ? `<div class="notice warn"><b>SketchUp .skp is a closed format</b> — it can only be read by SketchUp itself. Export the model first, then drop the export here:
+       <ol><li><b>SketchUp Pro / Go:</b> File → Export → 3D Model → <b>COLLADA (.dae)</b> or <b>OBJ</b> (leave "Y is up" ticked).</li>
+       <li><b>SketchUp Free (web):</b> ☰ → Download → <b>STL</b> (then pick <b>Z-up</b> above).</li>
+       <li>Untick "Export only current selection" so the whole room comes across.</li></ol></div>`
+    : `<div class="notice warn"><b>${esc(app)} native files are a closed format.</b> In 3ds Max: File → Export → <b>OBJ</b> or <b>FBX</b>, then drop that file here.</div>`;
+}
+async function loadFile(file){
+  const ext=(file.name.split(".").pop()||"").toLowerCase();
+  if(CLOSED_EXTS[ext]) return skpNotice(ext);
+  $("#skpNote").hidden=true;
+  try{
+    let obj;
+    if(ext==="obj"){ const {OBJLoader}=await import("three/addons/loaders/OBJLoader.js"); obj=new OBJLoader().parse(await file.text()); }
+    else if(ext==="stl"){ const {STLLoader}=await import("three/addons/loaders/STLLoader.js"); obj=new THREE.Mesh(new STLLoader().parse(await file.arrayBuffer())); }
+    else if(ext==="ply"){ const {PLYLoader}=await import("three/addons/loaders/PLYLoader.js"); obj=new THREE.Mesh(new PLYLoader().parse(await file.arrayBuffer())); }
+    else if(ext==="dae"){ const {ColladaLoader}=await import("three/addons/loaders/ColladaLoader.js"); obj=new ColladaLoader().parse(await file.text()).scene; }
+    else if(ext==="gltf"||ext==="glb"){ const {GLTFLoader}=await import("three/addons/loaders/GLTFLoader.js"); const buf=await file.arrayBuffer(); obj=await new Promise((res,rej)=>new GLTFLoader().parse(buf,"",r=>res(r.scene),rej)); }
+    else if(ext==="fbx"){ const {FBXLoader}=await import("three/addons/loaders/FBXLoader.js"); obj=new FBXLoader().parse(await file.arrayBuffer(),""); }
+    else { toast("Unsupported format: ."+ext); return; }
+    const tris=trisFromObject(obj); if(!tris.length){ toast("No mesh geometry found in that file"); return; }
+    S.rawTris=tris; S.name=file.name; S.file=file; $("#fnameTxt").textContent=file.name;
+    if(!$("#sv_title").value.trim()) $("#sv_title").value=file.name.replace(/\.[^.]+$/,"")+" — plan & elevations";
+    setUp(ext==="stl"||ext==="ply"?"z":"y"); // Max & SketchUp OBJ/DAE/FBX exports are Y-up by default; STL/PLY are raw Z-up
+    toast("Loaded "+(tris.length/9).toLocaleString("en-IN")+" triangles");
+  }catch(err){ console.error(err); toast("Could not read that file — try an OBJ or DAE export"); }
+}
+
+/* ================= project files (open existing 3D uploads) ================= */
+async function listProjectModels(){
+  const {sb,pid}=CTX; if(!sb||!pid) return;
+  const exts=[...MODEL_EXTS,"skp"];
+  const {data,error}=await sb.from("project_files").select("id,title,storage_path,file_type,version,uploaded_at").eq("project_id",pid).eq("kind","design").in("file_type",exts).order("uploaded_at",{ascending:false}).limit(40);
+  if(error||!data||!data.length) return;
+  $("#pfWrap").hidden=false;
+  $("#pfList").innerHTML=data.map(f=>`<button data-pf="${f.id}" data-path="${esc(f.storage_path)}" data-ext="${esc(f.file_type)}" title="${esc(f.storage_path)}"><span>${esc(f.title||f.storage_path.split("/").pop())}${f.version?` <span class="mono" style="color:var(--ink-soft)">${esc(f.version)}</span>`:""}</span><span class="ext">${esc(f.file_type)}</span></button>`).join("");
+  $("#pfList").querySelectorAll("[data-pf]").forEach(b=>b.onclick=async()=>{
+    if(CLOSED_EXTS[b.dataset.ext]) return skpNotice(b.dataset.ext);
+    b.disabled=true; toast("Fetching from project files…");
+    try{ const {data:su,error:se}=await sb.storage.from(BUCKET).createSignedUrl(b.dataset.path,600); if(se) throw se;
+      const blob=await (await fetch(su.signedUrl)).blob(); const name=b.dataset.path.split("/").pop().replace(/^\d+_/,"");
+      await loadFile(new File([blob],name)); }
+    catch(e){ toast("Could not open that file: "+(e.message||e)); }
+    b.disabled=false; });
+}
+
+/* ================= export & save ================= */
+function download(name,data,type){ const a=document.createElement("a"); const blob=new Blob([data],{type}); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500); }
+const safe=s=>String(s).replace(/[^a-zA-Z0-9._-]/g,"_");
+const baseName=()=>safe(S.name.replace(/\.[^.]+$/,""))||"drawing";
+async function saveToProject(){
+  const {sb,pid,session}=CTX; if(!sb||!session||!pid||!S.dxf) return;
+  const btn=$("#saveBtn"),hint=$("#saveHint"); btn.disabled=true;
+  const ts=Date.now(),base=baseName(),ver=$("#sv_ver").value.trim()||null,title=$("#sv_title").value.trim()||(base+" — plan & elevations");
+  const uid=session.user.id, rows=[], up=async(path,data,type)=>{ const {error}=await sb.storage.from(BUCKET).upload(path,new Blob([data],{type}),{contentType:type}); if(error) throw new Error(error.message); };
+  try{
+    hint.textContent="Uploading DXF…";
+    const dxfPath=`${pid}/design/${ts}_${base}.dxf`; await up(dxfPath,S.dxf,"application/dxf");
+    rows.push({project_id:pid,kind:"design",title:title+" (DXF)",version:ver,storage_path:dxfPath,file_type:"dxf",size_bytes:new Blob([S.dxf]).size,uploaded_by:uid});
+    hint.textContent="Uploading SVG…";
+    const svgPath=`${pid}/design/${ts}_${base}.svg`; await up(svgPath,S.svg,"image/svg+xml");
+    rows.push({project_id:pid,kind:"design",title:title+" (SVG)",version:ver,storage_path:svgPath,file_type:"svg",size_bytes:new Blob([S.svg]).size,uploaded_by:uid});
+    if($("#sv_keep").checked&&S.file){
+      hint.textContent="Uploading the 3D model ("+(S.file.size/1048576).toFixed(1)+" MB)…";
+      const ext=(S.file.name.split(".").pop()||"").toLowerCase(), mPath=`${pid}/design/${ts}_${safe(S.file.name)}`;
+      const {error}=await sb.storage.from(BUCKET).upload(mPath,S.file); if(error) throw new Error(error.message);
+      rows.push({project_id:pid,kind:"design",title:title+" (3D model)",version:ver,storage_path:mPath,file_type:ext,size_bytes:S.file.size,uploaded_by:uid});
+    }
+    hint.textContent="Recording files…";
+    const {error}=await sb.from("project_files").insert(rows); if(error) throw new Error(error.message);
+    hint.innerHTML=`Saved ${rows.length} file${rows.length>1?"s":""} — open <b>Studio → Design → Files</b> in Lintel OS to see them, share to the client, or request approval.`;
+    toast("Saved to project"); listProjectModels();
+  }catch(e){ console.error(e); hint.textContent=""; toast("Save failed: "+(e.message||e)); }
+  btn.disabled=false;
+}
+
+/* ================= session + project ================= */
+async function initProject(){
+  const body=$("#projBody"),strip=$("#projTxt"); const qs=new URLSearchParams(location.search); const pid=Number(qs.get("project"))||null;
+  if(!window.supabase){ body.innerHTML=`<div class="notice warn">Could not load the Lintel OS client. Downloads still work; saving needs a connection.</div>`; strip.textContent="Offline"; return; }
+  const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY); CTX.sb=sb;
+  let session=null; try{ session=(await sb.auth.getSession()).data.session; }catch(e){}
+  CTX.session=session;
+  if(!session){ strip.textContent="Not signed in"; body.innerHTML=`<div class="notice warn"><b>Not signed in.</b> Downloads work as-is. To save into a project, <a href="./">sign in to Lintel OS</a> in this browser, then reopen this page.</div>`; return; }
+  if(!pid){ strip.textContent="No project selected"; body.innerHTML=`<div class="notice">Open this page from a project — <b>Studio → Design → Files → 3D → 2D drawing</b> — to save drawings into it. Downloads work without a project.</div>`; return; }
+  CTX.pid=pid;
+  const {data:p,error}=await sb.from("projects").select("id,code,name,client_name").eq("id",pid).single();
+  if(error||!p){ strip.textContent="Project not found"; body.innerHTML=`<div class="notice warn">Project #${pid} could not be opened (${esc(error?error.message:"no access")}).</div>`; return; }
+  CTX.project=p;
+  $("#projStrip").innerHTML=`<b>${esc(p.code||"#"+p.id)}</b><span>${esc(p.name||"")}${p.client_name?" · "+esc(p.client_name):""}</span>`;
+  body.innerHTML=`<div><b class="display" style="font-size:15px">${esc(p.name||p.code)}</b><div class="uphint">${esc(p.code||"")}${p.client_name?" · "+esc(p.client_name):""}</div></div>`;
+  $("#saveBtn").disabled=false; regen(); listProjectModels();
+}
+
+/* ================= UI wiring ================= */
+function setUp(up){ S.up=up; $("#upZ").setAttribute("aria-pressed",up==="z"); $("#upY").setAttribute("aria-pressed",up==="y"); recompute(); }
+$("#drop").onclick=()=>$("#file").click();
+$("#drop").onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); $("#file").click(); } };
+$("#file").onchange=e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); };
+["dragover","dragenter"].forEach(ev=>$("#drop").addEventListener(ev,e=>{ e.preventDefault(); $("#drop").classList.add("hot"); }));
+["dragleave","drop"].forEach(ev=>$("#drop").addEventListener(ev,e=>{ e.preventDefault(); $("#drop").classList.remove("hot"); }));
+$("#drop").addEventListener("drop",e=>{ if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+$("#sampleBtn").onclick=()=>{ S.rawTris=sampleModel(); S.name="study-room.sample"; S.file=null; $("#fnameTxt").textContent="study-room.sample"; $("#skpNote").hidden=true; setUp("z"); toast("Loaded the sample study room"); };
+$("#upZ").onclick=()=>setUp("z"); $("#upY").onclick=()=>setUp("y");
+$("#secRange").oninput=e=>{ S.secPct=parseFloat(e.target.value); if(S.box){ syncSectionUI(); regen(); } };
+$("#secNum").onchange=e=>{ if(!S.box) return; const b=S.box,H=b.max[2]-b.min[2]||1; let v=parseFloat(e.target.value); if(isNaN(v)) return; v=Math.max(b.min[2],Math.min(b.max[2],v)); S.secPct=(v-b.min[2])/H*100; $("#secRange").value=S.secPct; syncSectionUI(); regen(); };
+$("#planeChk").onchange=e=>{ S.showPlane=e.target.checked; updatePlane(); };
+document.querySelectorAll("[data-view]").forEach(c=>c.onchange=e=>{ S.views[e.target.dataset.view]=e.target.checked; regen(); });
+$("#units").onchange=e=>{ S.units=e.target.value; if(S.box){ syncSectionUI(); regen(); } };
+$("#dxfBtn").onclick=()=>{ if(!S.dxf) return toast("Load a model first"); download(baseName()+".dxf",S.dxf,"application/dxf"); };
+$("#svgBtn").onclick=()=>{ if(!S.svg) return toast("Load a model first"); download(baseName()+".svg",S.svg,"image/svg+xml"); };
+$("#saveBtn").onclick=saveToProject;
+$("#resetBtn").onclick=()=>{ if(S.box) fitCamera(); };
+
+/* boot: engine first (works signed-out), then the project context */
+init3D(); S.rawTris=sampleModel(); recompute();
+initProject();
+</script>
+</body>
+</html>

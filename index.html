@@ -9032,6 +9032,10 @@ function execClientView(p,acts){
 }
 
 
+/* DRAW-01: 3D model → 2D DXF drawings live on their own page (three.js stays out of this file).
+   Same origin as the app, so it reuses the signed-in session, and it saves back into
+   project_files as kind "design" — i.e. the list below. Hosted URL when opened from a file:// copy. */
+const DRAWINGS_URL=(location.protocol==="http:"||location.protocol==="https:")?location.origin+"/drawings.html":"https://os.lintelspace.com/drawings.html";
 async function pwFiles(p,body,kind){
   const label=kind==="design"?"Design":"Document";
   const {data:files,error:fErr}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind",kind).order("uploaded_at",{ascending:false}).order("id",{ascending:false});
@@ -9042,15 +9046,17 @@ async function pwFiles(p,body,kind){
   }
   body.innerHTML=`<div class="pw-card">
     ${canWorkProject()?`<div class="upbar">
-      <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg"':''}>
+      <input type="file" id="pf_file" ${kind==="design"?'accept=".pdf,.dwg,.skp,.rvt,.png,.jpg,.jpeg,.obj,.fbx,.dae,.gltf,.glb,.stl,.ply"':''}>
       <input id="pf_title" placeholder="Title (optional)">
       <input id="pf_ver" placeholder="V1" style="width:70px">
       <button class="primary" id="pf_up">Upload</button>
+      ${kind==="design"?`<button id="pf_draw" title="Turn a 3ds Max / SketchUp export (OBJ, DAE, FBX, STL…) into a layered DXF — plan, elevations, top view — saved back into this list">3D → 2D drawing</button>`:""}
     </div><div class="uphint" id="pf_hint"></div>`:""}
     <div id="pf_list">${renderFileList(files||[],kind)}</div>
   </div>`;
   if(canWorkProject()){
     $("#pf_up").onclick=()=>uploadProjectFile(p,kind);
+    const dr=$("#pf_draw"); if(dr) dr.onclick=()=>window.open(DRAWINGS_URL+"?project="+p.id,"_blank");
     bindFileDownloads();
   } else bindFileDownloads();
 }
@@ -10966,6 +10972,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b87",date:"25 Sep 2026",title:"2D CAD drawings from a 3D model",points:[
+    "Open a project → <b>Studio → Design → Files</b> and press <b>3D → 2D drawing</b>. Drop the model exported from 3ds Max or SketchUp (OBJ, DAE, FBX, glTF, STL, PLY) — or pick one already uploaded to that project — drag the cut height, and you get a layered <b>DXF</b> with the floor plan (true section), front and side elevations and a top view, plus an SVG. Press <b>Save to project</b> and they land back in this Files list, ready to share to the client or send for approval.",
+    "Native <b>.max</b> and <b>.skp</b> files cannot be read outside their own apps — drop one and the page shows the exact export steps to use instead. If the model appears lying on its side, switch the <b>Up axis</b>.",
+  ]},
   {build:"b78",date:"25 Sep 2026",title:"Real cost rates, real margins",points:[
     "The rate library now has a <b>Cost ₹</b> column beside Rate — enter what an item costs <i>us</i> and every BOQ line added from the library carries that cost. This is the one thing that makes a project's budget, variance and margin real. Open <b>BOQ → Rate library</b>; the strip at the top tells you how much of the library is costed.",
     "You do not have to fill 600 items by hand: set <b>Cost: missing cost</b> to list only the blank ones, or press <b>Paste cost rates</b> and paste an item-and-cost list straight out of a spreadsheet — it shows you exactly what it matched, and what it could not, before anything is written.",
@@ -12893,7 +12903,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b86 · 25 Sep 2026";
+const APP_BUILD = "b87 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
