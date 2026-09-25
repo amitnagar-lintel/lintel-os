@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Configure Your Module · Lintel Space Atelier</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{ --navy:#0D0D27; --gold:#DFB05E; --gold-l:#E9C883; --ink:#23233F; --paper:#fff; --line:#E7E2D8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#F3F1EC;color:var(--ink);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    -webkit-text-size-adjust:100%;}
+
+  /* ── top bar (house pattern, as quote.html) ──────────────────────────── */
+  .top{background:var(--navy);border-bottom:3px solid var(--gold);color:#F7F2E9;
+    padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    position:sticky;top:0;z-index:20;}
+  .brand{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:16px;font-weight:500;
+    letter-spacing:2.5px;text-transform:uppercase}
+  .brand small{display:block;font-family:'Inter';font-size:8.5px;letter-spacing:2.6px;
+    text-transform:uppercase;color:var(--gold);opacity:.95;font-weight:400;margin-top:2px}
+
+  .wrap{max-width:560px;margin:18px auto 48px;padding:0 14px}
+  h1{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:23px;color:var(--navy);margin:14px 2px 4px}
+  .sub{color:#6b6b7a;font-size:13.5px;margin:0 2px 18px}
+  .card{background:var(--paper);border-radius:12px;padding:18px;margin-bottom:14px;
+    box-shadow:0 18px 50px -24px rgba(13,13,39,.35)}
+  .dims{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  label{font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;color:#6b6b7a;
+    display:block;margin-bottom:6px}
+  input{width:100%;padding:11px 10px;font-size:16px;border:1px solid var(--line);
+    border-radius:9px;background:#FDFCFA;color:var(--ink);font-family:'Inter'}
+  input:focus{outline:none;border-color:var(--gold)}
+  .hint{font-size:10.5px;color:#9a97a0;margin-top:4px}
+  .total{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .total span{color:#6b6b7a;font-size:12.5px;line-height:1.45}
+  .total b{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:32px;color:var(--navy);white-space:nowrap}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:8px 4px;border-bottom:1px solid var(--line);text-align:left}
+  td:last-child,th:last-child{text-align:right;white-space:nowrap}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#6b6b7a;font-weight:600}
+  .foot{font-size:11px;color:#9a97a0;margin:2px}
+  .updating{opacity:.45;transition:opacity .15s}
+  .state{padding:56px 24px;text-align:center;color:#6b6b7a}
+  .state h2{font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:22px;color:var(--navy);margin:0 0 8px}
+  .spin{width:26px;height:26px;border:2px solid var(--line);border-top-color:var(--gold);
+    border-radius:50%;margin:0 auto 16px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="top"><div class="brand">Lintel Space<small>Atelier · Module Studio</small></div></div>
+<div class="wrap">
+  <div id="app"><div class="card state"><div class="spin"></div>Preparing your module…</div></div>
+  <p class="foot">Indicative estimate generated live from the Lintel OS catalog (materials &amp; hardware,
+    ex-GST). Your final quotation includes fabrication, finish &amp; taxes.</p>
+</div>
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var TOKEN = (qs.get('t') || '').trim();
+  var API = qs.get('api') || 'https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/module-configurator';
+  var app = document.getElementById('app');
+  var timer = null;
+
+  function inr(n){ return '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+    return { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]; }); }
+  function fail(title, msg){
+    app.innerHTML = '<div class="card state"><h2>' + esc(title) + '</h2>' + esc(msg) + '</div>';
+  }
+
+  if (!TOKEN) { fail('Link incomplete', 'This configurator link is missing its token. Please use the link you were sent.'); return; }
+
+  fetch(API + '?t=' + encodeURIComponent(TOKEN))
+    .then(function (r) { return r.json(); })
+    .then(function (meta) {
+      if (meta.error) { fail('Link expired', 'This configurator link is no longer valid. Please ask your designer for a fresh one.'); return; }
+      var lim = meta.dim_limits || {};
+      var d = meta.dims || {};
+      function dimInput(id, name, val, l) {
+        l = l || {};
+        return '<div><label>' + name + ' (mm)</label>' +
+          '<input id="' + id + '" type="number" inputmode="numeric" value="' + (val || '') + '"' +
+          ' min="' + (l.min || 1) + '" max="' + (l.max || 10000) + '">' +
+          '<div class="hint">' + (l.min || '') + '–' + (l.max || '') + ' mm</div></div>';
+      }
+      app.innerHTML =
+        '<h1>' + esc(meta.title) + '</h1>' +
+        '<div class="sub">' + esc(meta.module && meta.module.name) + ' · adjust the size — the price updates live</div>' +
+        '<div class="card"><div class="dims">' +
+          dimInput('w', 'Width', d.w, lim.w) + dimInput('d', 'Depth', d.d, lim.d) + dimInput('h', 'Height', d.h, lim.h) +
+        '</div></div>' +
+        '<div class="card total"><span>Estimated price<br>materials &amp; hardware, ex-GST</span><b id="total">…</b></div>' +
+        '<div class="card"><table><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead><tbody id="lines"></tbody></table></div>';
+      ['w', 'd', 'h'].forEach(function (id) {
+        document.getElementById(id).addEventListener('input', function () {
+          clearTimeout(timer); timer = setTimeout(refresh, 350);
+        });
+      });
+      refresh();
+    })
+    .catch(function () { fail('Connection problem', 'Could not reach the pricing service. Please check your connection and reload.'); });
+
+  function refresh() {
+    var totalEl = document.getElementById('total');
+    if (!totalEl) return;
+    totalEl.classList.add('updating');
+    fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        t: TOKEN,
+        w: +document.getElementById('w').value,
+        d: +document.getElementById('d').value,
+        h: +document.getElementById('h').value
+      })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) throw new Error(j.error);
+        totalEl.textContent = inr(j.total);
+        document.getElementById('lines').innerHTML = (j.lines || []).map(function (l) {
+          return '<tr><td>' + esc(l.name) + '</td><td>' + l.qty + ' ' + esc(l.uom) + '</td><td>' + inr(l.amount) + '</td></tr>';
+        }).join('');
+        ['w', 'd', 'h'].forEach(function (k) {
+          if (j.clamped && j.clamped[k] != null) document.getElementById(k).value = j.clamped[k];
+        });
+        totalEl.classList.remove('updating');
+      })
+      .catch(function () { totalEl.textContent = 'unavailable'; totalEl.classList.remove('updating'); });
+  }
+})();
+</script>
+</body>
+</html>
