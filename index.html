@@ -4308,6 +4308,13 @@ async function convertLead(l){
     </div>
     <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="cv_go">Create project →</button></div>`);
   $("#cv_go").onclick=async()=>{
+    // Double-click guard (Ms Anita, 22 Sep: two clicks 0.8 s apart made LSA-2026-040 AND -041)
+    if(convertLead._busy) return;
+    const goBtn=$("#cv_go"); convertLead._busy=true; if(goBtn){ goBtn.disabled=true; goBtn.textContent="Creating…"; }
+    const done=()=>{ convertLead._busy=false; if(goBtn&&document.body.contains(goBtn)){ goBtn.disabled=false; goBtn.textContent="Create project →"; } };
+    try{ await convertLeadGo(); }catch(e){ toast(e.message||String(e)); } finally{ done(); }
+  };
+  async function convertLeadGo(){
     // ── client-data gate: no project without contact, email, site address (PAN optional) ──
     const phone=$("#cv_phone").value.trim(), email=$("#cv_email").value.trim(), pan=panResolve("cv_pan", l.pan);
     const sa=readSiteAddr("cv_s", l.site_address);
