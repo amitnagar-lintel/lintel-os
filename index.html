@@ -12146,18 +12146,27 @@ function gClient(p){
   const v=G.ver||{}, f=gGrand();
   const NAVY="#0D0D27",BRASS="#D7A758",BRASSD="#946F33",INKS="#6B6560",GREY="#9A9490",LINE="#E7E2D8",PAPER="#FBFAF7",MUTE="#B8B2AA";
   const dF=v.quote_date?new Date(v.quote_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
-  const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'30 days from date';
+  const vF=v.validity_date?new Date(v.validity_date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'21 days from date';
+  const rateRev=(G.rates.find(r=>r.effFrom)||{}).effFrom||null;
+  /* QUOTE-01 (Move 5, 25 Sep 2026): room-by-room summary first, then plain-words inclusions,
+     then the itemised sheet. Room order follows the space tags; allowances and options are marked. */
+  const SPACE_ORDER=['kitchen','living','bedroom','study_kids','bathroom','foyer_utility','balcony','general','whole_home'];
+  const roomSpace=room=>{ const c={}; G.rows.filter(r=>r.room===room).forEach(r=>{ const f=G.rates.find(x=>x.item===r.item); const sp=(f&&f.space)||'general'; c[sp]=(c[sp]||0)+1; }); if(/whole home|entire|full house/i.test(room)) return 'whole_home'; return Object.keys(c).sort((a,b)=>c[b]-c[a])[0]||'general'; };
+  const roomsOrdered=[...gRooms()].sort((a,b)=>SPACE_ORDER.indexOf(roomSpace(a))-SPACE_ORDER.indexOf(roomSpace(b)));
+  const lineClient=r=>{ const cfg=gStreamSettings(rowStream(r)); return gLineNet(r)*(1+cfg.gst/100); };   // what the client pays for this line, GST included
+  const isAllowance=r=>/^allowance/i.test(String(r.item||''))||/allowance/i.test(String(r.remarks||''))||r.cat==='Allowance';
+  const roomTier=room=>{ const t=G.rows.filter(r=>r.room===room&&/ Tier$/.test(r.cat)).map(r=>String(r.item).split(' · ')[1]).filter(Boolean); return [...new Set(t)].join(' / '); };
   const qLabel=t=>`<div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:${GREY};text-transform:uppercase;margin:0 0 4px">${t}</div><div style="width:34px;height:2px;background:${BRASS};margin-bottom:16px"></div>`;
   // Detailed BOQ grouped ROOM-wise — clients think in rooms; work sections
   // (Modular / Onsite Carpentry / ...) stay internal to estimator & work orders.
   let detailed='';
-  gRooms().forEach(room=>{
+  roomsOrdered.forEach(room=>{
     const rr=G.rows.filter(r=>r.room===room);
     if(!rr.length) return;
     const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
     detailed+=`<tr><td colspan="7" style="padding:18px 10px 6px"><span style="font-family:'Bricolage Grotesque',Inter,sans-serif;font-size:13px;font-weight:700;color:${NAVY};letter-spacing:.4px">${esc(room)}</span><div style="height:2px;background:linear-gradient(90deg,${BRASS} 60px,${LINE} 60px)"></div></td></tr>`;
     rr.forEach(r=>{ const sc=gScope(r), exc=sc==='excluded', opt=sc==='optional';
-      const tag=exc?` <span style="font-size:8.5px;font-weight:700;color:${MUTE};letter-spacing:1px;text-transform:uppercase;border:1px solid ${LINE};border-radius:8px;padding:0 6px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8.5px;font-weight:700;color:${BRASSD};letter-spacing:1px;text-transform:uppercase;border:1px solid ${BRASS};border-radius:8px;padding:0 6px;vertical-align:middle">Optional</span>`:'';
+      const tag=exc?` <span style="font-size:8.5px;font-weight:700;color:${MUTE};letter-spacing:1px;text-transform:uppercase;border:1px solid ${LINE};border-radius:8px;padding:0 6px;vertical-align:middle">Excluded</span>`:opt?` <span style="font-size:8.5px;font-weight:700;color:${BRASSD};letter-spacing:1px;text-transform:uppercase;border:1px solid ${BRASS};border-radius:8px;padding:0 6px;vertical-align:middle">Optional</span>`:isAllowance(r)?` <span style="font-size:8.5px;font-weight:700;color:${INKS};letter-spacing:1px;text-transform:uppercase;border:1px solid ${LINE};border-radius:8px;padding:0 6px;vertical-align:middle">Allowance</span>`:'';
       const disc=gLineDisc(r), discNote=disc>0?` <span style="font-size:9px;color:${BRASSD}">(${disc}% off)</span>`:'';
       const itemCell=exc?`<span style="text-decoration:line-through;color:${MUTE}">${esc(r.item)}</span>${tag}`:`${esc(r.item)}${discNote}${tag}`;
       const remark=(r.remarks&&String(r.remarks).trim())?`<div style="font-size:10px;color:${exc?MUTE:GREY};margin-top:2px;line-height:1.5;font-style:italic">${esc(String(r.remarks).trim())}</div>`:'';
@@ -12231,9 +12240,53 @@ function gClient(p){
         <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Project</div><b>${esc(v.project_name||'—')}</b><div style="color:${GREY};font-size:10.5px">${esc(v.property||'')}</div></div>
         <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Design consultant</div><b>${esc(v.consultant||'—')}</b><div style="color:${GREY};font-size:10.5px">${esc(v.consultant_phone||'')}</div></div>
         <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Date</div><b>${dF}</b></div>
-        <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Valid till</div><b>${vF}</b></div>
+        <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Valid till</div><b>${vF}</b>${rateRev?`<div style="color:${GREY};font-size:10px">rate card of ${esc(new Date(rateRev+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}))}</div>`:''}</div>
         <div><div style="font-size:9px;letter-spacing:1.5px;color:${GREY};text-transform:uppercase;margin-bottom:3px">Version</div><b>${esc(v.version_label||'—')}</b></div>
       </div>
+      ${qLabel("Your Home, Room by Room")}
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+        <thead><tr style="border-bottom:2px solid ${NAVY}">
+          <th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Room</th>
+          <th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Finish level</th>
+          <th style="text-align:right;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Items</th>
+          <th style="text-align:right;padding:8px 10px;font-size:9.5px;letter-spacing:1.2px;color:${GREY};text-transform:uppercase">Amount incl. GST</th></tr></thead>
+        <tbody>${roomsOrdered.map(room=>{ const rr=G.rows.filter(r=>r.room===room&&gScope(r)==='included'); if(!rr.length) return ''; const amt=rr.reduce((a,r)=>a+lineClient(r),0); const tier=roomTier(room); const whole=roomSpace(room)==='whole_home';
+          return `<tr style="border-bottom:1px solid ${LINE}"><td style="padding:9px 10px;color:${NAVY};font-weight:${whole?'400':'600'}">${esc(room)}${whole?` <span style="font-size:9.5px;color:${GREY}">· services across the home</span>`:''}</td><td style="padding:9px 10px;color:${BRASSD};font-size:11px">${esc(tier)}</td><td style="padding:9px 10px;text-align:right;color:${GREY}">${rr.length}</td><td style="padding:9px 10px;text-align:right;font-weight:600;color:${NAVY}">${gFmt(amt)}</td></tr>`; }).join('')}
+        </tbody></table>
+      <div style="font-size:10px;color:${GREY};margin:0 0 30px">Room amounts include design &amp; handling, any discount and GST — they add up to the total below. Optional items are not counted.</div>
+      ${(()=>{
+        const inc=gIncluded();
+        const has=re=>inc.some(r=>re.test(String(r.item)+' '+String(r.cat)));
+        const subs=[['BWP',/\bBWP\b/i],['BWR',/\bBWR\b/i],['HDHMR',/HDHMR/i],['MR-grade ply',/MR Ply/i],['MDF',/\bMDF\b/i]].filter(x=>has(x[1])).map(x=>x[0]);
+        const fins=[['laminate',/laminate/i],['acrylic',/acrylic/i],['PU',/\bPU\b/i],['veneer',/veneer/i],['glass profile',/glass profile|glass shutter/i],['membrane',/membrane/i],['duco',/duco/i]].filter(x=>has(x[1])).map(x=>x[0]);
+        const hw=[['Hettich',/hettich/i],['Blum',/blum/i],['Ebco',/ebco/i]].filter(x=>has(x[1])).map(x=>x[0]);
+        const tiers=[...new Set(inc.filter(r=>/ Tier$/.test(r.cat)).map(r=>String(r.item).split(' · ')[1]).filter(Boolean))];
+        const warranty=tiers.length?(tiers.includes('Essential')&&tiers.length===1?'5 years on woodwork & workmanship':'10 years on woodwork & workmanship + 1 year free service'):'10 years on woodwork & workmanship + 1 year free service';
+        const allow=G.rows.filter(r=>gScope(r)==='included'&&isAllowance(r));
+        const opts=G.rows.filter(r=>gScope(r)==='optional');
+        const excl=G.rows.filter(r=>gScope(r)==='excluded');
+        const li=t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin:0 0 6px"><span style="color:${BRASSD};font-weight:700">—</span><div>${t}</div></div>`;
+        return `${qLabel("What This Includes")}
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:0;border:1px solid ${LINE};border-radius:10px;overflow:hidden;margin-bottom:34px;font-size:11px;line-height:1.55">
+          <div style="padding:16px 18px;border-right:1px solid ${LINE}"><div style="font-weight:700;color:${NAVY};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Included</div>
+            ${tiers.length?li(`<b style="color:${NAVY}">${esc(tiers.join(' / '))}</b> finish level${tiers.length>1?'s':''}`):''}
+            ${subs.length?li(`Carcass: <b style="color:${NAVY}">${esc(subs.join(', '))}</b> IS-grade boards, machine edge-banded`):''}
+            ${fins.length?li(`Shutters &amp; panels: <b style="color:${NAVY}">${esc(fins.join(', '))}</b>`):''}
+            ${hw.length?li(`Hardware: <b style="color:${NAVY}">${esc(hw.join(' / '))}</b> soft-close, brand-warrantied`):li('Soft-close hardware on every unit')}
+            ${li(`Warranty: <b style="color:${NAVY}">${warranty}</b>`)}
+            ${li('Design, project management, delivery &amp; installation')}
+          </div>
+          <div style="padding:16px 18px;border-right:1px solid ${LINE}"><div style="font-weight:700;color:${NAVY};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Allowances &amp; options</div>
+            ${allow.length?allow.map(r=>li(`${esc(r.item.replace(/^Allowance — /i,''))} — <b style="color:${NAVY}">${gFmt(lineClient(r))}</b> <span style="color:${GREY}">allowance; adjusts to your selection</span>`)).join(''):''}
+            ${opts.length?opts.map(r=>li(`${esc(r.item)} — <b style="color:${BRASSD}">+${gFmt(lineClient(r))}</b> <span style="color:${GREY}">optional</span>`)).join(''):''}
+            ${(!allow.length&&!opts.length)?`<div style="color:${GREY}">No allowances or optional items — everything above is firm.</div>`:''}
+          </div>
+          <div style="padding:16px 18px"><div style="font-weight:700;color:${NAVY};font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Not included</div>
+            ${excl.map(r=>li(esc(r.item))).join('')}
+            ${li(STD_EXCL)}
+            ${li('Civil, electrical or plumbing work beyond the lines listed')}
+          </div>
+        </div>`; })()}
       ${qLabel("Your Investment")}
       <div style="display:flex;justify-content:flex-end;margin-bottom:34px">
         <div style="width:400px;max-width:100%;font-size:12px">
@@ -12259,7 +12312,6 @@ function gClient(p){
       </table>
       ${scopeNote}
       <div style="height:30px"></div>
-      ${scopeStrip}
       ${standard}
       ${qLabel("Payments")}
       <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:28px;margin-bottom:34px;font-size:11.5px">
@@ -12841,7 +12893,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b85 · 25 Sep 2026";
+const APP_BUILD = "b86 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
