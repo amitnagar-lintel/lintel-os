@@ -9954,6 +9954,20 @@ function gLineDiscCap(r){
   const cost=Number(r.cost)||0; if(!(cost>0)||!(price>0)) return DISC_CAP_UNCOSTED;
   return Math.max(0, Math.min(100, Math.floor(1000*(1-cost/((1-DISC_MARGIN_FLOOR)*price)))/10));
 }
+/* Margin display (staff only — never the client view) + discount authority (AUTH-01, 25 Sep 2026):
+   consultants / designers / presales / partners may enter up to 5%, the sales head 10%, admin anything.
+   Applies to the discount as ENTERED; the per-line margin caps above still apply on top. */
+const DISC_AUTHORITY={admin:100,sales_head:10};
+function gDiscAuthority(){ return DISC_AUTHORITY[myRole]!==undefined?DISC_AUTHORITY[myRole]:5; }
+function gAuthorityNote(){ const a=gDiscAuthority(); return a>=100?'':`your limit ${a}% · ${a<10?'Rafiya up to 10%, ':''}Amit beyond`; }
+function gShowMargin(){ return canWrite() && !isDesignPartner(); }
+// Net price of a line as the client pays it (before GST): boosted, plus design fee, less the discount actually applied.
+function gLineNet(r){ const cfg=gStreamSettings(rowStream(r)); return gBoosted(r)*(1+cfg.fee/100)*(1-gLineSectionDisc(r,cfg)/100); }
+function gLineGM(r){ const c=Number(r.cost)||0, n=gLineNet(r); if(!(c>0)||!(n>0)) return null; return Math.round(1000*(n-c*(Number(r.qty)||0))/n)/10; }
+function gGMCell(gm,tag){ if(gm===null) return `<${tag} style="color:var(--ink-mute)" title="No cost on file">—</${tag}>`; const col=gm<20?'#B4453A':gm<32?'#B7791F':'#2E7D5B'; return `<${tag} style="color:${col};font-weight:600;font-variant-numeric:tabular-nums">${gm}%</${tag}>`; }
+// Margin over a set of rows: net revenue vs cost, plus how much of that revenue is costed at all.
+function gMarginOf(rows){ let net=0,cost=0,costed=0; rows.forEach(r=>{ if(gScope(r)!=='included') return; const n=gLineNet(r); net+=n; const c=(Number(r.cost)||0)*(Number(r.qty)||0); if(c>0){ cost+=c; costed+=n; } }); return {net,cost,cover:net>0?Math.round(100*costed/net):0,gm:net>0&&costed>0?Math.round(1000*(net-cost)/net)/10:null}; }
+function gMarginHtml(m,label){ if(!gShowMargin()) return ''; const gm=m.gm; const col=gm===null?'var(--ink-mute)':gm<20?'#B4453A':gm<32?'#B7791F':'#2E7D5B'; return `<div class="fcell" title="Internal — never shown to the client. Net revenue after discount vs cost on file; ${m.cover}% of this value has a cost."><div class="fl">${label||'Margin'} <span style="font-weight:400">· internal</span></div><div class="fv" style="color:${col}">${gm===null?'—':gm+'%'}<span style="font-size:11px;color:var(--ink-soft);font-weight:400"> ${m.cover<100?`(${m.cover}% costed)`:''}</span></div></div>`; }
 // Section discount actually applied to THIS line (the section % trimmed to the line's cap, after its own line discount).
 function gLineSectionDisc(r,cfg){
   const ld=gLineDisc(r)/100, sd=cfg.disc/100, cap=gLineDiscCap(r)/100;
@@ -11592,11 +11606,13 @@ function gSectionsHtml(ro){
 function gSectionCard(st,ro){
   const fin=gStreamFin(st), label=STREAM_LABEL[st], showDisc=(st===FURNISHING);
   const secRows=G.rows.filter(r=>rowStream(r)===st);
-  const colCount=(ro?11:13)+(showDisc?1:0);
+  const showGM=gShowMargin();
+  const colCount=(ro?11:13)+(showDisc?1:0)+(showGM?1:0);
   const subCols=ro?(showDisc?9:8):(showDisc?10:9);   // columns before the Amount cell
+  const gmTh=showGM?'<th title="Margin on cost — internal">GM</th>':'';
   const head=ro
-    ? `<th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th><th>Remarks</th><th>Scope</th>`
-    : `<th>Section</th><th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th><th>Remarks</th><th>Scope</th><th></th>`;
+    ? `<th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th>${gmTh}<th>Remarks</th><th>Scope</th>`
+    : `<th>Section</th><th>Room</th><th>Category</th><th>Item</th><th>Unit</th><th>Rate</th><th>W</th><th>H</th><th>Qty</th>${showDisc?'<th>Disc%</th>':''}<th>Amount</th>${gmTh}<th>Remarks</th><th>Scope</th><th></th>`;
   let body='';
   if(!secRows.length){
     body=`<tr><td colspan="${colCount}" class="empty">No items in this section yet.</td></tr>`;
@@ -11607,7 +11623,8 @@ function gSectionCard(st,ro){
       const rsub=rr.filter(r=>gScope(r)==='included').reduce((s,r)=>s+gBoosted(r),0);
       body+=`<tr class="roomhdr"><td colspan="${ro?colCount:colCount-1}">${esc(room)}</td>${ro?'':`<td style="text-align:right"><button class="linkbtn" data-copyroom="${esc(room)}" data-sec="${st}" title="Duplicate this room">⧉ Copy</button></td>`}</tr>`;
       rr.forEach(r=>{ body+=gRowHtml(r,ro,showDisc); });
-      body+=`<tr class="roomsub"><td colspan="${subCols}" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td><td colspan="${colCount-subCols-1}"></td></tr>`;
+      const rm=gMarginOf(rr);
+      body+=`<tr class="roomsub"><td colspan="${subCols}" style="text-align:right">Subtotal — ${esc(room)}</td><td style="font-weight:600">${gFmt(rsub)}</td>${showGM?gGMCell(rm.gm,'td'):''}<td colspan="${colCount-subCols-1-(showGM?1:0)}"></td></tr>`;
     });
   }
   return `<div class="pw-card gsec" data-sec="${st}">
@@ -11623,7 +11640,7 @@ function gRowHtml(r,ro,showDisc){
   const sc=gScope(r), st=rowStream(r);
   if(ro){
     const discCell=showDisc?`<td>${(Number(r.lineDisc)||0)?((Number(r.lineDisc)||0)+'%'):'—'}</td>`:'';
-    const cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td>${discCell}<td style="font-weight:600">${gFmt(gBoosted(r))}</td><td>${esc(r.remarks||'')}</td><td>${gScopeTag(r)||'—'}</td>`;
+    const cells=`<td>${esc(r.room)}</td><td>${esc(r.cat)}</td><td>${esc(r.item)}</td><td>${esc(r.unit)}</td><td>${gFmt(r.originalRate)}</td><td>${r.w||'—'}</td><td>${r.h||'—'}</td><td>${r.qty}</td>${discCell}<td style="font-weight:600">${gFmt(gBoosted(r))}</td>${gShowMargin()?gGMCell(gLineGM(r),'td'):''}<td>${esc(r.remarks||'')}</td><td>${gScopeTag(r)||'—'}</td>`;
     return `<tr${sc==='excluded'?' class="g-exc"':sc==='optional'?' class="g-opt"':''}>${cells}</tr>`;
   }
   const catItems=G.rates.filter(x=>x.cat===r.cat);
@@ -11640,7 +11657,7 @@ function gRowHtml(r,ro,showDisc){
     `<td><input class="ii" style="width:42px" type="number" value="${r.h||0}" data-id="${r.id}" data-f="h"></td>`+
     `<td><input class="ii" style="width:52px" type="number" value="${r.qty}" data-id="${r.id}" data-f="qty"></td>`+
     discCell+
-    `<td style="font-weight:600">${gFmt(gBoosted(r))}</td>`+
+    `<td style="font-weight:600">${gFmt(gBoosted(r))}</td>`+(gShowMargin()?gGMCell(gLineGM(r),'td'):'')+
     `<td><input class="ii" style="width:80px" value="${esc(r.remarks||'')}" data-id="${r.id}" data-f="remarks" placeholder="note"></td>`+
     `<td><select class="ii gscope-sel" style="width:92px" data-id="${r.id}" data-f="scope"><option value="included"${sc==='included'?' selected':''}>Included</option><option value="optional"${sc==='optional'?' selected':''}>Optional</option><option value="excluded"${sc==='excluded'?' selected':''}>Excluded</option></select></td>`+
     `<td><button class="linkbtn del" data-del="${r.id}">×</button></td>`;
@@ -11648,7 +11665,7 @@ function gRowHtml(r,ro,showDisc){
 }
 function gSectionFooter(st,ro,fin){
   const cfg=fin.cfg;
-  const inField=(k,lab,step)=>`<div class="field" style="min-width:110px"><label${k==='disc'||k==='boost'?' style="color:var(--brass-deep)"':''}>${lab} %</label><input class="ii-sec" type="number" step="${step}" value="${cfg[k]}" data-sec="${st}" data-k="${k}"></div>`;
+  const inField=(k,lab,step)=>`<div class="field" style="min-width:110px"><label${k==='disc'||k==='boost'?' style="color:var(--brass-deep)"':''}>${lab} %${(k==='disc'&&gDiscRuleOn()&&gAuthorityNote())?` <span style="font-weight:400;color:var(--ink-soft)">(${gAuthorityNote()})</span>`:''}</label><input class="ii-sec" type="number" step="${step}" value="${cfg[k]}" data-sec="${st}" data-k="${k}"${(k==='disc'&&gDiscRuleOn())?` max="${gDiscAuthority()}"`:''}></div>`;
   const settings=ro?'':`<div class="addgrid" style="margin-bottom:8px">${inField('fee','Design fee','0.5')}${inField('disc','Discount','0.5')}${inField('gst','GST','1')}${inField('boost','Price Boost · INTERNAL','0.5')}</div>`;
   return `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
     ${settings}
@@ -11658,6 +11675,7 @@ function gSectionFooter(st,ro,fin){
       <div class="fcell fgold"><div class="fl">Discount (${fin.effDisc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
       <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
       <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
+      ${gMarginHtml(gMarginOf(gIncluded().filter(r=>rowStream(r)===st)))}
     </div>
   </div>`;
 }
@@ -11669,7 +11687,7 @@ function gBindTable(ro){
       const r=G.rows.find(x=>x.id==inp.dataset.id), f=inp.dataset.f;
       if(!r) return;
       if(['rate','w','h','qty'].includes(f)){ r[f]=parseFloat(inp.value)||0; if(f==='rate')r.originalRate=r.rate; if((f==='w'||f==='h')&&r.w&&r.h)r.qty=Math.round(r.w*r.h*10)/10; r.amount=r.rate*r.qty; gDrawTable(ro); gTotals(); }
-      else if(f==='linedisc'){ const want=Math.max(0,Math.min(100,parseFloat(inp.value)||0)), cap=gLineDiscCap(r); r.lineDisc=Math.min(want,cap); if(want>cap) toast(`Line discount capped at ${cap}% — ${gTradeOf(r)==='civil_demolition'?'civil work takes at most 8%':(Number(r.cost)>0?'20% margin floor on this item':'no cost on file, max 10%')}`); gDrawTable(ro); gTotals(); }
+      else if(f==='linedisc'){ let want=Math.max(0,Math.min(100,parseFloat(inp.value)||0)); if(gDiscRuleOn()&&want>gDiscAuthority()){ toast(`Discount authority: up to ${gDiscAuthority()}% for you`); want=gDiscAuthority(); } const cap=gLineDiscCap(r); r.lineDisc=Math.min(want,cap); if(want>cap) toast(`Line discount capped at ${cap}% — ${gTradeOf(r)==='civil_demolition'?'civil work takes at most 8%':(Number(r.cost)>0?'20% margin floor on this item':'no cost on file, max 10%')}`); gDrawTable(ro); gTotals(); }
       else if(f==='stream'){ r.stream=normStream(inp.value); G.dirty=true; gDrawTable(ro); gTotals(); }
       else if(f==='cat'){
         r.cat=inp.value;
@@ -11692,7 +11710,9 @@ function gBindTable(ro){
   });
   // per-section financial settings (fee / discount / GST / boost)
   $$("#gsecs .ii-sec").forEach(inp=>{
-    inp.onchange=()=>{ gSetStreamSetting(inp.dataset.sec, inp.dataset.k, inp.value); gDrawTable(ro); gTotals();
+    inp.onchange=()=>{ let val=inp.value;
+      if(inp.dataset.k==='disc'&&gDiscRuleOn()){ const a=gDiscAuthority(), want=Number(val)||0; if(want>a){ val=a; toast(`Discount authority: you can give up to ${a}% — ${a<10?'Rafiya can approve up to 10%, ':''}Amit beyond that. Set to ${a}%.`); } }
+      gSetStreamSetting(inp.dataset.sec, inp.dataset.k, val); gDrawTable(ro); gTotals();
       if(inp.dataset.k==='disc'){ const fin=gStreamFin(inp.dataset.sec); if(fin.capped) toast(`${STREAM_LABEL[inp.dataset.sec]}: ${fin.capped} line${fin.capped===1?'':'s'} capped by the margin rule — effective discount ${fin.effDisc}%`); } };
   });
   $$("#gsecs [data-del]").forEach(btn=>btn.onclick=(e)=>{
@@ -11983,6 +12003,7 @@ function gSummary(){
         <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%${fin.capped?` · capped on ${fin.capped} line${fin.capped===1?'':'s'} → ${fin.effDisc}%`:''})</div><div class="fv">−${gFmt(fin.disc)}</div></div>
         <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
         <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
+        ${gMarginHtml(gMarginOf(gIncluded().filter(r=>rowStream(r)===st)))}
       </div>
     </div>`;
   }).join("")||'<div class="pw-card"><div class="empty">No items yet</div></div>';
@@ -11997,8 +12018,14 @@ function gSummary(){
     <div class="fcell fgold"><div class="fl">Discount</div><div class="fv">−${gFmt(g.disc)}</div></div>
     <div class="fcell"><div class="fl">GST</div><div class="fv">${gFmt(g.gst)}</div></div>
     <div class="fcell facc"><div class="fl">Total project value</div><div class="fv">${gFmt(g.total)}</div></div>
+    ${gMarginHtml(gMarginOf(G.rows),'BOQ margin')}
   </div>
   ${secCards}
+  ${gShowMargin()?`<div class="pw-card" style="margin-top:16px"><div class="sec-label" style="border:none;padding-top:0">Margin by room <span style="font-weight:400;color:var(--ink-soft)">· internal, never on the client sheet</span></div>
+    <div class="table-wrap"><table style="font-size:13px"><thead><tr><th>Room</th><th style="text-align:right">Net value</th><th style="text-align:right">Cost on file</th><th style="text-align:right">Margin</th><th style="text-align:right">Costed</th></tr></thead><tbody>
+    ${gRooms().map(room=>{ const m=gMarginOf(G.rows.filter(r=>r.room===room)); return `<tr><td>${esc(room)}</td><td style="text-align:right">${gFmt(m.net)}</td><td style="text-align:right">${m.cost?gFmt(m.cost):'—'}</td>${gGMCell(m.gm,'td style="text-align:right"')}<td style="text-align:right;color:var(--ink-soft)">${m.cover}%</td></tr>`; }).join('')}
+    </tbody></table></div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px">Net value = after boost, design fee and the discount actually applied, before GST. Lines without a cost on file count in value but not in margin — fill their cost on the Rates tab to make this exact.</div></div>`:''}
   <div class="grid2" style="margin-top:16px">
     <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Section split</div>${secSplit}</div>
     <div class="pw-card"><div class="sec-label" style="border:none;padding-top:0">Category split</div>${catSplit}</div>
@@ -12707,7 +12734,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b81 · 25 Sep 2026";
+const APP_BUILD = "b82 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
