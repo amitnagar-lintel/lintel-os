@@ -11533,6 +11533,14 @@ function gEstimator(p){
   </div>
 
   <div class="pw-card">
+    <div class="sec-label" style="border:none;padding-top:0">Whole-home services</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="primary" id="spkgOpen">+ Add Services Package</button>
+      <span class="hint" style="margin:0">Carpet area, rooms and bathrooms → painting, false ceiling, electrical points, bathroom rebuilds with allowances, cleaning, debris and transport — every quantity is a formula you can override, every line stays editable.</span>
+    </div>
+  </div>
+
+  <div class="pw-card">
     <div class="sec-label" style="border:none;padding-top:0">Import from another project</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="ghost" id="importRoom">⬇ Import a room from another BOQ</button>
@@ -11591,6 +11599,7 @@ function gEstimator(p){
     $("#ci-w").oninput=()=>aq("#ci-w","#ci-h","#ci-qty"); $("#ci-h").oninput=()=>aq("#ci-w","#ci-h","#ci-qty");
     $("#addLib").onclick=gAddLib; $("#addCustom").onclick=gAddCustom;
     if($("#kpkgOpen")) $("#kpkgOpen").onclick=kpkgOpen;
+    if($("#spkgOpen")) $("#spkgOpen").onclick=spkgOpen;
     if($("#importRoom")) $("#importRoom").onclick=()=>gImportFrom(p,false);
     if($("#importFull")) $("#importFull").onclick=()=>gImportFrom(p,true);
     gBindTable(ro);   // bind section tables + per-section setting inputs on first render
@@ -11922,6 +11931,102 @@ function kpkgAdd(){
   G.dirty=true; closeModal(); G.section='all';
   gReRenderEst();
   toast(rows.length+" kitchen lines added"+(missing.length?" · not in library: "+missing.join(", "):""));
+}
+
+/* ================= SERVICES PACKAGE (Move 4, 25 Sep 2026) =================
+   Whole-home services as formulas instead of lump sums. Inputs: carpet area, room counts,
+   bathrooms, choices. Output: library lines with computed quantities (all editable after).
+   spkgPlan() is pure (inputs → line specs) so the math can be checked without the DOM. */
+const SPKG={wallFactor:3.2, transportPct:1.5, debrisPerSqft:600,
+  // electrical points per room type — Bengaluru apartment norms; consultant can override every count
+  pts:{bedroom:{lp:1,ls:4,fan:1,ac:1,s6:2,s16:0,tv:0,geyser:0}, living:{lp:2,ls:6,fan:2,ac:1,s6:3,s16:1,tv:1,geyser:0},
+       dining:{lp:1,ls:2,fan:1,ac:0,s6:1,s16:0,tv:0,geyser:0}, bathroom:{lp:1,ls:1,fan:0,ac:0,s6:1,s16:0,tv:0,geyser:1}, kitchen:{lp:1,ls:2,fan:0,ac:0,s6:2,s16:2,tv:0,geyser:0}}};
+const SPKG_EL=[['lp','Electrical','New Light Point (Primary)'],['ls','Electrical','New Light Point (Secondary / Looped)'],['fan','Electrical','Ceiling Fan Point'],['ac','Electrical','AC Point - Dedicated 20A Circuit'],
+  ['s6','Electrical','New 6A Socket Point'],['s16','Electrical','New 16A Power Point'],['tv','Electrical','TV / Data Point (Cat-6 + Coax)'],['geyser','Electrical','Geyser Point - Dedicated Circuit']];
+function spkgSuggestPoints(n){ const o={lp:0,ls:0,fan:0,ac:0,s6:0,s16:0,tv:0,geyser:0};
+  [['bedroom',n.bedrooms],['living',n.living],['dining',n.dining],['bathroom',n.bathrooms],['kitchen',n.kitchen?1:0]].forEach(([k,c])=>{ const p=SPKG.pts[k]; Object.keys(o).forEach(f=>o[f]+=p[f]*(Number(c)||0)); });
+  return o; }
+// inputs → [{cat,item,qty,room,custom?,rate?,note}]
+function spkgPlan(i){
+  const L=[]; const carpet=Number(i.carpet)||0;
+  const add=(cat,item,qty,room,extra)=>{ qty=Math.round(qty*10)/10; if(qty>0) L.push(Object.assign({cat,item,qty,room:room||'Whole home'},extra||{})); };
+  if(i.paintItem&&carpet) add('Painting Works',i.paintItem,carpet*(Number(i.wallFactor)||SPKG.wallFactor),'Whole home');
+  if(i.fcFlat>0) add('False Ceiling',i.fcGrade+' Gypsum FC Flat',i.fcFlat);
+  if(i.fcCove>0) add('False Ceiling',i.fcGrade+' Gypsum FC Cove',i.fcCove);
+  SPKG_EL.forEach(([k,cat,item])=>{ if(Number(i.pts&&i.pts[k])>0) add(cat,item,Number(i.pts[k])); });
+  if(i.pts&&Object.values(i.pts).some(v=>Number(v)>0)){ add('Electrical','DB Dressing & Re-termination',1); add('Electrical','Testing, Commissioning & Handover',1); }
+  if(i.kitchen&&i.kitchenEl) add('Kitchen Electrical','Kitchen Electrical Points (package)',1,'Kitchen');
+  if(i.kitchen&&i.kitchenPl) add('Kitchen Plumbing','Kitchen Plumbing Points (package)',1,'Kitchen');
+  for(let b=1;b<=(Number(i.bathRebuild)||0);b++){ const room='Bathroom '+b;
+    add('Plumbing Works','Bathroom rebuild — labour & consumables (per bathroom; tiles, sanitary & CP as allowances)',1,room);
+    if(Number(i.tileAllow)>0) add('Allowance','Allowance — tiles (client selection, laying included above)',1,room,{custom:true,rate:Number(i.tileAllow),note:'allowance'});
+    if(Number(i.cpAllow)>0) add('Allowance','Allowance — sanitary ware & CP fittings',1,room,{custom:true,rate:Number(i.cpAllow),note:'allowance'}); }
+  if(i.cleaning&&carpet) add('Demolition','Deep cleaning & floor protection (per sq ft carpet)',carpet);
+  if(i.debris&&carpet) add('Demolition','Debris Disposal',Math.max(1,Math.ceil(carpet/SPKG.debrisPerSqft)));
+  if(i.transport&&Number(i.modularValue)>0) add('Allowance','Transport & handling ('+SPKG.transportPct+'% of modular value)',1,'Whole home',{custom:true,rate:Math.round(Number(i.modularValue)*SPKG.transportPct/100),note:'recompute if modular changes'});
+  return L;
+}
+function spkgOpen(){
+  if(!gCanEdit()) return;
+  const paints=G.rates.filter(r=>r.cat==='Painting Works'&&/Painting/.test(r.item)).map(r=>r.item);
+  const paintOpts='<option value="">— no painting —</option>'+paints.map(f=>`<option${f==='Fresh Painting Royal Emulsion'?' selected':''}>${esc(f)}</option>`).join("");
+  const modular=gIncluded().filter(r=>rowStream(r)==='modular').reduce((a,r)=>a+gBoosted(r),0);
+  const num=(id,lab,val,step,hint)=>`<div class="field"><label>${lab}</label><input id="${id}" type="number" step="${step||1}" value="${val===undefined?'':val}">${hint?`<div class="hint" style="margin:3px 0 0">${hint}</div>`:''}</div>`;
+  openModal(`
+    <div class="modal-h">Add Services Package</div>
+    <div class="modal-b">
+      <div class="hint" style="margin-top:0">Quantities come from formulas (painting = carpet × wall factor, points per room, cleaning per sq ft, debris per 600 sq ft, transport ${SPKG.transportPct}% of modular). Change any number before adding; every line stays editable after.</div>
+      <div class="sec-label">Home</div>
+      <div class="grid4" style="grid-template-columns:repeat(4,1fr)">
+        ${num('sp-carpet','Carpet area (sq ft)','',10)}${num('sp-bed','Bedrooms',2)}${num('sp-liv','Living rooms',1)}${num('sp-din','Dining',1)}
+        ${num('sp-bath','Bathrooms',2)}<div class="field"><label>Kitchen</label><select id="sp-kit"><option value="1" selected>Yes</option><option value="0">No</option></select></div>
+      </div>
+      <div class="sec-label">Painting &amp; ceiling</div>
+      <div class="grid4" style="grid-template-columns:repeat(4,1fr)">
+        <div class="field" style="grid-column:span 2"><label>Painting</label><select id="sp-paint">${paintOpts}</select></div>
+        ${num('sp-wf','Wall factor × carpet',SPKG.wallFactor,0.1,'walls + ceiling ≈ 3.2× carpet')}
+        <div class="field"><label>False-ceiling grade</label><select id="sp-fcg"><option>Premium</option><option>Standard</option></select></div>
+        ${num('sp-fcflat','False ceiling flat (sq ft)','',10)}${num('sp-fccove','Cove / border (rft)','',5)}
+      </div>
+      <div class="sec-label">Electrical points <span style="font-weight:400;color:var(--ink-soft)">· suggested from the room counts, edit freely</span></div>
+      <div class="grid4" style="grid-template-columns:repeat(4,1fr)">
+        ${SPKG_EL.map(([k,c,item])=>num('sp-pt-'+k,item.replace(/^New /,'').replace(/ Point.*$/,'').replace(' - Dedicated 20A Circuit','').replace(' (Cat-6 + Coax)',''),0)).join('')}
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" id="sp-kel" checked style="width:auto"> Kitchen electrical points package</label>
+      <div class="sec-label">Bathrooms &amp; plumbing</div>
+      <div class="grid4" style="grid-template-columns:repeat(4,1fr)">
+        ${num('sp-bathre','Bathrooms to rebuild',0,1,'₹48,000 labour &amp; consumables each')}${num('sp-tile','Tiles allowance / bathroom (₹)',25000,1000)}${num('sp-cp','Sanitary &amp; CP allowance / bathroom (₹)',35000,1000)}
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" id="sp-kpl" checked style="width:auto"> Kitchen plumbing points package</label>
+      <div class="sec-label">Site &amp; handover</div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" id="sp-clean" checked style="width:auto"> Deep cleaning &amp; floor protection · ₹22 per sq ft of carpet</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" id="sp-debris" checked style="width:auto"> Debris disposal · one trip per ${SPKG.debrisPerSqft} sq ft</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" id="sp-trans" ${modular>0?'checked':''} style="width:auto"> Transport &amp; handling · ${SPKG.transportPct}% of modular value (${gFmt(modular)} on this BOQ now)</label>
+    </div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Cancel</button>
+      <button class="primary" id="sp-add">Add services to BOQ</button>
+    </div>`);
+  let ptsTouched=false;
+  const suggest=()=>{ if(ptsTouched) return; const o=spkgSuggestPoints({bedrooms:$("#sp-bed").value,living:$("#sp-liv").value,dining:$("#sp-din").value,bathrooms:$("#sp-bath").value,kitchen:$("#sp-kit").value==='1'}); Object.keys(o).forEach(k=>{ const e=$("#sp-pt-"+k); if(e) e.value=o[k]; }); };
+  ['sp-bed','sp-liv','sp-din','sp-bath','sp-kit'].forEach(id=>{ $("#"+id).onchange=suggest; }); suggest();
+  SPKG_EL.forEach(([k])=>{ $("#sp-pt-"+k).oninput=()=>{ ptsTouched=true; }; });
+  $("#sp-bath").onchange=()=>{ suggest(); if(!$("#sp-bathre").value||$("#sp-bathre").value==='0') $("#sp-bathre").value=$("#sp-bath").value; };
+  $("#sp-add").onclick=()=>{
+    const pts={}; SPKG_EL.forEach(([k])=>pts[k]=Number($("#sp-pt-"+k).value)||0);
+    const plan=spkgPlan({carpet:$("#sp-carpet").value, paintItem:$("#sp-paint").value, wallFactor:$("#sp-wf").value, fcGrade:$("#sp-fcg").value, fcFlat:Number($("#sp-fcflat").value)||0, fcCove:Number($("#sp-fccove").value)||0,
+      pts, kitchen:$("#sp-kit").value==='1', kitchenEl:$("#sp-kel").checked, kitchenPl:$("#sp-kpl").checked, bathRebuild:$("#sp-bathre").value, tileAllow:$("#sp-tile").value, cpAllow:$("#sp-cp").value,
+      cleaning:$("#sp-clean").checked, debris:$("#sp-debris").checked, transport:$("#sp-trans").checked, modularValue:modular});
+    if(!plan.length) return toast("Nothing to add — enter the carpet area or some counts");
+    const missing=[]; let n=0;
+    plan.forEach(l=>{
+      if(l.custom){ G.rows.push({id:G.uid++,room:l.room,cat:l.cat,item:l.item,unit:'LS',rate:l.rate,originalRate:l.rate,w:0,h:0,qty:l.qty,amount:l.rate*l.qty,remarks:l.note||'',custom:true,cost:0,stream:'services',lineDisc:0}); n++; return; }
+      const f=kpkgRate(l.cat,l.item); if(!f){ missing.push(l.item); return; }
+      G.rows.push({id:G.uid++,room:l.room,cat:l.cat,item:l.item,unit:f.unit,rate:f.rate,originalRate:f.rate,w:0,h:0,qty:l.qty,amount:f.rate*l.qty,remarks:l.note||'',custom:false,cost:f.cost||0,stream:normStream(f.stream||classifyStream(l.cat)),lineDisc:0,trade:f.trade||null}); n++; });
+    if(!n) return toast("Nothing added — items missing from the rate library: "+missing.join(", "));
+    G.dirty=true; closeModal(); G.section='all'; gReRenderEst();
+    toast(n+" service lines added"+(missing.length?" · not in library: "+missing.join(", "):""));
+  };
 }
 
 /* ---- Feature 2: Import room or full BOQ from another project ---- */
@@ -12736,7 +12841,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b84 · 25 Sep 2026";
+const APP_BUILD = "b85 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
