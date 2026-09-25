@@ -4333,6 +4333,9 @@ async function convertLead(l){
     const need=(Number(total)||0)*0.10;
     if(!(adv>0)) return toast("Enter the advance received — a project can't be opened without it.");
     if(need>0 && adv<need-0.5) return toast("Advance is below 10% — "+fmt(need)+" required, "+fmt(adv)+" entered.");
+    // Second safety net: a lead can only ever become one project
+    const {count:already}=await sb.from("projects").select("id",{count:"exact",head:true}).eq("lead_id",l.id);
+    if(already) return toast("This lead has already been converted — open it under Projects.");
     const {count}=await sb.from("projects").select("*",{count:"exact",head:true});
     const code=`LSA-2026-${String((count||0)+1).padStart(3,"0")}`;
     const designer=$("#cv_designer").value?Number($("#cv_designer").value):null;
@@ -12384,7 +12387,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b75 · 24 Sep 2026";
+const APP_BUILD = "b76 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
