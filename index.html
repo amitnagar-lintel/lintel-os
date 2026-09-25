@@ -9938,6 +9938,28 @@ function gIncluded(){ return G.rows.filter(r=>gScope(r)==='included'); }
 function gScopeTag(r){ const s=gScope(r); return s==='excluded'?'<span class="gtag gtag-exc">Excluded</span>':s==='optional'?'<span class="gtag gtag-opt">Optional</span>':''; }
 // Per-line discount % (only meaningful in the furnishing section).
 function gLineDisc(r){ return rowStream(r)===FURNISHING?(Number(r.lineDisc)||0):0; }
+/* DISC-01 (Amit, 25 Sep 2026): discounts may never take a line below 20% margin on its cost;
+   civil & demolition lines take at most 8%; lines with no cost on file take at most 10%.
+   The consultant's section % still applies, but each line is capped individually, so a
+   15% section discount becomes 8% on the plastering line and whatever the margin allows on
+   a thin shutter. Admins (Amit) are exempt. BOQs created before the rule are untouched. */
+const DISC_RULE_FROM=new Date("2026-09-26T00:00:00+05:30"), DISC_MARGIN_FLOOR=0.20, DISC_CAP_CIVIL=8, DISC_CAP_UNCOSTED=10;
+function gDiscRuleOn(){ const c=G.ver&&G.ver.created_at; return !!c && new Date(c)>=DISC_RULE_FROM && !isBoqAdmin(); }
+function gTradeOf(r){ if(r.trade) return r.trade; const f=G.rates.find(x=>x.item===r.item); return f?f.trade:null; }
+function gLineDiscCap(r){
+  if(!gDiscRuleOn()) return 100;
+  if(gTradeOf(r)==='civil_demolition') return DISC_CAP_CIVIL;
+  const cfg=gStreamSettings(rowStream(r));
+  const price=(Number(r.originalRate!==undefined?r.originalRate:r.rate)||0)*(1+cfg.boost/100)*(1+cfg.fee/100);
+  const cost=Number(r.cost)||0; if(!(cost>0)||!(price>0)) return DISC_CAP_UNCOSTED;
+  return Math.max(0, Math.min(100, Math.floor(1000*(1-cost/((1-DISC_MARGIN_FLOOR)*price)))/10));
+}
+// Section discount actually applied to THIS line (the section % trimmed to the line's cap, after its own line discount).
+function gLineSectionDisc(r,cfg){
+  const ld=gLineDisc(r)/100, sd=cfg.disc/100, cap=gLineDiscCap(r)/100;
+  if(1-(1-ld)*(1-sd) <= cap+1e-9) return cfg.disc;
+  return Math.max(0, 100*(1-(1-cap)/(1-ld||1)));
+}
 // Line value before section boost, after any per-line discount.
 function gLineBase(r){ const base=r.originalRate!==undefined?r.originalRate:r.rate; return (Number(base)||0)*(Number(r.qty)||0)*(1-gLineDisc(r)/100); }
 // Boosted line amount using THIS row's section boost.
@@ -9950,10 +9972,13 @@ function gStreamFin(stream){
   const sub=rows.reduce((s,r)=>s+gLineBase(r),0);
   const subM=rows.reduce((s,r)=>s+gBoosted(r),0);
   const fee=Math.round(subM*cfg.fee/100);
-  const disc=Math.round((subM+fee)*cfg.disc/100);
+  let disc=0, capped=0;
+  rows.forEach(r=>{ const sd=gLineSectionDisc(r,cfg); if(sd<cfg.disc-1e-6) capped++; disc+=gBoosted(r)*(1+cfg.fee/100)*sd/100; });
+  disc=Math.round(disc);
+  const effDisc=(subM+fee)>0?Math.round(1000*disc/(subM+fee))/10:0;   // what the client actually gets
   const base=subM+fee-disc;
   const gst=Math.round(base*cfg.gst/100);
-  return {stream,cfg,n:rows.length,sub,subM,fee,disc,base,gst,total:base+gst};
+  return {stream,cfg,n:rows.length,sub,subM,fee,disc,effDisc,capped,base,gst,total:base+gst};
 }
 // Grand total across all sections (also the shape gFin() used to return).
 function gGrand(){
@@ -11630,7 +11655,7 @@ function gSectionFooter(st,ro,fin){
     <div class="finrow">
       <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(fin.subM)}</div></div>
       <div class="fcell"><div class="fl">Design fee (${cfg.fee}%)</div><div class="fv">${gFmt(fin.fee)}</div></div>
-      <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
+      <div class="fcell fgold"><div class="fl">Discount (${fin.effDisc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
       <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
       <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
     </div>
@@ -11644,7 +11669,7 @@ function gBindTable(ro){
       const r=G.rows.find(x=>x.id==inp.dataset.id), f=inp.dataset.f;
       if(!r) return;
       if(['rate','w','h','qty'].includes(f)){ r[f]=parseFloat(inp.value)||0; if(f==='rate')r.originalRate=r.rate; if((f==='w'||f==='h')&&r.w&&r.h)r.qty=Math.round(r.w*r.h*10)/10; r.amount=r.rate*r.qty; gDrawTable(ro); gTotals(); }
-      else if(f==='linedisc'){ r.lineDisc=Math.max(0,Math.min(100,parseFloat(inp.value)||0)); gDrawTable(ro); gTotals(); }
+      else if(f==='linedisc'){ const want=Math.max(0,Math.min(100,parseFloat(inp.value)||0)), cap=gLineDiscCap(r); r.lineDisc=Math.min(want,cap); if(want>cap) toast(`Line discount capped at ${cap}% — ${gTradeOf(r)==='civil_demolition'?'civil work takes at most 8%':(Number(r.cost)>0?'20% margin floor on this item':'no cost on file, max 10%')}`); gDrawTable(ro); gTotals(); }
       else if(f==='stream'){ r.stream=normStream(inp.value); G.dirty=true; gDrawTable(ro); gTotals(); }
       else if(f==='cat'){
         r.cat=inp.value;
@@ -11667,7 +11692,8 @@ function gBindTable(ro){
   });
   // per-section financial settings (fee / discount / GST / boost)
   $$("#gsecs .ii-sec").forEach(inp=>{
-    inp.onchange=()=>{ gSetStreamSetting(inp.dataset.sec, inp.dataset.k, inp.value); gDrawTable(ro); gTotals(); };
+    inp.onchange=()=>{ gSetStreamSetting(inp.dataset.sec, inp.dataset.k, inp.value); gDrawTable(ro); gTotals();
+      if(inp.dataset.k==='disc'){ const fin=gStreamFin(inp.dataset.sec); if(fin.capped) toast(`${STREAM_LABEL[inp.dataset.sec]}: ${fin.capped} line${fin.capped===1?'':'s'} capped by the margin rule — effective discount ${fin.effDisc}%`); } };
   });
   $$("#gsecs [data-del]").forEach(btn=>btn.onclick=(e)=>{
     e.preventDefault(); e.stopPropagation();
@@ -11954,7 +11980,7 @@ function gSummary(){
       <div class="finrow">
         <div class="fcell"><div class="fl">Work subtotal</div><div class="fv">${gFmt(fin.subM)}</div></div>
         <div class="fcell"><div class="fl">Design fee (${cfg.fee}%)</div><div class="fv">${gFmt(fin.fee)}</div></div>
-        <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%)</div><div class="fv">−${gFmt(fin.disc)}</div></div>
+        <div class="fcell fgold"><div class="fl">Discount (${cfg.disc}%${fin.capped?` · capped on ${fin.capped} line${fin.capped===1?'':'s'} → ${fin.effDisc}%`:''})</div><div class="fv">−${gFmt(fin.disc)}</div></div>
         <div class="fcell"><div class="fl">GST (${cfg.gst}%)</div><div class="fv">${gFmt(fin.gst)}</div></div>
         <div class="fcell facc"><div class="fl">Section total</div><div class="fv">${gFmt(fin.total)}</div></div>
       </div>
@@ -12377,7 +12403,7 @@ function gExportCSV(){
     });
     csv+=`\n,,,,,,,,,,Work subtotal — ${label},${Math.round(fin.subM)}`;
     csv+=`\n,,,,,,,,,,Design Fee (${cfg.fee}%),${Math.round(fin.fee)}`;
-    if(cfg.disc>0) csv+=`\n,,,,,,,,,,Discount (${cfg.disc}%),-${Math.round(fin.disc)}`;
+    if(fin.disc>0) csv+=`\n,,,,,,,,,,Discount (${fin.effDisc}%),-${Math.round(fin.disc)}`;
     csv+=`\n,,,,,,,,,,GST (${cfg.gst}%),${Math.round(fin.gst)}`;
     csv+=`\n,,,,,,,,,,${label} TOTAL,${Math.round(fin.total)}\n`;
   });
@@ -12681,7 +12707,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b80 · 25 Sep 2026";
+const APP_BUILD = "b81 · 25 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
