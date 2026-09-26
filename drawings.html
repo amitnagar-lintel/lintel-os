@@ -8,7 +8,34 @@
 <meta name="theme-color" content="#0D0D27">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- Fonts load WITHOUT blocking first paint. A render-blocking <link rel=stylesheet> to
+     fonts.googleapis.com will white-out the whole page if that host is slow, sink-holed by a
+     DNS/ad filter, or unreachable — the media=print trick paints immediately with the system
+     fallback stack and swaps the brand faces in when (if) they arrive. -->
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"></noscript>
+<script>
+/* Boot watchdog — a classic (non-module) script, so it runs even when the ES module never
+   executes (e.g. an ad-blocker, privacy extension, DNS filter or offline network blocks
+   three.js on cdn.jsdelivr.net, or an old browser without import-map support). If the module
+   has not signalled a good boot within a few seconds, replace the empty 3D canvas with a
+   plain-language message instead of leaving a dead page. When the module boots normally it
+   sets window.__drawingsBooted and this never fires. */
+window.addEventListener("DOMContentLoaded",function(){
+  setTimeout(function(){
+    if(window.__drawingsBooted) return;
+    var host=document.getElementById("view3d"); if(!host||!host.parentNode) return;
+    var d=document.createElement("div");
+    d.style.cssText="padding:22px;font:14px/1.55 Inter,system-ui,sans-serif;color:#565571";
+    d.innerHTML="<b style='color:#0D0D27'>The 3D engine didn’t load.</b><br>"+
+      "This page loads its 3D library from <b>cdn.jsdelivr.net</b>. An ad-blocker, privacy "+
+      "extension, DNS filter or office firewall is most likely blocking it. Allow that domain "+
+      "(and <b>fonts.googleapis.com</b>), or open the page on a network without the filter, then reload. "+
+      "Your Lintel OS sign-in and the rest of the app are unaffected.";
+    host.parentNode.replaceChild(d,host);
+  },7000);
+});
+</script>
 <style>
   /* DRAW-01 · 3D model → 2D CAD drawings. Staff page; same tokens as the app shell (index.html :root). */
   :root{
@@ -409,8 +436,14 @@ function init3D(){
   new ResizeObserver(resize).observe(canvas); resize();
   (function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene,cam); })();
 }
+function show3DError(){
+  const host=$("#view3d"); if(!host||!host.parentNode) return;
+  const d=document.createElement("div"); d.style.cssText="padding:22px;font-size:13.5px;color:var(--ink-soft);line-height:1.55";
+  d.innerHTML="<b style='color:var(--navy)'>3D preview unavailable</b> in this browser — WebGL looks disabled or blocked. The 2D drawing and the DXF / SVG export below still work. <span style='color:#8f8ba0'>(Chrome → Settings → System → turn on “Use graphics acceleration”, then reload.)</span>";
+  host.parentNode.replaceChild(d,host);
+}
 function update3DModel(){
-  const {scene}=V;
+  const {scene}=V; if(!V.renderer) return; // 3D failed to init — 2D/DXF path still runs
   if(V.model){ scene.remove(V.model); V.model.traverse(o=>{ o.geometry&&o.geometry.dispose(); o.material&&o.material.dispose&&o.material.dispose(); }); }
   if(V.grid) scene.remove(V.grid);
   const geo=new THREE.BufferGeometry(); geo.setAttribute("position",new THREE.BufferAttribute(S.zup.slice(0),3)); geo.computeVertexNormals();
@@ -424,7 +457,8 @@ function update3DModel(){
   fitCamera(); buildPlane();
 }
 function buildPlane(){
-  const {scene}=V; if(V.plane){ scene.remove(V.plane); V.plane.traverse(o=>{ o.geometry&&o.geometry.dispose(); o.material&&o.material.dispose(); }); }
+  const {scene}=V; if(!V.renderer) return;
+  if(V.plane){ scene.remove(V.plane); V.plane.traverse(o=>{ o.geometry&&o.geometry.dispose(); o.material&&o.material.dispose(); }); }
   const b=S.box,W=(b.max[0]-b.min[0])*1.25||1,D=(b.max[1]-b.min[1])*1.25||1;
   const grp=new THREE.Group(); const pg=new THREE.PlaneGeometry(W,D);
   grp.add(new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:0xd7a758,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false})));
@@ -432,7 +466,7 @@ function buildPlane(){
   grp.position.set((b.min[0]+b.max[0])/2,(b.min[1]+b.max[1])/2,S.secHeight); grp.visible=S.showPlane; scene.add(grp); V.plane=grp;
 }
 function updatePlane(){ if(V.plane){ V.plane.position.z=S.secHeight; V.plane.visible=S.showPlane; } }
-function fitCamera(){ const b=S.box,{cam,controls}=V;
+function fitCamera(){ if(!V.renderer) return; const b=S.box,{cam,controls}=V;
   const cx=(b.min[0]+b.max[0])/2,cy=(b.min[1]+b.max[1])/2,cz=(b.min[2]+b.max[2])/2;
   const ext=Math.max(b.max[0]-b.min[0],b.max[1]-b.min[1],b.max[2]-b.min[2])||10; controls.target.set(cx,cy,cz);
   const d=ext*1.9; cam.position.set(cx+d*0.8,cy-d,cz+d*0.7); cam.near=ext*0.01; cam.far=ext*40; cam.updateProjectionMatrix(); controls.update(); }
@@ -569,9 +603,14 @@ $("#svgBtn").onclick=()=>{ if(!S.svg) return toast("Load a model first"); downlo
 $("#saveBtn").onclick=saveToProject;
 $("#resetBtn").onclick=()=>{ if(S.box) fitCamera(); };
 
-/* boot: engine first (works signed-out), then the project context */
-init3D(); S.rawTris=sampleModel(); recompute();
-initProject();
+/* boot: engine first (works signed-out), then the project context.
+   Each stage is isolated so one failure never blanks the page: a WebGL/init throw drops the 3D
+   preview but keeps the 2D drawing + export; a 2D throw still lets the project context load. */
+try{ init3D(); }catch(e){ console.error("3D init failed",e); show3DError(); }
+S.rawTris=sampleModel();
+try{ recompute(); }catch(e){ console.error("2D compute failed",e); }
+try{ initProject(); }catch(e){ console.error("project init failed",e); }
+window.__drawingsBooted=true;
 </script>
 </body>
 </html>
