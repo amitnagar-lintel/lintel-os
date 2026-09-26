@@ -4188,7 +4188,7 @@ function shareAdvance(l,total,advance){
 
 /* ---- BOQ generator on a lead (reuses module G, keyed by lead_id) ---- */
 async function leadBoqGenerator(l, host){
-  G.projectId=null; G.leadId=l.id; G.partnerBoq=false;
+  G.projectId=null; G.leadId=l.id; G.partnerBoq=false; G.projGuardOff=false;
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
     G.rates=(data||[]).map(r=>({cat:r.category,item:r.item,unit:r.uom,rate:Number(r.rate)||0,rateNew:Number(r.rate)||0,ratePrev:(r.rate_prev!=null?Number(r.rate_prev):null),effFrom:r.rate_effective_from||null,cost:Number(r.cost_rate)||0,id:r.id,stream:r.stream||null,space:(r.space==='wardrobe'?'bedroom':r.space)||null,trade:r.trade||null,descr:r.description||null}));
@@ -9838,7 +9838,7 @@ async function gBoqList(p, body, versions){
 }
 
 async function pwBoq(p, body){
-  G.projectId = p.id; G.leadId = null; G.partnerBoq = isDesignPartner() && canBoqProject(p);
+  G.projectId = p.id; G.leadId = null; G.partnerBoq = isDesignPartner() && canBoqProject(p); G.projGuardOff = !!p.discount_guard_off;
   // load rate library once
   if(!G.rates.length){
     const {data}=await sb.from("rate_library").select("*").eq("is_active",true).order("category");
@@ -9952,7 +9952,8 @@ function gLineDisc(r){ return rowStream(r)===FURNISHING?(Number(r.lineDisc)||0):
    15% section discount becomes 8% on the plastering line and whatever the margin allows on
    a thin shutter. Admins (Amit) are exempt. BOQs created before the rule are untouched. */
 const DISC_RULE_FROM=new Date("2026-09-26T00:00:00+05:30"), DISC_MARGIN_FLOOR=0.20, DISC_CAP_CIVIL=8, DISC_CAP_UNCOSTED=10;
-function gDiscRuleOn(){ const c=G.ver&&G.ver.created_at; return !!c && new Date(c)>=DISC_RULE_FROM && !isBoqAdmin(); }
+// DISC-02: projects.discount_guard_off (set by Amit) switches the caps and the authority limits off for that project.
+function gDiscRuleOn(){ const c=G.ver&&G.ver.created_at; return !!c && new Date(c)>=DISC_RULE_FROM && !isBoqAdmin() && !G.projGuardOff; }
 function gTradeOf(r){ if(r.trade) return r.trade; const f=G.rates.find(x=>x.item===r.item); return f?f.trade:null; }
 function gLineDiscCap(r){
   if(!gDiscRuleOn()) return 100;
@@ -10091,6 +10092,7 @@ function gRender(p, body){
   if(!ro && !Object.keys(PROFILE_NAMES||{}).length) loadProfileNames();
   body.innerHTML=`
   ${gLockBanner()}
+  ${(G.projGuardOff&&canWrite())?`<div style="margin-bottom:10px;padding:8px 12px;border:1px solid #D4B06A;background:#FBF5E6;border-radius:8px;font-size:12px">🔓 <b>Discount rules are switched off for this project</b> (set by Amit) — no margin-floor caps and no authority limit on this BOQ. Margins still show for reference.</div>`:""}
   ${G.rateEra==="previous"?`<div style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--line-2);background:var(--paper-2);border-radius:8px;font-size:12px;color:var(--ink-soft)">📌 Created before the library rate revision of ${esc(((G.rates.find(r=>r.effFrom)||{}).effFrom)||"")} — this BOQ keeps the earlier rates; new BOQs use the revised ones.</div>`:""}
   ${isProj?`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12.5px;flex-wrap:wrap">
       <button class="ghost" id="gBackList" style="padding:4px 10px">← All BOQs</button>
@@ -12903,7 +12905,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b87 · 25 Sep 2026";
+const APP_BUILD = "b88 · 26 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
