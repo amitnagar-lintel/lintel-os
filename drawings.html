@@ -243,12 +243,13 @@ window.addEventListener("DOMContentLoaded",function(){
             Download DXF
           </button>
           <button class="btn" id="svgBtn">Download SVG</button>
+          <button class="btn" id="pdfBtn">Download PDF</button>
         </div>
         <div class="field"><label for="sv_title">Title in project files</label><input type="text" id="sv_title" placeholder="e.g. Living room — plan &amp; elevations"></div>
         <div class="num-row"><div class="field" style="flex:1"><label for="sv_ver">Version</label><input type="text" id="sv_ver" placeholder="V1" style="max-width:110px"></div></div>
         <label class="chk"><input type="checkbox" id="sv_keep" checked>Also keep the source 3D model in the project</label>
         <button class="primary" id="saveBtn" disabled>Save to project</button>
-        <div class="uphint" id="saveHint">Saves the DXF and SVG into <b>Studio → Design → Files</b> for this project.</div>
+        <div class="uphint" id="saveHint">Saves the DXF, SVG and a scaled PDF sheet into <b>Studio → Design → Files</b> for this project.</div>
       </div>
     </aside>
 
@@ -411,6 +412,76 @@ function buildSVG(){
   S.svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${num(mnx)} ${num(mny)} ${num(w)} ${num(hgt)}"><style>${st}</style>${out}</svg>`;
 }
 
+/* ================= PDF sheet (A3, to scale, title block) ================= */
+const UNIT_MM={mm:1,cm:10,m:1000,in:25.4,ft:304.8};                       // model unit → millimetres
+const STD_SCALES=[1,2,5,10,20,25,50,75,100,150,200,250,500,1000,2000,5000]; // architectural denominators
+const PDF_LC={PLAN:[164,80,62],ELEV_FRONT:[91,134,179],ELEV_SIDE:[79,125,82],TOP_VIEW:[124,141,160]};
+async function ensureJsPDF(){
+  if(window.jspdf&&window.jspdf.jsPDF) return window.jspdf.jsPDF;
+  await new Promise((res,rej)=>{ const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js";
+    s.onload=res; s.onerror=()=>rej(new Error("PDF library blocked — allow cdn.jsdelivr.net")); document.head.appendChild(s); });
+  if(!window.jspdf||!window.jspdf.jsPDF) throw new Error("PDF library failed to initialise");
+  return window.jspdf.jsPDF;
+}
+const asc=s=>String(s==null?"":s).replace(/[^\x20-\x7E]/g,"-");
+const clip=(s,n)=>{ s=asc(s); return s.length>n?s.slice(0,n-1)+"~":s; };
+async function buildPDF(){
+  const sh=S.sheet; if(!sh||!sh.ent.length) throw new Error("Load a model first");
+  const jsPDF=await ensureJsPDF();
+  // content bounds in model units (same accumulation as the SVG)
+  let mnx=Infinity,mny=Infinity,mxx=-Infinity,mxy=-Infinity;
+  const acc=(x,y)=>{ if(x<mnx)mnx=x; if(y<mny)mny=y; if(x>mxx)mxx=x; if(y>mxy)mxy=y; };
+  for(const e of sh.ent) for(const s of e.segs){ acc(s[0],s[1]); acc(s[2],s[3]); }
+  for(const l of sh.labels) acc(l.x,l.y); acc(sh.title.x,sh.title.y);
+  if(!isFinite(mnx)){ mnx=mny=0; mxx=mxy=1; }
+  const uMM=UNIT_MM[S.units]||1;
+  // A3 landscape; title block bottom-right; drawing area above/left of it
+  const PW=420,PH=297,M=12,TBW=156,TBH=42,GAP=4;
+  const dX=M,dY=M,dW=PW-2*M,dH=PH-2*M-TBH-GAP;
+  const wMM=(mxx-mnx)*uMM||1,hMM=(mxy-mny)*uMM||1;
+  const needDen=Math.max(wMM/dW,hMM/dH,1e-9);
+  let den=STD_SCALES.find(d=>d>=needDen)||Math.ceil(needDen/1000)*1000;
+  const k=uMM/den;                                                        // page mm per model unit
+  const cW=(mxx-mnx)*k,cH=(mxy-mny)*k, oX=dX+(dW-cW)/2, oY=dY+(dH-cH)/2;
+  const PX=x=>oX+(x-mnx)*k, PY=y=>oY+cH-(y-mny)*k;                         // flip Y (model up → page down)
+
+  const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a3",compress:true});
+  doc.setDrawColor(13,13,39); doc.setLineWidth(0.5); doc.rect(M,M,PW-2*M,PH-2*M);   // sheet border
+  for(const e of sh.ent){ const c=PDF_LC[e.layer]||[13,13,39]; doc.setDrawColor(c[0],c[1],c[2]);
+    doc.setLineWidth(e.layer==="PLAN"?0.35:0.18);
+    for(const s of e.segs) doc.line(PX(s[0]),PY(s[1]),PX(s[2]),PY(s[3])); }
+  doc.setFont("helvetica","normal"); doc.setTextColor(86,85,113); doc.setFontSize(7.5);
+  for(const l of sh.labels) doc.text(asc(l.t),PX(l.x),PY(l.y)+4,{align:"center"});
+
+  // title block
+  const tbX=PW-M-TBW,tbY=PH-M-TBH;
+  doc.setDrawColor(13,13,39); doc.setLineWidth(0.4); doc.rect(tbX,tbY,TBW,TBH);
+  doc.setFillColor(13,13,39); doc.rect(tbX,tbY,TBW,8,"F");
+  doc.setTextColor(247,242,233); doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  doc.text("LINTEL OS",tbX+3,tbY+5.6);
+  doc.setFont("helvetica","normal"); doc.setFontSize(6); doc.setTextColor(215,167,88);
+  doc.text("Studio · 2D drawing",tbX+TBW-3,tbY+5.6,{align:"right"});
+  const p=CTX.project||{};
+  const rows=[
+    ["Project",clip((p.code?p.code+"  ":"")+(p.name||"—"),40)],
+    ["Client",clip(p.client_name||"—",40)],
+    ["Drawing",clip($("#sv_title").value.trim()||S.name.replace(/\.[^.]+$/,""),40)],
+    ["Scale · Units","1:"+den+"   ·   "+S.units],
+    ["Section","PLAN @ "+asc(fmtLen(S.secHeight,S.units))],
+    ["Date",new Date().toISOString().slice(0,10)],
+  ];
+  const rh=(TBH-8)/rows.length; let ry=tbY+8;
+  for(const [lab,val] of rows){
+    doc.setDrawColor(221,211,193); doc.setLineWidth(0.15); doc.line(tbX,ry,tbX+TBW,ry);
+    doc.setFont("helvetica","normal"); doc.setFontSize(5.4); doc.setTextColor(120,117,140);
+    doc.text(lab.toUpperCase(),tbX+3,ry+rh/2+0.6);
+    doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(13,13,39);
+    doc.text(val,tbX+34,ry+rh/2+0.7); ry+=rh;
+  }
+  return {doc,den};
+}
+
 /* ================= pipeline ================= */
 function regen(){ if(!S.box) return; computeSheet(); S.dxf=buildDXF(); buildSVG(); updateStats(); updatePlane(); }
 function recompute(){ if(!S.rawTris) return; S.zup=toZup(S.rawTris,S.up); S.box=bboxOf(S.zup); syncSectionUI(); regen(); update3DModel(); }
@@ -551,6 +622,13 @@ async function saveToProject(){
     hint.textContent="Uploading SVG…";
     const svgPath=`${pid}/design/${ts}_${base}.svg`; await up(svgPath,S.svg,"image/svg+xml");
     rows.push({project_id:pid,kind:"design",title:title+" (SVG)",version:ver,storage_path:svgPath,file_type:"svg",size_bytes:new Blob([S.svg]).size,uploaded_by:uid});
+    try{
+      hint.textContent="Rendering PDF sheet…";
+      const {doc}=await buildPDF(); const pdfBlob=doc.output("blob");
+      const pdfPath=`${pid}/design/${ts}_${base}.pdf`;
+      const {error:pe}=await sb.storage.from(BUCKET).upload(pdfPath,pdfBlob,{contentType:"application/pdf"}); if(pe) throw new Error(pe.message);
+      rows.push({project_id:pid,kind:"design",title:title+" (PDF)",version:ver,storage_path:pdfPath,file_type:"pdf",size_bytes:pdfBlob.size,uploaded_by:uid});
+    }catch(pe){ console.error("PDF step skipped:",pe); toast("Saving without PDF — "+(pe.message||pe)); }
     if($("#sv_keep").checked&&S.file){
       hint.textContent="Uploading the 3D model ("+(S.file.size/1048576).toFixed(1)+" MB)…";
       const ext=(S.file.name.split(".").pop()||"").toLowerCase(), mPath=`${pid}/design/${ts}_${safe(S.file.name)}`;
@@ -600,6 +678,11 @@ document.querySelectorAll("[data-view]").forEach(c=>c.onchange=e=>{ S.views[e.ta
 $("#units").onchange=e=>{ S.units=e.target.value; if(S.box){ syncSectionUI(); regen(); } };
 $("#dxfBtn").onclick=()=>{ if(!S.dxf) return toast("Load a model first"); download(baseName()+".dxf",S.dxf,"application/dxf"); };
 $("#svgBtn").onclick=()=>{ if(!S.svg) return toast("Load a model first"); download(baseName()+".svg",S.svg,"image/svg+xml"); };
+$("#pdfBtn").onclick=async()=>{ if(!S.sheet||!S.sheet.ent.length) return toast("Load a model first");
+  const b=$("#pdfBtn"),o=b.textContent; b.disabled=true; b.textContent="Rendering…";
+  try{ const {doc,den}=await buildPDF(); doc.save(baseName()+".pdf"); toast("PDF sheet · 1:"+den); }
+  catch(e){ console.error(e); toast(e.message||"Could not build the PDF"); }
+  b.disabled=false; b.textContent=o; };
 $("#saveBtn").onclick=saveToProject;
 $("#resetBtn").onclick=()=>{ if(S.box) fitCamera(); };
 
