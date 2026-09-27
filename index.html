@@ -9969,7 +9969,9 @@ function gLineDiscCap(r){
 const DISC_AUTHORITY={admin:100,sales_head:10};
 function gDiscAuthority(){ return DISC_AUTHORITY[myRole]!==undefined?DISC_AUTHORITY[myRole]:5; }
 function gAuthorityNote(){ const a=gDiscAuthority(); return a>=100?'':`your limit ${a}% · ${a<10?'Rafiya up to 10%, ':''}Amit beyond`; }
-function gShowMargin(){ return canWrite() && !isDesignPartner(); }
+// 27 Sep 2026 (Amit): margin display switched OFF for everyone; flip SHOW_MARGIN to bring it back.
+const SHOW_MARGIN=false;
+function gShowMargin(){ return SHOW_MARGIN && canWrite() && !isDesignPartner(); }
 // Net price of a line as the client pays it (before GST): boosted, plus design fee, less the discount actually applied.
 function gLineNet(r){ const cfg=gStreamSettings(rowStream(r)); return gBoosted(r)*(1+cfg.fee/100)*(1-gLineSectionDisc(r,cfg)/100); }
 function gLineGM(r){ const c=Number(r.cost)||0, n=gLineNet(r); if(!(c>0)||!(n>0)) return null; return Math.round(1000*(n-c*(Number(r.qty)||0))/n)/10; }
@@ -12905,7 +12907,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b88 · 26 Sep 2026";
+const APP_BUILD = "b89 · 27 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
