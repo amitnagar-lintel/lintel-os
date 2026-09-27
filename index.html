@@ -3306,6 +3306,7 @@ async function saveLeadRow(row,lead){
     else { row.owner_id=me.id; res=await sb.from("leads").insert(row).select().single(); newId=res.data&&res.data.id; }
     if(res.error) return toast(res.error.message);
     if(!lead && newId) await sb.from("lead_activities").insert({lead_id:newId,type:"created",text:"Lead added via "+(row.source||"—"),by_user:me.id});
+    if(!lead && newId) pingNewLead(newId);   // S2L-05: Priya WhatsApps presales (Maleen) to call — the poll catches it anyway within 30 s
     closeModal(); toast(lead?"Lead updated":"Lead created");
     invalidateLeadsCache(); if(activeLead) renderLeadWorkspace(activeLead); else drawBoard();
 }
@@ -6006,6 +6007,10 @@ function milestoneSetup(p, existing){
 const PRIYA_SERVER="https://lintel-crm-production.up.railway.app";
 /* Tell Priya the moment a lead is assigned → instant WhatsApp to the owner.
    Failures are surfaced (previously swallowed) so a dropped assignment alert is visible. */
+/* S2L-05: instant nudge to presales for a freshly created lead (poll is the safety net). */
+function pingNewLead(leadId){
+  try{ fetch(PRIYA_SERVER+"/notify/new-lead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead_id:leadId})}).catch(()=>{}); }catch(_){}
+}
 function pingAssignment(payload){
   try{
     fetch(PRIYA_SERVER+"/notify/assignment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
@@ -12907,7 +12912,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b89 · 27 Sep 2026";
+const APP_BUILD = "b90 · 27 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
