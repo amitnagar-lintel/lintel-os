@@ -9974,7 +9974,9 @@ function gLineDiscCap(r){
    consultants / designers / presales / partners may enter up to 5%, the sales head 10%, admin anything.
    Applies to the discount as ENTERED; the per-line margin caps above still apply on top. */
 const DISC_AUTHORITY={admin:100,sales_head:10};
-function gDiscAuthority(){ return DISC_AUTHORITY[myRole]!==undefined?DISC_AUTHORITY[myRole]:5; }
+// AUTH-02 (28 Sep 2026, Amit): authority limits OFF — everyone may enter any discount. Flip DISC_AUTHORITY_ON to restore 5/10/admin.
+const DISC_AUTHORITY_ON=false;
+function gDiscAuthority(){ if(!DISC_AUTHORITY_ON) return 100; return DISC_AUTHORITY[myRole]!==undefined?DISC_AUTHORITY[myRole]:5; }
 function gAuthorityNote(){ const a=gDiscAuthority(); return a>=100?'':`your limit ${a}% · ${a<10?'Rafiya up to 10%, ':''}Amit beyond`; }
 // 27 Sep 2026 (Amit): margin display switched OFF for everyone; flip SHOW_MARGIN to bring it back.
 const SHOW_MARGIN=false;
@@ -12914,7 +12916,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b91 · 28 Sep 2026";
+const APP_BUILD = "b92 · 28 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
