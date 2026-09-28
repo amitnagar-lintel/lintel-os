@@ -9960,8 +9960,10 @@ const DISC_RULE_FROM=new Date("2026-09-26T00:00:00+05:30"), DISC_MARGIN_FLOOR=0.
 // DISC-02: projects.discount_guard_off (set by Amit) switches the caps and the authority limits off for that project.
 function gDiscRuleOn(){ const c=G.ver&&G.ver.created_at; return !!c && new Date(c)>=DISC_RULE_FROM && !isBoqAdmin() && !G.projGuardOff; }
 function gTradeOf(r){ if(r.trade) return r.trade; const f=G.rates.find(x=>x.item===r.item); return f?f.trade:null; }
+// DISC-03 (28 Sep 2026, Amit): margin-floor guard switched OFF — no per-line caps. Authority limits (5/10/admin) stay.
+const DISC_GUARD_ON=false;
 function gLineDiscCap(r){
-  if(!gDiscRuleOn()) return 100;
+  if(!DISC_GUARD_ON||!gDiscRuleOn()) return 100;
   if(gTradeOf(r)==='civil_demolition') return DISC_CAP_CIVIL;
   const cfg=gStreamSettings(rowStream(r));
   const price=(Number(r.originalRate!==undefined?r.originalRate:r.rate)||0)*(1+cfg.boost/100)*(1+cfg.fee/100);
@@ -12912,7 +12914,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b90 · 27 Sep 2026";
+const APP_BUILD = "b91 · 28 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
