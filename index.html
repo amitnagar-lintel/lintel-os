@@ -10867,7 +10867,8 @@ async function gReviewAction(p, body, next){
     if(!gPartnerCanEdit(v)) return;
     if(!confirm(`Submit "${nm}" to ${cons} for approval?\n\nYou won't be able to edit it until it is approved or sent back.`)) return;
     if(typeof gStopAutosave==="function") gStopAutosave();
-    try{ await gSave(p,true); }catch(e){}
+    let saved=false; try{ saved=await gSave(p,true); }catch(e){ saved=false; }
+    if(!saved) return toast("Not submitted — the BOQ could not be saved first. Reload the page, sign in again and try once more.", 8000);
     patch=Object.assign(patch,{submitted_by:me.id,submitted_at:new Date().toISOString(),reviewed_by:null,reviewed_at:null,review_note:null});
     msg=`BOQ "${nm}" submitted for approval to ${cons} by ${myName||"design partner"}`;
   }else{
@@ -10877,8 +10878,10 @@ async function gReviewAction(p, body, next){
     patch=Object.assign(patch,{reviewed_by:me.id,reviewed_at:new Date().toISOString(),review_note:note||null});
     msg=next==="approved"?`BOQ "${nm}" approved by ${myName||"consultant"}`:`BOQ "${nm}" sent back to the design partner by ${myName||"consultant"}${note?": "+note:""}`;
   }
-  const {error}=await sb.from("boq_versions").update(patch).eq("id",G.boqId);
+  try{ await gEnsureSession(); }catch(e){ gSessionLost(); return; }
+  const {data:upd,error}=await sb.from("boq_versions").update(patch).eq("id",G.boqId).select("id,review_status");
   if(error) return toast(error.message);
+  if(!upd||!upd.length){ gSessionLost(); return toast("Not "+(next==="submitted"?"submitted":next)+" — the database did not accept the change (session expired or no rights on this BOQ). Reload and try again.", 9000); }
   Object.assign(v,patch); if(G.versions){ const gv=G.versions.find(x=>String(x.id)===String(G.boqId)); if(gv) Object.assign(gv,patch); }
   gLogActivity(p,msg);
   // Priya WhatsApps the consultant (on submit) or the partner (on approve / send back)
@@ -12514,8 +12517,28 @@ function gPasteCosts(onDone){
 }
 
 /* ================= SAVE / CSV ================= */
+/* SESSION-01 (28 Sep 2026): a tab left open past the token's life kept autosaving with an expired
+   session — PostgREST answered 401 / "row-level security" and the version PATCH matched 0 rows, so the
+   sheet looked saved (and "Submit for approval" looked done) while the database never changed. Every
+   write now (a) refreshes the session first and (b) checks that the row was actually written. */
+async function gEnsureSession(){
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const soon=Date.now()/1000+90;
+    if(!session || (session.expires_at && session.expires_at<soon)){
+      const {data,error}=await sb.auth.refreshSession();
+      if(error||!data||!data.session) throw new Error("SESSION_EXPIRED");
+    }
+    return true;
+  }catch(e){ throw new Error("SESSION_EXPIRED"); }
+}
+function gSessionLost(){
+  gStopAutosave();
+  const ind=$("#g-autosave"); if(ind){ ind.textContent="⚠ Not saved — your session expired. Reload the page and sign in again."; ind.style.color="#d9534f"; }
+  if(!gSessionLost._told){ gSessionLost._told=true; toast("Your session has expired — this BOQ is NOT being saved. Reload the page and sign in again.", 9000); }
+}
 async function gSave(p, silent){
-  if(!G.boqId) return;
+  if(!G.boqId) return false;
   // Locked BOQ (shared with client + 10% received): only Amit may write.
   // Postgres enforces this anyway (boq_lock_guard); this just avoids firing
   // doomed round-trips — especially from the 5s autosave.
@@ -12524,7 +12547,7 @@ async function gSave(p, silent){
     if(!silent) toast("This BOQ is locked — only Amit can edit it. Use “New revision” to quote changes.");
     return;
   }
-  if(G._saving) return; // prevent overlapping saves
+  if(G._saving) return false; // prevent overlapping saves
   G._saving=true;
   const v=G.ver||{};
   // auto-generate a version label with date+time if none set
@@ -12536,7 +12559,8 @@ async function gSave(p, silent){
   }
   const grand=gGrand();   // legacy fee/gst/disc/boost_pct columns are no longer written (BOQ-STREAMS-02)
   try{
-    const {error:vErr}=await sb.from("boq_versions").update({
+    await gEnsureSession();
+    const {data:vRows,error:vErr}=await sb.from("boq_versions").update({
       client_name:v.client_name,client_phone:v.client_phone,client_email:v.client_email,project_name:v.project_name,property:v.property,
       quote_date:v.quote_date||null,
       stream_settings:(G.ver&&G.ver.stream_settings)||{},
@@ -12544,8 +12568,9 @@ async function gSave(p, silent){
       // total = client-facing grand (discounts + GST, excluded/optional out) — same number as
       // projects.contract_value below; the recalc_boq_total trigger that overwrote it is dropped
       total:grand.total, total_ex_gst:grand.base, last_edited_by:me.id, last_edited_at:new Date().toISOString()
-    }).eq("id",G.boqId);
+    }).eq("id",G.boqId).select("id");
     if(vErr) throw vErr;
+    if(!vRows||!vRows.length) throw new Error("NOT_WRITTEN");   // RLS hid the row: expired session or no edit rights on this BOQ
     // replace items atomically via RPC — a mid-save failure can no longer wipe the sheet
     const payload=G.rows.map((r,i)=>({room:r.room,category:r.cat,item_name:r.item,description:r.item,uom:r.unit||'nos',rate:r.rate,qty:r.qty,cost_rate:(r.cost==null?0:Number(r.cost)||0),width:r.w||null,height:r.h||null,remarks:r.remarks||null,is_custom:r.custom,sort_idx:i,room_tag:r.room,scope:gScope(r),stream:rowStream(r),line_disc_pct:(rowStream(r)===FURNISHING?(Number(r.lineDisc)||0):0)}));
     const {error:iErr}=await sb.rpc("boq_replace_items",{p_version_id:G.boqId,p_items:payload});
@@ -12572,12 +12597,17 @@ async function gSave(p, silent){
       if(gLocked() && isBoqAdmin()) gLogActivity(p, "⚠ Locked BOQ edited by admin · "+v.version_label);
     }
     if(G.leadId && typeof refreshLeadBoqFlow==="function" && !silent) refreshLeadBoqFlow();
+    return true;
   }catch(e){
-    const locked=/BOQ_LOCKED/.test(e.message||"");
-    const msg=locked?"BOQ is locked — only Amit can edit it":(e.message||"error");
+    const em=String(e.message||e||"");
+    const locked=/BOQ_LOCKED/.test(em);
+    const session=/SESSION_EXPIRED|NOT_WRITTEN|row-level security|JWT|401/i.test(em);
+    if(session){ gSessionLost(); return false; }
+    const msg=locked?"BOQ is locked — only Amit can edit it":(em||"error");
     if(locked) gStopAutosave();
     const ind=$("#g-autosave"); if(ind){ ind.textContent="⚠ Not saved — "+msg; ind.style.color="#d9534f"; }
     if(!silent) toast(locked?msg+". Use “New revision” to quote changes.":("Save failed: "+msg));
+    return false;
   }finally{ G._saving=false; }
 }
 
@@ -12916,7 +12946,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b92 · 28 Sep 2026";
+const APP_BUILD = "b93 · 28 Sep 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
