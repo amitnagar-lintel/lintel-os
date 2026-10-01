@@ -7951,6 +7951,7 @@ async function pwDesign(p,body){
       <button data-ds="meetings" class="${designSub==='meetings'?'on':''}">Meetings</button>
       <button data-ds="mom" class="${designSub==='mom'?'on':''}">MoM</button>
       <button data-ds="files" class="${designSub==='files'?'on':''}">Files</button>
+      <button data-ds="weekly" class="${designSub==='weekly'?'on':''}">Weekly Update</button>
     </div>
   </div>
   <div id="dsBody">Loading…</div>`;
@@ -7960,6 +7961,7 @@ async function pwDesign(p,body){
   if(designSub==="meetings") return dsMeetings(p,dsBody);
   if(designSub==="mom")      return dsMoM(p,dsBody);
   if(designSub==="files")    return pwFiles(p,dsBody,"design");
+  if(designSub==="weekly")   return dsWeekly(p,dsBody);
 }
 
 /* ---- Design Timeline ---- */
@@ -10792,6 +10794,476 @@ async function pwJourneyPlan(p){
 }
 
 
+/* ===================== WEEKLY DESIGN UPDATE (WEEKLY-01) =====================
+   A room-wise weekly design progress report + a 4–6 week design schedule with
+   client approval turnaround and iteration counts, all built from live project
+   data. Hosted for the client via weekly_reports -> weekly.html?t=token (the
+   weekly-view edge function), mirroring pwJourneyPlan. The client signs off on
+   the hosted page; the decision is written back to weekly_reports and shows here.
+   Lives on the Project → Studio → Design tab as the "Weekly Update" sub-tab. */
+const WEEKLY_VIEW_BASE="https://os.lintelspace.com/weekly.html";
+const WK_LABELS={"Concept":"Concept & Brief","Moodboard":"Moodboard","2D Layout":"2D Layout","3D Views":"3D Views","Materials":"Materials & Finishes","Final Drawings":"Final Drawings"};
+const WK_DEFDAYS={"Concept":5,"Moodboard":7,"2D Layout":7,"3D Views":7,"Materials":5,"Final Drawings":5};
+const WK_STD_ROOMS=["Foyer","Living Room","Dining","Kitchen","Master Bedroom","Bedroom 2","Bedroom 3","Master Bathroom","Common Bathroom","Balcony & Utility"];
+const WK_ROOM_STATUS=[["not_started","Not started"],["in_design","In design"],["in_review","In review"],["approved","Approved"],["on_hold","On hold"]];
+const WK_ROOM_SLABEL={not_started:"Not started",in_design:"In design",in_review:"In review",approved:"Approved",on_hold:"On hold"};
+
+function wkDaysBetween(a,b){ if(!a||!b) return null; return Math.max(0,Math.round((new Date(b)-new Date(a))/864e5)); }
+function wkShortDate(iso){ if(!iso) return ""; const d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}); }
+function wkDaysAgo(iso){ if(!iso) return null; return Math.max(0,Math.round((Date.now()-new Date(iso))/864e5)); }
+
+async function wkLoadSchedule(pid){
+  let {data}=await sb.from("design_schedule_stages").select("*").eq("project_id",pid).order("sort_idx");
+  if(data&&data.length) return data;
+  const days=DESIGN_PHASES.map(s=>WK_DEFDAYS[s]||7);
+  let cur=new Date(); cur.setHours(0,0,0,0);
+  const rows=DESIGN_PHASES.map((s,i)=>{ const ps=new Date(cur); cur=new Date(cur.getTime()+days[i]*864e5);
+    return {project_id:pid,stage:s,sort_idx:i,planned_start:ps.toISOString().slice(0,10),planned_days:days[i],status:i===0?"active":"todo",iterations:1}; });
+  const r=await sb.from("design_schedule_stages").insert(rows).select("*").order("sort_idx");
+  return r.data||rows;
+}
+async function wkLoadRooms(pid){
+  let {data}=await sb.from("design_rooms").select("*").eq("project_id",pid).order("sort_idx");
+  if(data&&data.length) return data;
+  const rows=WK_STD_ROOMS.map((r,i)=>({project_id:pid,room:r,sort_idx:i,is_standard:true,status:"not_started",iterations:1}));
+  const ins=await sb.from("design_rooms").insert(rows).select("*").order("sort_idx");
+  return ins.data||rows;
+}
+
+/* ---------- editor: schedule + rooms + "preview & share" ---------- */
+async function dsWeekly(p,body){
+  const w=canWorkProject();
+  body.innerHTML=`<div id="wkBody" style="color:var(--ink-soft)">Loading the design schedule…</div>`;
+  const host=$("#wkBody");
+  let stages,rooms;
+  try{ [stages,rooms]=await Promise.all([wkLoadSchedule(p.id),wkLoadRooms(p.id)]); }
+  catch(e){ host.innerHTML=`<div class="pw-card" style="color:var(--clay)">Couldn't load the schedule: ${esc(e.message||e)}</div>`; return; }
+
+  const done=stages.filter(s=>s.status==="done").length;
+  const pct=Math.round(done/stages.length*100);
+  const appr=stages.filter(s=>s.sent_at&&s.approved_at).map(s=>wkDaysBetween(s.sent_at,s.approved_at));
+  const avg=appr.length?(appr.reduce((a,b)=>a+b,0)/appr.length):null;
+  const iters=stages.reduce((a,s)=>a+(s.iterations||1),0);
+
+  host.innerHTML=`
+  <div class="pw-card">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px">
+      <div><div style="font-family:'Fraunces',serif;font-size:19px;color:var(--ink)">${pct}% <span style="font-size:12px;color:var(--ink-soft);font-weight:400">design complete</span></div>
+        <div style="font-size:12px;color:var(--ink-soft)">${done} of ${stages.length} stages · ${avg==null?"—":avg.toFixed(1)+" day avg approval"} · ${iters} rounds</div></div>
+      <div style="margin-left:auto">${w?`<button class="primary" id="wkShare">Preview &amp; share weekly update →</button>`:`<span style="font-size:12px;color:var(--ink-soft)">View only</span>`}</div>
+    </div>
+    <div class="s2l-hint" style="margin-top:6px">Design phase target 5 weeks, capped at 6. Each stage ends in a client approval — the turnaround and rounds below feed the client's weekly update.</div>
+  </div>
+
+  <div class="pw-card">
+    <h3 style="margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Design schedule</h3>
+    <div style="overflow-x:auto"><table style="min-width:620px"><thead><tr>
+      <th>Stage</th><th>Start</th><th>Days</th><th>Status</th><th>Rounds</th><th>Approval</th>${w?"<th></th>":""}</tr></thead><tbody>
+      ${stages.map(s=>{
+        const chip=s.approved_at?`<span style="color:#2E7D5B;font-weight:600">✓ ${wkDaysBetween(s.sent_at,s.approved_at)??"—"} day${(wkDaysBetween(s.sent_at,s.approved_at))===1?"":"s"}</span>`
+          :s.sent_at?`<span style="color:#B7791F;font-weight:600">⏳ ${wkDaysAgo(s.sent_at)}d waiting</span>`:`<span style="color:var(--ink-soft)">—</span>`;
+        return `<tr data-ss="${s.id||""}">
+          <td><b>${esc(WK_LABELS[s.stage]||s.stage)}</b></td>
+          <td>${w?`<input type="date" data-f="planned_start" value="${s.planned_start||""}" style="width:140px">`:wkShortDate(s.planned_start)}</td>
+          <td>${w?`<input type="number" data-f="planned_days" value="${s.planned_days||7}" min="1" max="60" style="width:60px">`:(s.planned_days||7)}</td>
+          <td>${w?`<select data-f="status"><option value="todo" ${s.status==="todo"?"selected":""}>To do</option><option value="active" ${s.status==="active"?"selected":""}>Active</option><option value="done" ${s.status==="done"?"selected":""}>Done</option></select>`:s.status}</td>
+          <td>${w?`<span class="wk-step" data-id="${s.id}" data-t="stage"><button class="linkbtn" data-it="-">–</button> ${s.iterations||1} <button class="linkbtn" data-it="+">+</button></span>`:(s.iterations||1)}</td>
+          <td>${chip}${w?`<br><button class="linkbtn" data-sent="${s.id}">mark sent</button> · <button class="linkbtn" data-appr="${s.id}">approved</button>`:""}</td>
+          ${w?"<td></td>":""}
+        </tr>`;}).join("")}
+    </tbody></table></div>
+  </div>
+
+  <div class="pw-card">
+    <h3 style="margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--brass-deep)">Room-by-room progress</h3>
+    <div style="overflow-x:auto"><table style="min-width:680px"><thead><tr>
+      <th>Room</th><th>Status</th><th>Rounds</th><th>Approval</th><th style="min-width:200px">Work done / pending</th>${w?"<th></th>":""}</tr></thead><tbody>
+      ${rooms.map(r=>{
+        const chip=r.approved_at?`<span style="color:#2E7D5B;font-weight:600">✓ ${wkDaysBetween(r.sent_at,r.approved_at)??"—"}d</span>`
+          :r.sent_at?`<span style="color:#B7791F;font-weight:600">⏳ ${wkDaysAgo(r.sent_at)}d</span>`:`<span style="color:var(--ink-soft)">—</span>`;
+        return `<tr data-dr="${r.id||""}">
+          <td><b>${esc(r.room)}</b>${r.is_standard?"":` <span style="font-size:9px;font-weight:700;color:var(--brass-deep)">ADDED</span>`}</td>
+          <td>${w?`<select data-f="status">${WK_ROOM_STATUS.map(o=>`<option value="${o[0]}" ${r.status===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select>`:WK_ROOM_SLABEL[r.status]||r.status}</td>
+          <td>${w?`<span class="wk-step" data-id="${r.id}" data-t="room"><button class="linkbtn" data-it="-">–</button> ${r.iterations||1} <button class="linkbtn" data-it="+">+</button></span>`:(r.iterations||1)}</td>
+          <td>${chip}${w?`<br><button class="linkbtn" data-rsent="${r.id}">sent</button> · <button class="linkbtn" data-rappr="${r.id}">ok</button>`:""}</td>
+          <td>${w?`<input data-f="work_note" placeholder="what's done" value="${esc(r.work_note||"")}" style="width:100%;margin-bottom:4px"><input data-f="pending_note" placeholder="pending" value="${esc(r.pending_note||"")}" style="width:100%">`:`${esc(r.work_note||"—")}${r.pending_note?`<br><span style="color:var(--ink-soft)">Pending: ${esc(r.pending_note)}</span>`:""}`}</td>
+          ${w?`<td><button class="linkbtn del" data-rdel="${r.id}">✕</button></td>`:""}
+        </tr>`;}).join("")}
+    </tbody></table></div>
+    ${w?`<div class="ds-row" style="margin-top:10px"><div class="field" style="flex:1;min-width:180px"><label>Add room / area</label><input id="wkNewRoom" placeholder="e.g. Home Theatre, Pooja, Terrace"></div><button class="primary" id="wkAddRoom">Add</button></div>`:""}
+  </div>`;
+
+  if(!w){ const sb_=$("#wkShare"); if(sb_) sb_.remove(); return; }
+
+  // ---- schedule edits ----
+  host.querySelectorAll("tr[data-ss]").forEach(tr=>{
+    const id=tr.dataset.ss; if(!id) return;
+    tr.querySelectorAll("[data-f]").forEach(el=>el.onchange=async()=>{
+      const patch={}; patch[el.dataset.f]=el.type==="number"?Number(el.value):el.value; patch.updated_at=new Date().toISOString();
+      await sb.from("design_schedule_stages").update(patch).eq("id",id);
+      if(el.dataset.f==="status") dsWeekly(p,body);
+    });
+    const s=stages.find(x=>String(x.id)===String(id))||{};
+    tr.querySelector("[data-sent]")&&(tr.querySelector("[data-sent]").onclick=async()=>{ await sb.from("design_schedule_stages").update({sent_at:new Date().toISOString(),status:"active"}).eq("id",id); dsWeekly(p,body); });
+    tr.querySelector("[data-appr]")&&(tr.querySelector("[data-appr]").onclick=async()=>{ await sb.from("design_schedule_stages").update({approved_at:new Date().toISOString(),status:"done"}).eq("id",id); dsWeekly(p,body); });
+  });
+  // ---- room edits ----
+  host.querySelectorAll("tr[data-dr]").forEach(tr=>{
+    const id=tr.dataset.dr; if(!id) return;
+    tr.querySelectorAll("[data-f]").forEach(el=>el.onchange=async()=>{
+      const patch={}; patch[el.dataset.f]=el.value; patch.updated_at=new Date().toISOString();
+      await sb.from("design_rooms").update(patch).eq("id",id);
+    });
+    tr.querySelector("[data-rsent]")&&(tr.querySelector("[data-rsent]").onclick=async()=>{ await sb.from("design_rooms").update({sent_at:new Date().toISOString(),status:"in_review"}).eq("id",id); dsWeekly(p,body); });
+    tr.querySelector("[data-rappr]")&&(tr.querySelector("[data-rappr]").onclick=async()=>{ await sb.from("design_rooms").update({approved_at:new Date().toISOString(),status:"approved"}).eq("id",id); dsWeekly(p,body); });
+    tr.querySelector("[data-rdel]")&&(tr.querySelector("[data-rdel]").onclick=async()=>{ if(!confirm("Remove this room from the tracker?")) return; await sb.from("design_rooms").delete().eq("id",id); dsWeekly(p,body); });
+  });
+  // ---- iteration steppers ----
+  host.querySelectorAll(".wk-step").forEach(sp=>{
+    const id=sp.dataset.id, tbl=sp.dataset.t==="stage"?"design_schedule_stages":"design_rooms";
+    sp.querySelectorAll("[data-it]").forEach(b=>b.onclick=async()=>{
+      const cur=(sp.dataset.t==="stage"?stages:rooms).find(x=>String(x.id)===String(id))||{iterations:1};
+      const n=Math.max(1,(cur.iterations||1)+(b.dataset.it==="+"?1:-1));
+      await sb.from(tbl).update({iterations:n}).eq("id",id); dsWeekly(p,body);
+    });
+  });
+  // ---- add room ----
+  const ar=$("#wkAddRoom"); if(ar) ar.onclick=async()=>{
+    const name=($("#wkNewRoom").value||"").trim(); if(!name) return toast("Room name needed");
+    await sb.from("design_rooms").insert({project_id:p.id,room:name,sort_idx:rooms.length,is_standard:false,status:"not_started",iterations:1});
+    dsWeekly(p,body);
+  };
+  // ---- preview & share ----
+  const sh=$("#wkShare"); if(sh) sh.onclick=()=>pwWeeklyShare(p);
+}
+
+/* ---------- gather live data for the client report ---------- */
+async function weeklyContext(p,opts){
+  opts=opts||{};
+  const [stages,rooms]=await Promise.all([wkLoadSchedule(p.id),wkLoadRooms(p.id)]);
+  const {data:acts}=await sb.from("mom_actions").select("*").eq("project_id",p.id).neq("status","done").neq("status","closed").order("deadline",{ascending:true,nullsFirst:false});
+  const {data:pays}=await sb.from("payment_milestones").select("amount,percent,status,paid_at,label").eq("project_id",p.id).order("sort_idx");
+  const designer=(STAFF||[]).find(s=>String(s.id)===String(p.designer_id))||(STAFF||[]).find(s=>String(s.id)===String(p.consultant_id))||{};
+  const dn=designer.full_name||"your design consultant";
+  const initials=(dn.match(/\b[A-Za-z]/g)||["L","S"]).slice(0,2).join("").toUpperCase();
+
+  const done=stages.filter(s=>s.status==="done").length;
+  const pct=Math.round(done/stages.length*100);
+  const active=stages.find(s=>s.status==="active")||stages.find(s=>s.status==="todo")||stages[stages.length-1];
+  const appr=stages.filter(s=>s.sent_at&&s.approved_at).map(s=>wkDaysBetween(s.sent_at,s.approved_at));
+  const avg=appr.length?(appr.reduce((a,b)=>a+b,0)/appr.length):null;
+  const iters=stages.reduce((a,s)=>a+(s.iterations||1),0);
+
+  // week number from the first stage's planned start (or conversion / sale date)
+  const anchor=stages[0]&&stages[0].planned_start?new Date(stages[0].planned_start):(p.converted_at?new Date(p.converted_at):new Date(p.created_at||Date.now()));
+  const weekNo=Math.max(1,Math.ceil((Date.now()-anchor)/(7*864e5)));
+
+  // payments
+  const contract=Number(p.contract_value)|| (pays||[]).reduce((a,m)=>a+(Number(m.amount)||0),0) || 0;
+  const received=(pays||[]).filter(m=>m.status==="paid"||m.paid_at).reduce((a,m)=>a+(Number(m.amount)||0),0);
+  const nextDue=(pays||[]).find(m=>!(m.status==="paid"||m.paid_at));
+
+  // client-visible design images → short-lived signed URLs for the digest
+  let images=[];
+  try{
+    const {data:files}=await sb.from("project_files").select("*").eq("project_id",p.id).eq("kind","design").eq("client_visible",true).order("uploaded_at",{ascending:false}).limit(4);
+    for(const f of (files||[])){
+      const ext=(f.file_type||f.storage_path||"").toLowerCase();
+      if(!/(png|jpe?g|webp|gif)/.test(ext)) continue;
+      const {data:su}=await sb.storage.from("project-files").createSignedUrl(f.storage_path,14*86400);
+      if(su&&su.signedUrl) images.push({url:su.signedUrl,cap:f.title||"Design view"});
+    }
+  }catch(e){}
+
+  const clients=p.client_name||"Client";
+  const firstName=clients.split(/[&,]/)[0].trim().split(/\s+/).slice(-1)[0]||"there";
+  const defNote=`This week we progressed ${active?("the "+(WK_LABELS[active.stage]||active.stage).toLowerCase()):"your design"}. Scroll down for the room-by-room detail — and please review the decisions we need from you to stay on schedule.`;
+
+  return { p, stages, rooms, acts:acts||[], designerName:dn, initials, pct, done, total:stages.length,
+    active, avg, iters, weekNo, contract, received, nextDue, images, clients, firstName,
+    note:opts.note!=null?opts.note:defNote,
+    periodLabel:`Week ${weekNo} · ${new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}` };
+}
+
+
+const WK_FONTS=`<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">`;
+
+/* Build the client-facing weekly update as a self-contained, .wkdoc-scoped block.
+   The same string is used for the in-app preview, the print/PDF window, and the
+   hosted link. No <script> here — the hosted page (weekly.html) wires the sign-off. */
+function weeklyDocHtml(ctx){
+  const p=ctx.p;
+  const C=207.3, off=(C*(1-ctx.pct/100)).toFixed(1);
+  const curIdx=STAGE_FLOW.indexOf(p.current_stage);
+  const phaseRow=ctx.stages.map(s=>{
+    const cls=s.status==="done"?"done":s.status==="active"?"now":"todo";
+    const st=s.status==="done"?("Approved "+(s.approved_at?wkShortDate(s.approved_at):"")):s.status==="active"?"In progress":(s.sort_idx===ctx.done?"Next":"Upcoming");
+    return `<li class="wk-phase ${cls}"><i class="wk-dot"></i><span class="wk-pn">${esc(WK_LABELS[s.stage]||s.stage)}</span><span class="wk-ps">${esc(st)}</span></li>`;
+  }).join("");
+
+  const roomCards=ctx.rooms.map(r=>{
+    const open=(r.status==="in_review"||r.status==="in_design")?" open":"";
+    const pill=r.status==="approved"?["done","Approved"]:(r.status==="in_review")?["now","In review"]:(r.status==="in_design")?["now","In design"]:(r.status==="on_hold")?["queue","On hold"]:["queue","Not started"];
+    const meta=r.approved_at?`${r.iterations||1} round${(r.iterations||1)===1?"":"s"} · <span class="ap">approved${r.sent_at?" in "+(wkDaysBetween(r.sent_at,r.approved_at))+"d":""}</span>`
+      :r.sent_at?`Round ${r.iterations||1} · <span class="rv">in review (${wkDaysAgo(r.sent_at)}d)</span>`
+      :(r.status==="not_started")?`Not started`:`Round ${r.iterations||1} · in design`;
+    const work=r.work_note?esc(r.work_note):(r.status==="not_started"?"Design not started yet.":"Design in progress.");
+    return `<details class="wk-room"${open}>
+      <summary><div class="wk-rh"><div class="wk-rname">${esc(r.room)}${r.is_standard?"":`<span class="wk-added">Added</span>`}</div><div class="wk-rmeta">${meta}</div></div>
+        <span class="wk-rstat ${pill[0]}">${pill[1]}</span>
+        <svg class="wk-chev" width="14" height="14" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
+      <div class="wk-rbody"><h4>Work done</h4><p class="wk-wk">${work}</p>${r.pending_note?`<p class="wk-pend"><b>Pending:</b> ${esc(r.pending_note)}</p>`:""}</div>
+    </details>`;
+  }).join("");
+
+  const decisions=ctx.acts.length?ctx.acts.map((a,i)=>`<div class="wk-dcard"><h3>${i+1} · ${esc(a.item||"Decision needed")}</h3>${a.deadline?`<span class="wk-by">⏱ by ${wkShortDate(a.deadline)}</span>`:""}</div>`).join("")
+    :`<p class="wk-none">You're all caught up — no decisions pending from your side right now.</p>`;
+
+  const nextBits=[];
+  const nextStage=ctx.stages.find(s=>s.status!=="done");
+  if(nextStage) nextBits.push(`Progress <b>${esc(WK_LABELS[nextStage.stage]||nextStage.stage)}</b>`);
+  const inRev=ctx.rooms.filter(r=>r.status==="in_review").map(r=>r.room);
+  if(inRev.length) nextBits.push(`Finalise <b>${esc(inRev.slice(0,3).join(", "))}</b> once you approve`);
+  const notStarted=ctx.rooms.filter(r=>r.status==="not_started").map(r=>r.room);
+  if(notStarted.length) nextBits.push(`Begin design for <b>${esc(notStarted.slice(0,3).join(", "))}</b>`);
+  if(!nextBits.length) nextBits.push("Move your project into production");
+
+  const journey=STAGE_FLOW.map((st,i)=>`<div class="wk-seg ${i<curIdx?"d":i===curIdx?"c":""}"><b>${esc(st)}</b>${i<curIdx?"Done":i===curIdx?"Now":""}</div>`).join("");
+  const feePct=ctx.contract?Math.min(100,Math.round(ctx.received/ctx.contract*100)):0;
+
+  const digest=ctx.images.length
+    ? `<div class="wk-digest">${ctx.images.map((im,i)=>`<div class="wk-shot${i===0&&ctx.images.length>1?" wide":""}"><img src="${esc(im.url)}" alt="${esc(im.cap)}"><div class="wk-cap">${esc(im.cap)}</div></div>`).join("")}</div>`
+    : `<p class="wk-none">New design views for this week will appear here as your designer shares them.</p>`;
+
+  return `<div class="wkdoc"><style>
+  .wkdoc{--navy:#0D0D27;--ink:#2B2B40;--muted:#6B6A7D;--gold:#C9A24B;--gold-deep:#A9821F;--pale:#E9D9AE;--ivory:#F7F4EE;--paper:#fff;--line:#E7E0D2;--lsoft:#EFEAE0;--ok:#3E7C54;--okbg:#E7F0E8;--warn:#9A6B12;--warnbg:#F6ECD4;--queue:#8E8BA0;--queuebg:#EEECEF;background:var(--ivory);color:var(--ink);font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wkdoc *{box-sizing:border-box}
+  .wkdoc .wrap{max-width:620px;margin:0 auto;padding:0 16px 40px}
+  .wkdoc .topbar{background:var(--navy);border-bottom:2px solid var(--gold);color:var(--ivory);display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px}
+  .wkdoc .brand{font-family:'Fraunces',serif;font-weight:600;font-size:15px;letter-spacing:2.4px;text-transform:uppercase;line-height:1}
+  .wkdoc .brand small{display:block;font-family:'Inter';font-size:8px;letter-spacing:2.8px;color:var(--pale);margin-top:4px;font-weight:500}
+  .wkdoc .wklbl{font-size:11px;letter-spacing:.6px;color:var(--pale);text-align:right;white-space:nowrap}
+  .wkdoc .hero{background:var(--paper);border:1px solid var(--line);border-top:none;border-radius:0 0 18px 18px;box-shadow:0 20px 50px -28px rgba(13,13,39,.42);padding:22px 20px;margin-bottom:18px}
+  .wkdoc .eyebrow{font-size:10.5px;letter-spacing:2.2px;text-transform:uppercase;color:var(--gold-deep);font-weight:600;margin:0 0 8px}
+  .wkdoc h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(22px,6vw,29px);line-height:1.12;color:var(--navy);margin:0 0 4px}
+  .wkdoc .sub{color:var(--muted);font-size:13px;margin:0 0 18px}.wkdoc .sub b{color:var(--ink);font-weight:600}
+  .wkdoc .dz{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--lsoft);background:var(--ivory);border-radius:12px}
+  .wkdoc .av{width:46px;height:46px;border-radius:50%;flex:0 0 46px;background:var(--navy);display:grid;place-items:center;color:var(--pale);font-family:'Fraunces',serif;font-size:17px;font-weight:600;border:2px solid var(--gold)}
+  .wkdoc .dz .note{font-size:13px;color:var(--ink)}.wkdoc .dz .who{font-size:11px;color:var(--muted);margin-top:3px}.wkdoc .dz .who b{color:var(--navy)}
+  .wkdoc section{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .wkdoc .sh{display:flex;align-items:baseline;gap:10px;margin:0 0 14px}
+  .wkdoc .sh h2{font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:var(--navy);margin:0}
+  .wkdoc .sh .tag{margin-left:auto;font-size:10.5px;color:var(--muted)}
+  .wkdoc .lede{font-size:12.5px;color:var(--muted);margin:-6px 0 12px}
+  .wkdoc .none{font-size:13px;color:var(--muted);margin:0}
+  .wkdoc .ptop{display:flex;align-items:center;gap:16px}
+  .wkdoc .ring{flex:0 0 84px}
+  .wkdoc .pmeta .big{font-family:'Fraunces',serif;font-size:15px;color:var(--navy);font-weight:600}
+  .wkdoc .pmeta p{margin:4px 0 0;font-size:12.5px;color:var(--muted)}
+  .wkdoc .on{display:inline-block;margin-top:8px;font-size:11px;font-weight:600;color:var(--ok);background:var(--okbg);padding:3px 10px;border-radius:20px}
+  .wkdoc .phases{list-style:none;margin:16px 0 0;padding:0}
+  .wkdoc .wk-phase{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--lsoft)}
+  .wkdoc .wk-phase:first-child{border-top:none}
+  .wkdoc .wk-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);background:var(--paper);justify-self:center;position:relative}
+  .wkdoc .wk-phase.done .wk-dot{background:var(--ok);border-color:var(--ok)}
+  .wkdoc .wk-phase.done .wk-dot::after{content:"";position:absolute;inset:3px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translate(0,-1px);width:6px;height:3px}
+  .wkdoc .wk-phase.now .wk-dot{background:var(--gold);border-color:var(--gold-deep);box-shadow:0 0 0 4px rgba(201,162,75,.2)}
+  .wkdoc .wk-pn{font-size:13.5px;font-weight:600;color:var(--ink)}.wkdoc .wk-phase.todo .wk-pn{color:var(--muted);font-weight:500}
+  .wkdoc .wk-ps{font-size:11px;color:var(--muted)}.wkdoc .wk-phase.now .wk-ps{color:var(--gold-deep);font-weight:600}.wkdoc .wk-phase.done .wk-ps{color:var(--ok)}
+  .wkdoc .wk-digest{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .wkdoc .wk-shot{border-radius:11px;overflow:hidden;border:1px solid var(--line);position:relative;background:var(--navy);min-width:0}
+  .wkdoc .wk-shot.wide{grid-column:1/-1}
+  .wkdoc .wk-shot img{display:block;width:100%;height:100%;object-fit:cover;aspect-ratio:16/10}
+  .wkdoc .wk-cap{position:absolute;left:0;right:0;bottom:0;padding:8px 10px;background:linear-gradient(transparent,rgba(13,13,39,.82));color:var(--ivory);font-size:11px;font-weight:600}
+  .wkdoc .wk-room{border:1px solid var(--line);border-radius:12px;background:var(--paper);overflow:hidden;margin-bottom:10px}
+  .wkdoc .wk-room summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:1fr auto 16px;align-items:center;gap:10px;padding:13px 14px}
+  .wkdoc .wk-room summary::-webkit-details-marker{display:none}
+  .wkdoc .wk-rname{font-family:'Fraunces',serif;font-size:15px;font-weight:600;color:var(--navy)}
+  .wkdoc .wk-added{font-family:'Inter';font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--gold-deep);background:var(--warnbg);padding:2px 6px;border-radius:5px;margin-left:7px}
+  .wkdoc .wk-rmeta{font-size:10.5px;font-weight:600;margin-top:5px;color:var(--muted)}.wkdoc .wk-rmeta .rv{color:var(--gold-deep)}.wkdoc .wk-rmeta .ap{color:var(--ok)}
+  .wkdoc .wk-rstat{font-size:10.5px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
+  .wkdoc .wk-rstat.done{color:var(--ok);background:var(--okbg)}.wkdoc .wk-rstat.now{color:var(--gold-deep);background:var(--warnbg)}.wkdoc .wk-rstat.queue{color:var(--queue);background:var(--queuebg)}
+  .wkdoc .wk-chev{justify-self:center;color:var(--muted)}.wkdoc .wk-room[open] .wk-chev{transform:rotate(180deg)}
+  .wkdoc .wk-rbody{padding:0 14px 15px;border-top:1px solid var(--lsoft)}
+  .wkdoc .wk-rbody h4{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--gold-deep);font-weight:700;margin:13px 0 6px}
+  .wkdoc .wk-wk{font-size:13px;color:var(--ink);margin:0}
+  .wkdoc .wk-pend{font-size:12px;color:var(--muted);margin:9px 0 0;padding-top:9px;border-top:1px dashed var(--line)}.wkdoc .wk-pend b{color:var(--ink)}
+  .wkdoc .wk-dcard{border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:10px;padding:12px 14px;background:var(--ivory);margin-bottom:10px}
+  .wkdoc .wk-dcard h3{margin:0 0 6px;font-size:13.5px;color:var(--navy);font-weight:600;font-family:'Inter'}
+  .wkdoc .wk-by{display:inline-flex;font-size:11px;font-weight:600;color:var(--warn);background:var(--warnbg);padding:4px 10px;border-radius:20px}
+  .wkdoc .sumrow{display:flex;gap:10px;flex-wrap:wrap}
+  .wkdoc .scard{flex:1 1 140px;border:1px solid var(--line);border-radius:11px;background:var(--ivory);padding:12px 14px}
+  .wkdoc .scard .k{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .wkdoc .scard .v{font-family:'Fraunces',serif;font-size:19px;color:var(--navy);font-weight:600;margin-top:3px}.wkdoc .scard .v small{font-family:'Inter';font-size:11px;color:var(--muted);font-weight:500}
+  .wkdoc .nextl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .wkdoc .nextl li{display:grid;grid-template-columns:auto 1fr;gap:11px;font-size:13.5px;align-items:start}.wkdoc .nextl .arw{color:var(--gold-deep);font-weight:700}
+  .wkdoc .tl{display:flex;margin-top:4px}
+  .wkdoc .wk-seg{flex:1;text-align:center;font-size:10px;color:var(--muted);position:relative;padding-top:20px}
+  .wkdoc .wk-seg::before{content:"";position:absolute;top:7px;left:0;right:0;height:4px;background:var(--line)}
+  .wkdoc .wk-seg.d::before{background:var(--ok)}.wkdoc .wk-seg.c::before{background:var(--gold)}
+  .wkdoc .wk-seg:first-child::before{border-radius:4px 0 0 4px}.wkdoc .wk-seg:last-child::before{border-radius:0 4px 4px 0}
+  .wkdoc .wk-seg b{display:block;color:var(--ink);font-size:10.5px;font-weight:600}
+  .wkdoc .fee .track{height:10px;background:var(--line);border-radius:10px;overflow:hidden}
+  .wkdoc .fee .fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-deep));border-radius:10px}
+  .wkdoc .fee .nums{display:flex;justify-content:space-between;margin-top:7px;font-size:11.5px;color:var(--muted)}.wkdoc .fee .nums b{color:var(--navy)}
+  .wkdoc .fee .fnote{font-size:11.5px;color:var(--muted);margin:10px 0 0}
+  .wkdoc .signoff{position:relative;background:var(--paper);border:1.5px solid var(--gold);border-radius:14px;padding:24px 20px;text-align:center}
+  .wkdoc .seal{width:44px;height:44px;border-radius:50%;background:var(--navy);border:2px solid var(--gold);color:var(--pale);font-family:'Fraunces',serif;font-weight:600;font-size:14px;display:grid;place-items:center;margin:0 auto 12px}
+  .wkdoc .doc-eyebrow{font-size:10px;letter-spacing:2.6px;text-transform:uppercase;color:var(--gold-deep);font-weight:700;margin:0 0 4px}
+  .wkdoc .signoff h2{font-family:'Fraunces',serif;font-weight:600;font-size:19px;color:var(--navy);margin:0 0 12px}
+  .wkdoc .declare{font-size:13px;color:var(--ink);max-width:44ch;margin:0 auto 4px}.wkdoc .declare b{color:var(--navy)}
+  .wkdoc .sign-form{text-align:left;max-width:420px;margin:14px auto 0}
+  .wkdoc .agree{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:var(--ink);background:var(--ivory);border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:pointer}
+  .wkdoc .agree input{margin-top:2px;width:16px;height:16px;accent-color:var(--gold-deep);flex:0 0 16px}
+  .wkdoc .sfields{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .wkdoc .fld{flex:1 1 150px;min-width:0}
+  .wkdoc .fld label{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:5px}
+  .wkdoc .fld input{width:100%;padding:11px 12px;font-size:15px;border:1px solid var(--line);border-radius:9px;background:#FDFCFA;color:var(--ink);font-family:'Inter'}
+  .wkdoc .fld input[readonly]{background:var(--ivory);color:var(--muted)}
+  .wkdoc .sacts{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .wkdoc .btn-sign{flex:1 1 180px;background:var(--gold);color:var(--navy);border:none;font-weight:700;font-size:14px;padding:13px;border-radius:10px;cursor:pointer;font-family:'Inter'}
+  .wkdoc .btn-ghost{flex:1 1 140px;background:none;border:1px solid var(--line);color:var(--ink);font-weight:600;font-size:13px;padding:13px;border-radius:10px;cursor:pointer;font-family:'Inter'}
+  .wkdoc .sfine{font-size:11px;color:var(--muted);margin:12px 0 0;text-align:center}
+  .wkdoc .serr{font-size:12px;color:#B0442E;font-weight:600;margin:10px 0 0;text-align:center}
+  .wkdoc .cbox{margin-top:14px;border-top:1px dashed var(--line);padding-top:14px}
+  .wkdoc .cbox label{display:block;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:7px}
+  .wkdoc .cbox textarea{width:100%;padding:11px 12px;font-size:14px;border:1px solid var(--line);border-radius:9px;background:#FDFCFA;color:var(--ink);font-family:'Inter';resize:vertical}
+  .wkdoc .cbox .btn-sign.sm{flex:0 0 auto;padding:10px 18px;font-size:13px;margin-top:10px}
+  .wkdoc .stamp{text-align:center;padding:8px 0 2px}
+  .wkdoc .stamp .mk{display:inline-block;font-family:'Fraunces',serif;font-weight:600;font-size:17px;color:var(--ok);border:2px solid var(--ok);border-radius:10px;padding:8px 20px;transform:rotate(-3deg);margin-bottom:12px}
+  .wkdoc .stamp p{font-size:13px;color:var(--ink);margin:0}.wkdoc .stamp #signedBy{font-weight:600;color:var(--navy)}
+  .wkdoc .closing{background:var(--navy);color:var(--ivory);border:none;text-align:center}
+  .wkdoc .closing h2{font-family:'Fraunces',serif;color:var(--ivory);font-size:18px;margin:0 0 8px}
+  .wkdoc .closing p{font-size:13px;color:#C9C8D6;margin:0 auto 14px;max-width:38ch}
+  .wkdoc .closing .num{font-size:12px;color:var(--pale);letter-spacing:.4px}
+  .wkdoc .foot{text-align:center;font-size:10.5px;color:var(--muted);padding:20px 10px 4px;line-height:1.7}.wkdoc .foot b{color:var(--navy);font-family:'Fraunces',serif}
+  @media(max-width:480px){.wkdoc .wk-digest{grid-template-columns:1fr}}
+  </style>
+  <div class="topbar"><div class="brand">Lintel Space<small>Atelier · Bengaluru</small></div><div class="wklbl">Weekly Design Update<br>${esc(ctx.periodLabel)}</div></div>
+  <div class="wrap">
+    <div class="hero">
+      <p class="eyebrow">Progress Report · ${esc(ctx.periodLabel)}</p>
+      <h1>${esc(p.name||p.code||"Your Home")}</h1>
+      <p class="sub">For <b>${esc(ctx.clients)}</b> · Stage: <b>${esc(ctx.active?(WK_LABELS[ctx.active.stage]||ctx.active.stage):(p.current_stage||"Design"))}</b>${p.target_end?` · Target handover <b>${wkShortDate(p.target_end)}</b>`:""}</p>
+      <div class="dz"><div class="av">${esc(ctx.initials)}</div><div><div class="note">${esc(ctx.note)}</div><div class="who">— <b>${esc(ctx.designerName)}</b>, your design consultant</div></div></div>
+    </div>
+
+    <section><div class="sh"><h2>Where we are</h2><span class="tag">Design phase</span></div>
+      <div class="ptop">
+        <svg class="ring" viewBox="0 0 80 80" role="img" aria-label="${ctx.pct} percent"><circle cx="40" cy="40" r="33" fill="none" stroke="#E7E0D2" stroke-width="9"/><circle cx="40" cy="40" r="33" fill="none" stroke="#C9A24B" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 40 40)"/><text x="40" y="39" text-anchor="middle" font-family="Fraunces,serif" font-size="19" font-weight="600" fill="#0D0D27">${ctx.pct}%</text><text x="40" y="52" text-anchor="middle" font-family="Inter,sans-serif" font-size="7.5" fill="#6B6A7D">DESIGN</text></svg>
+        <div class="pmeta"><div class="big">${ctx.done} of ${ctx.total} design stages complete</div><p>${esc(ctx.active?(WK_LABELS[ctx.active.stage]||ctx.active.stage)+" in progress":"Design in progress")}.</p><span class="on">● On track</span></div>
+      </div>
+      <ul class="phases">${phaseRow}</ul>
+    </section>
+
+    <section><div class="sh"><h2>This week in your home</h2><span class="tag">${ctx.images.length?ctx.images.length+" view"+(ctx.images.length===1?"":"s"):""}</span></div>${digest}</section>
+
+    <section><div class="sh"><h2>Room-by-room progress</h2><span class="tag">${ctx.rooms.length} areas</span></div>
+      <p class="lede">Exactly what we have designed in each space. Tap a room to open the detail.</p>${roomCards}</section>
+
+    <section><div class="sh"><h2>Decisions we need from you</h2><span class="tag">${ctx.acts.length||""}</span></div>${decisions}</section>
+
+    <section><div class="sh"><h2>Approvals &amp; iterations</h2></div>
+      <div class="sumrow">
+        <div class="scard"><div class="k">Avg approval time</div><div class="v">${ctx.avg==null?"—":ctx.avg.toFixed(1)} <small>${ctx.avg==null?"":"days"}</small></div></div>
+        <div class="scard"><div class="k">Design rounds</div><div class="v">${ctx.iters} <small>so far</small></div></div>
+        <div class="scard"><div class="k">Schedule</div><div class="v">On track</div></div>
+      </div></section>
+
+    <section><div class="sh"><h2>Next week</h2></div><ul class="nextl">${nextBits.map(b=>`<li><span class="arw">→</span><div>${b}</div></li>`).join("")}</ul></section>
+
+    <section><div class="sh"><h2>Your journey</h2><span class="tag">Brief → Handover</span></div><div class="tl">${journey}</div></section>
+
+    <section class="fee"><div class="sh"><h2>Investment status</h2><span class="tag">Transparent, always</span></div>
+      <div class="track"><div class="fill" style="width:${feePct}%"></div></div>
+      <div class="nums"><span>Received: <b>${fmt(ctx.received)}</b></span><span>Contract: <b>${ctx.contract?fmt(ctx.contract):"—"}</b></span></div>
+      ${ctx.nextDue?`<p class="fnote">Next milestone — <b>${esc(ctx.nextDue.label||"Next payment")}</b>${ctx.nextDue.due_date?` · due ${wkShortDate(ctx.nextDue.due_date)}`:""}.</p>`:""}
+    </section>
+
+    <section class="signoff" id="signoff">
+      <div class="seal">${esc((p.name||"LSA").slice(0,1).toUpperCase())||"LSA"}</div>
+      <p class="doc-eyebrow">Formal record</p>
+      <h2>Design Stage Sign-off</h2>
+      <p class="declare">I/We confirm that we have reviewed the design presented in this update and approve <b>Lintel Space Atelier</b> to proceed to the next stage on <b>${esc(p.name||p.code||"this project")}</b>.</p>
+      <div class="sign-form" id="signForm">
+        <label class="agree"><input type="checkbox" id="agree"> I have reviewed the design above and I approve Lintel Space Atelier to proceed.</label>
+        <div class="sfields"><div class="fld"><label>Your full name</label><input id="signName" type="text" placeholder="Your name" autocomplete="name"></div><div class="fld"><label>Date</label><input id="signDate" type="text" readonly></div></div>
+        <div class="sacts"><button class="btn-sign" id="btnSign" type="button">Approve &amp; sign</button><button class="btn-ghost" id="btnChanges" type="button">Request changes first</button></div>
+        <p class="serr" id="signErr" hidden></p>
+        <p class="sfine">On signing, your approval is recorded and shared with your design consultant.</p>
+        <div class="cbox" id="changesBox" hidden><label for="changesTxt">What would you like changed before you sign?</label><textarea id="changesTxt" rows="3" placeholder="Share your notes…"></textarea><button class="btn-sign sm" id="btnSendChanges" type="button">Send to consultant</button></div>
+      </div>
+      <div class="stamp" id="signedStamp" hidden><div class="mk">✓ Approved</div><p id="signedBy"></p><p class="sfine">Thank you. Your approval has been recorded and shared with your design consultant.</p></div>
+    </section>
+
+    <section class="closing"><h2>Questions? We're one message away.</h2><p>Reply on WhatsApp any time, or we can walk through the design together on a quick call.</p>${p.client_phone?`<div class="num">${esc(ctx.designerName)} · WhatsApp ${esc(p.client_phone)}</div>`:""}</section>
+
+    <div class="foot"><b>LINTEL SPACE ATELIER</b><br>Weekly design update, generated from your live project in Lintel OS.<br>Private link for ${esc(ctx.clients)}. Figures are indicative and exclude GST unless stated.</div>
+  </div></div>`;
+}
+
+/* Insert one weekly_reports row and return the client link. */
+async function weeklyShareLink(ctx,html){
+  const {data,error}=await sb.from("weekly_reports").insert({
+    project_id:ctx.p.id, html:html, title:(ctx.clients?ctx.clients+" · ":"")+"Weekly Design Update",
+    client_name:ctx.clients||null, period_label:ctx.periodLabel, week_no:ctx.weekNo, created_by:me.id,
+    expires_at:new Date(Date.now()+30*864e5).toISOString()
+  }).select("token").single();
+  if(error) throw new Error("Could not create the link: "+error.message);
+  return WEEKLY_VIEW_BASE+"?t="+data.token;
+}
+
+/* Preview + share the weekly update (mirrors pwJourneyPlan). */
+async function pwWeeklyShare(p){
+  if(!canWorkProject()) return toast("You don't have access to send client updates.");
+  openModal(`<div class="modal-h">Weekly design update · ${esc(p.code||p.name||"")}</div>
+    <div class="modal-b" style="max-height:62vh;overflow:auto">
+      <div class="field"><label>Opening note to the client (editable)</label><textarea id="wkNote" rows="2" style="width:100%"></textarea></div>
+      <div id="wkPrev" style="min-height:120px;color:var(--ink-soft)">Building the update…</div>
+    </div>
+    <div class="modal-f" style="flex-wrap:wrap;gap:8px">
+      <button class="ghost" onclick="closeModal()">Close</button>
+      <button class="ghost" id="wkPrint">⬇ Download / Print PDF</button>
+      ${p.client_phone?`<button class="wa-btn" id="wkWa">Share on WhatsApp</button>`:""}
+      <button class="ghost" id="wkMail">✉ Email link</button>
+      <button class="primary" id="wkLink">🔗 Create share link</button>
+    </div>`);
+  let ctx=null, html="";
+  async function build(){
+    const note=$("#wkNote")?$("#wkNote").value:undefined;
+    ctx=await weeklyContext(p,{note:(note&&note.trim())?note.trim():undefined});
+    if($("#wkNote")&&!$("#wkNote").value) $("#wkNote").value=ctx.note;
+    html=weeklyDocHtml(ctx);
+    if($("#wkPrev")) $("#wkPrev").innerHTML=html;
+  }
+  await build();
+  if($("#wkNote")) $("#wkNote").onchange=build;
+  if($("#wkPrint")) $("#wkPrint").onclick=()=>{
+    const w=window.open("","_blank"); if(!w) return toast("Allow pop-ups to download the PDF");
+    w.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Weekly Update · ${esc(ctx.clients||p.name||"")}</title>${WK_FONTS}</head><body style="margin:0;background:#F7F4EE">${html}</body></html>`);
+    w.document.close(); setTimeout(()=>{try{w.focus();}catch(_){}w.print();},700);
+  };
+  async function makeLink(btn){
+    const b=btn,old=b.textContent;b.disabled=true;b.textContent="Creating…";
+    try{ const url=await weeklyShareLink(ctx,html); await navigator.clipboard.writeText(url).catch(()=>{}); toast("Share link created & copied"); return url; }
+    catch(e){ toast(e.message||"Could not create link"); return null; }
+    finally{ b.disabled=false;b.textContent=old; }
+  }
+  if($("#wkLink")) $("#wkLink").onclick=()=>makeLink($("#wkLink"));
+  if($("#wkWa")) $("#wkWa").onclick=async()=>{
+    const url=await makeLink($("#wkWa")); if(!url) return;
+    const msg=`Dear ${ctx.firstName},\n\nHere is your weekly design update from Lintel Space Atelier — room-by-room progress, the decisions we need from you, and this week's design views:\n\n${url}\n\nDo review and sign off at the bottom when you're happy.\n\n— ${ctx.designerName}, Lintel Space Atelier`;
+    waOpen(p.client_phone,msg);
+  };
+  if($("#wkMail")) $("#wkMail").onclick=async()=>{
+    const url=await makeLink($("#wkMail")); if(!url) return;
+    const subj="Your weekly design update · Lintel Space Atelier";
+    const bodyTxt=`Dear ${esc(ctx.clients||"Client")},\n\nHere is your weekly design update for ${p.code||"your project"} — room-by-room progress, decisions needed, and this week's design views:\n\n${url}\n\nWarm regards,\n${ctx.designerName}\nLintel Space Atelier`;
+    window.location.href=`mailto:${encodeURIComponent((p.client_email||"").trim())}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(bodyTxt)}`;
+  };
+}
+
+
 /* One-click download — replaces "print, then Save as PDF". */
 async function gDownloadPdf(p){
   try{
@@ -12946,7 +13418,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b93 · 28 Sep 2026";
+const APP_BUILD = "b94 · 1 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;

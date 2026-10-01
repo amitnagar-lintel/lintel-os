@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Weekly Design Update · Lintel Space Atelier</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0D0D27">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0}
+  body{background:#F7F4EE;color:#2B2B40;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%}
+  #doc img{max-width:100%;height:auto}
+  .state{padding:64px 24px;text-align:center;color:#6B6A7D;max-width:460px;margin:0 auto}
+  .state h2{font-family:'Fraunces',Georgia,serif;font-size:22px;color:#0D0D27;margin:0 0 8px}
+  .state p{font-size:13.5px;line-height:1.6;margin:0}
+  .spin{width:26px;height:26px;border:2px solid #E7E0D2;border-top-color:#C9A24B;border-radius:50%;margin:0 auto 18px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+  <div id="doc"></div>
+  <div class="state" id="state"><div class="spin"></div>Loading your design update…</div>
+
+<script>
+(function(){
+  var FN = "https://cxgxmqspvpuizvwfbnjq.supabase.co/functions/v1/weekly-view";
+  var stateEl = document.getElementById("state");
+  var docEl = document.getElementById("doc");
+
+  function fail(title, msg){
+    docEl.innerHTML = "";
+    stateEl.innerHTML = "<h2>" + title + "</h2><p>" + msg + "</p>";
+    stateEl.style.display = "";
+  }
+  function esc(s){ return String(s==null?"":s).replace(/[<>&"]/g,function(c){return {"<":"&lt;",">":"&gt;","&":"&amp;","\"":"&quot;"}[c];}); }
+
+  var token = new URLSearchParams(location.search).get("t");
+  if(!token){ return fail("Link incomplete", "This update link looks incomplete. Please use the link you were sent."); }
+
+  fetch(FN + "?t=" + encodeURIComponent(token), { headers:{ "Accept":"application/json" } })
+    .then(function(r){ return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+    .then(function(res){
+      if(!res.ok || !res.j || res.j.error || !res.j.html){
+        var e = (res.j && res.j.error) || "This update link is no longer valid.";
+        return fail("Update unavailable", e + " Please contact your design consultant for an up-to-date copy.");
+      }
+      stateEl.style.display = "none";
+      docEl.innerHTML = res.j.html;
+      if(res.j.title) document.title = res.j.title + " · Lintel Space Atelier";
+      wireSignoff(res.j);
+    })
+    .catch(function(){ fail("Could not load the update", "Please check your connection and try again."); });
+
+  // The report snapshot carries the sign-off markup (ids below) but no script —
+  // scripts are stripped server-side — so the behaviour is wired here and posts
+  // the client's decision back to the weekly-view function.
+  function wireSignoff(meta){
+    var form = document.getElementById("signForm");
+    var stamp = document.getElementById("signedStamp");
+    var dateEl = document.getElementById("signDate");
+    var d = new Date();
+    var m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    var today = String(d.getDate()).padStart(2,"0")+" "+m[d.getMonth()]+" "+d.getFullYear();
+    if(dateEl) dateEl.value = today;
+
+    // Already signed when the page loaded.
+    if(meta.signed_at && form && stamp){
+      form.style.display = "none"; stamp.hidden = false;
+      var sb_ = document.getElementById("signedBy");
+      if(sb_){ var dt = new Date(meta.signed_at);
+        sb_.textContent = "Approved by " + (meta.signed_name||"client") + "  ·  " +
+          String(dt.getDate()).padStart(2,"0")+" "+m[dt.getMonth()]+" "+dt.getFullYear(); }
+      return;
+    }
+
+    var sign = document.getElementById("btnSign"),
+        err = document.getElementById("signErr"),
+        changesBtn = document.getElementById("btnChanges"),
+        changesBox = document.getElementById("changesBox"),
+        sendChanges = document.getElementById("btnSendChanges");
+
+    function show(msg){ if(err){ err.textContent=msg; err.hidden=false; } }
+    function post(body){
+      body.t = token;
+      return fetch(FN, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) })
+        .then(function(r){ return r.json(); });
+    }
+
+    if(sign) sign.addEventListener("click", function(){
+      var nameEl = document.getElementById("signName");
+      var name = (nameEl && nameEl.value || "").trim();
+      var agreed = document.getElementById("agree") && document.getElementById("agree").checked;
+      if(!agreed){ show("Please tick the box to confirm you approve."); return; }
+      if(!name){ show("Please type your name to sign."); return; }
+      sign.disabled = true; sign.textContent = "Recording…";
+      post({ action:"sign", name:name }).then(function(j){
+        if(j && (j.ok || j.already)){
+          if(form) form.style.display="none";
+          if(stamp){ stamp.hidden=false;
+            var sb2 = document.getElementById("signedBy");
+            if(sb2) sb2.textContent = "Approved by " + name + "  ·  " + today; }
+        } else { show((j && j.error) || "Could not record your approval."); sign.disabled=false; sign.textContent="Approve & sign"; }
+      }).catch(function(){ show("Network problem. Please try again."); sign.disabled=false; sign.textContent="Approve & sign"; });
+    });
+
+    if(changesBtn) changesBtn.addEventListener("click", function(){ if(changesBox) changesBox.hidden = !changesBox.hidden; });
+    if(sendChanges) sendChanges.addEventListener("click", function(){
+      var txtEl = document.getElementById("changesTxt");
+      var nameEl = document.getElementById("signName");
+      sendChanges.disabled = true; sendChanges.textContent = "Sending…";
+      post({ action:"changes", name:(nameEl&&nameEl.value||"").trim(), note:(txtEl&&txtEl.value||"").trim() }).then(function(j){
+        if(j && j.ok){ if(changesBox) changesBox.innerHTML = '<p style="margin:0;font-size:12px;color:#3E7C54;font-weight:600">✓ Sent to your design consultant. They will get back to you before you sign.</p>'; }
+        else { sendChanges.disabled=false; sendChanges.textContent="Send to consultant"; }
+      }).catch(function(){ sendChanges.disabled=false; sendChanges.textContent="Send to consultant"; });
+    });
+  }
+})();
+</script>
+</body>
+</html>
