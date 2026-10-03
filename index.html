@@ -10075,6 +10075,10 @@ function gLockBanner(){
     return box("#F6E7E3","#D9A79B",`↩ <b>Sent back</b> by ${esc(rwho)} on ${esc(rdt(rv.reviewed_at))}${rv.review_note?`: <i>${esc(rv.review_note)}</i>`:""}. ${G.partnerBoq?"Make the changes and submit again.":""}`);
   if(gIsPartnerBoq()&&rs==="approved"&&!L.locked)
     return box("#EAF3EC","#9CC5A6",`✅ <b>Approved</b> by ${esc(rwho)} on ${esc(rdt(rv.reviewed_at))}. ${G.partnerBoq?"Your design consultant will share it with the client.":"It can now be shared with the client."}`);
+  if(gIsPartnerBoq()&&rs==="edit_requested"&&!L.locked)
+    return box("#FBF5E6","#D4B06A", G.partnerBoq
+      ? `✏️ <b>Edit requested.</b> Waiting for ${esc(rwho)} to reopen this approved BOQ${rv.edit_reason?`: <i>${esc(rv.edit_reason)}</i>`:""}. You can edit again once it is reopened.`
+      : `✏️ <b>${esc(PROFILE_NAMES[rv.edit_requested_by]||"The design partner")} wants to edit this approved BOQ</b>${rv.edit_reason?`: <i>${esc(rv.edit_reason)}</i>`:""}. Approve to reopen it for them, or decline to keep it approved.`);
   if(gIsPartnerBoq()&&rs==="none"&&G.partnerBoq&&!L.locked)
     return box("#EAF0F6","#A9C2DA",`✍ <b>Draft.</b> When the BOQ is complete, press <b>📨 Submit for approval</b> — your design consultant reviews it and shares it with the client.`);
   if(G.partnerBoq && !gPartnerOwns(G.ver) && !L.locked)
@@ -10130,6 +10134,8 @@ function gRender(p, body){
       ${ro?'':`<button class="ghost" id="gSave">Save now</button>`}
       ${(G.partnerBoq&&gPartnerCanEdit(G.ver)&&!L.locked)?`<button class="primary" id="gSubmit" title="Send this BOQ to the project's design consultant for approval">📨 Submit for approval</button>`:''}
       ${(gCanApprove(p)&&gIsPartnerBoq()&&gReviewStatus()==="submitted")?`<button class="primary" id="gApprove" title="Approve this design partner BOQ — it can then be shared with the client">✅ Approve</button><button class="ghost" id="gReturn" title="Send it back to the design partner with a note">↩ Send back</button>`:''}
+      ${(G.partnerBoq&&gPartnerOwns(G.ver)&&gReviewStatus()==="approved"&&!L.locked)?`<button class="ghost" id="gReqEdit" title="Ask the design consultant to reopen this approved BOQ so you can edit it">✏️ Request edit</button>`:''}
+      ${(gCanApprove(p)&&gIsPartnerBoq()&&gReviewStatus()==="edit_requested")?`<button class="primary" id="gEditOk" title="Reopen this BOQ for the design partner to edit">✅ Approve edit</button><button class="ghost" id="gEditNo" title="Decline — keep the BOQ approved">✖ Decline</button>`:''}
       ${canWrite()&&gNeedsApproval()?`<span class="s2l-chip s2l-queued" style="animation:none;align-self:center" title="Design partner BOQ — the project's design consultant must approve it before it is shared with the client">⏳ Approval needed before sharing</span>`:''}
       ${canWrite()&&!gNeedsApproval()?`<button class="ghost" id="gSendProp" title="Email this proposal to the client from contact@lintelspace.com, BCC'ing the assigned team">📤 ${L.sentAt?'Resend':'Send'} proposal</button>`:''}
       ${!ro&&!L.locked&&!G.partnerBoq?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
@@ -10149,6 +10155,9 @@ function gRender(p, body){
   if($("#gSubmit")) $("#gSubmit").onclick=()=>gReviewAction(p,body,"submitted");
   if($("#gApprove")) $("#gApprove").onclick=()=>gReviewAction(p,body,"approved");
   if($("#gReturn")) $("#gReturn").onclick=()=>gReviewAction(p,body,"returned");
+  if($("#gReqEdit")) $("#gReqEdit").onclick=()=>gReviewAction(p,body,"edit_requested");
+  if($("#gEditOk")) $("#gEditOk").onclick=()=>gReviewAction(p,body,"edit_approved");
+  if($("#gEditNo")) $("#gEditNo").onclick=()=>gReviewAction(p,body,"edit_declined");
   if($("#gRevise")) $("#gRevise").onclick=()=>gNewRevision(p,body);
   if($("#gFinal")) $("#gFinal").onclick=()=>gFinaliseLock(p,body);
   if($("#gBackList")) $("#gBackList").onclick=()=>{ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); G.boqView="list"; pwBoq(p,body); };
@@ -11334,6 +11343,26 @@ async function gReviewAction(p, body, next){
   const v=G.ver||{}; if(!G.boqId) return;
   const nm=(v.title&&v.title.trim())||v.version_label||("v"+v.version);
   const cons=p&&p.consultant_id?staffName(p.consultant_id):"the design consultant";
+  const notify=(ev)=>{ try{ fetch(PRIYA_SERVER+"/notify/boq-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({boq_version_id:G.boqId,event:ev})})
+    .then(r=>r.json()).then(j=>{ if(!j||!j.ok) toast("Heads-up: the WhatsApp nudge may not have been delivered"+(j&&j.error?" ("+j.error+")":"")); }).catch(()=>{}); }catch(_){} };
+
+  // Partner: request to edit an already-approved BOQ. Partner RLS can't update an
+  // approved row, so this goes through the request_boq_edit security-definer RPC.
+  if(next==="edit_requested"){
+    if(!(G.partnerBoq && gPartnerOwns(v) && gReviewStatus(v)==="approved")) return;
+    const reason=prompt(`Request to edit the approved BOQ "${nm}"?\n\nTell ${cons} what you need to change (optional):`,"");
+    if(reason===null) return;
+    try{ await gEnsureSession(); }catch(e){ gSessionLost(); return; }
+    const {error}=await sb.rpc("request_boq_edit",{vid:G.boqId,reason:(reason||"").trim()||null});
+    if(error) return toast(error.message||"Could not send the edit request");
+    Object.assign(v,{review_status:"edit_requested",edit_reason:(reason||"").trim()||null,edit_requested_by:me.id});
+    if(G.versions){ const gv=G.versions.find(x=>String(x.id)===String(G.boqId)); if(gv) gv.review_status="edit_requested"; }
+    gLogActivity(p,`Edit requested on approved BOQ "${nm}" by ${myName||"design partner"}${reason?": "+reason:""}`);
+    notify("edit_requested");
+    toast("Edit request sent to "+cons);
+    return gRender(p,body);
+  }
+
   let patch={review_status:next}, note=null, msg="";
   if(next==="submitted"){
     if(!gPartnerCanEdit(v)) return;
@@ -11346,20 +11375,24 @@ async function gReviewAction(p, body, next){
   }else{
     if(!gCanApprove(p)) return toast("Only the project's design consultant (or an admin) can review this BOQ.");
     if(next==="returned"){ note=prompt("What should the design partner change?"); if(note===null) return; }
+    else if(next==="edit_declined"){ note=prompt("Decline the edit request?\n\nOptional note to the design partner:",""); if(note===null) return; }
+    else if(next==="edit_approved"){ if(!confirm(`Reopen "${nm}" for ${PROFILE_NAMES[v.edit_requested_by]||"the design partner"} to edit?\n\nIt leaves 'approved' and can't be shared with the client until re-approved.`)) return; }
     else if(!confirm(`Approve "${nm}"? It can then be shared with the client.`)) return;
+    patch.review_status = next==="edit_approved" ? "returned" : next==="edit_declined" ? "approved" : next;
     patch=Object.assign(patch,{reviewed_by:me.id,reviewed_at:new Date().toISOString(),review_note:note||null});
-    msg=next==="approved"?`BOQ "${nm}" approved by ${myName||"consultant"}`:`BOQ "${nm}" sent back to the design partner by ${myName||"consultant"}${note?": "+note:""}`;
+    msg = next==="approved" ? `BOQ "${nm}" approved by ${myName||"consultant"}`
+        : next==="returned" ? `BOQ "${nm}" sent back to the design partner by ${myName||"consultant"}${note?": "+note:""}`
+        : next==="edit_approved" ? `Edit request on BOQ "${nm}" approved by ${myName||"consultant"} — reopened for the design partner`
+        : `Edit request on BOQ "${nm}" declined by ${myName||"consultant"}${note?": "+note:""}`;
   }
   try{ await gEnsureSession(); }catch(e){ gSessionLost(); return; }
   const {data:upd,error}=await sb.from("boq_versions").update(patch).eq("id",G.boqId).select("id,review_status");
   if(error) return toast(error.message);
-  if(!upd||!upd.length){ gSessionLost(); return toast("Not "+(next==="submitted"?"submitted":next)+" — the database did not accept the change (session expired or no rights on this BOQ). Reload and try again.", 9000); }
+  if(!upd||!upd.length){ gSessionLost(); return toast("Not saved — the database did not accept the change (session expired or no rights on this BOQ). Reload and try again.", 9000); }
   Object.assign(v,patch); if(G.versions){ const gv=G.versions.find(x=>String(x.id)===String(G.boqId)); if(gv) Object.assign(gv,patch); }
   gLogActivity(p,msg);
-  // Priya WhatsApps the consultant (on submit) or the partner (on approve / send back)
-  try{ fetch(PRIYA_SERVER+"/notify/boq-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({boq_version_id:G.boqId,event:next})})
-    .then(r=>r.json()).then(j=>{ if(!j||!j.ok) toast("Heads-up: the WhatsApp nudge may not have been delivered"+(j&&j.error?" ("+j.error+")":"")); }).catch(()=>{}); }catch(_){}
-  toast(next==="submitted"?"Submitted for approval":next==="approved"?"Approved":"Sent back");
+  notify(next);
+  toast(next==="submitted"?"Submitted for approval":next==="approved"?"Approved":next==="returned"?"Sent back":next==="edit_approved"?"Reopened for editing":"Edit request declined");
   gRender(p,body);
 }
 async function gSendProposal(p, body){
@@ -13418,7 +13451,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b94 · 1 Oct 2026";
+const APP_BUILD = "b95 · 3 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
