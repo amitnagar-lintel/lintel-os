@@ -2019,6 +2019,10 @@ async function renderDashboard(){
       <div class="sec-label">Monthly sales <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— booked value ex-GST, this financial year</span></div>
       <div id="dashSalesBody">${skel(1,150)}</div>
     </section>
+    ${isAdminLevel()?`<section class="pw-card" id="dashCollections" style="margin-bottom:14px">
+      <div class="sec-label">Collections <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— money received from clients, by month</span></div>
+      <div id="dashCollectionsBody">${skel(2,120)}</div>
+    </section>`:""}
     ${isAdminLevel()?`<section class="pw-card" id="dashRoi" style="margin-bottom:14px">
       <div class="sec-label">Source ROI <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— this financial year · won value ex-GST · spend from the weekly campaign entry</span></div>
       <div id="dashRoiBody">${skel(3,40)}</div>
@@ -2077,6 +2081,7 @@ async function renderDashboard(){
   renderCsatDash();
   renderMonthlySales();
   if(isAdminLevel()) renderSourceRoi();
+  if(isAdminLevel()) renderCollections();
   if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
@@ -2291,6 +2296,55 @@ async function renderSourceRoi(){
       <td style="padding:6px 8px;font-weight:600">${esc(r.source)}</td><td class="num" style="padding:6px 8px">${r.leads}</td><td class="num" style="padding:6px 8px">${r.cold||""}</td><td class="num" style="padding:6px 8px">${r.qualified}</td><td class="num" style="padding:6px 8px">${r.meetings}</td><td class="num" style="padding:6px 8px">${r.proposals}</td><td class="num" style="padding:6px 8px;font-weight:600">${r.won}</td>
       <td class="num" style="padding:6px 8px;color:${cc};font-weight:600">${c(r.conv_pct)}${r.conv_pct!=null?"%":""}</td><td class="num mono" style="padding:6px 8px">${r.won_value?fmt(r.won_value):"—"}</td><td class="num mono" style="padding:6px 8px">${r.spend?fmt(r.spend):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpl?fmt(r.cpl):"—"}</td><td class="num mono" style="padding:6px 8px">${r.cpw?fmt(r.cpw):"—"}</td></tr>`;}).join("")}</tbody></table></div>
     <div class="s2l-hint" style="margin-top:8px">Spend is per campaign (Dashboard → Cost / meeting tile → add weekly spend); it rolls up to the source of the leads that carry that campaign name. Organic sources show no spend by design.</div>`;
+}
+/* COLLECT-01: company-wide monthly collections (admin/sales_head) — receipts from
+   project_payments, collected vs contract vs due. Backed by collections_summary(). */
+async function renderCollections(){
+  const host=$("#dashCollectionsBody"); if(!host) return;
+  const {data,error}=await sb.rpc("collections_summary");
+  if(error||!data){ host.innerHTML=`<div class="empty" style="padding:10px 0">Couldn't load collections.</div>`; return; }
+  if(data.denied){ host.innerHTML=`<div class="empty" style="padding:10px 0">Collections are visible to Admin / Sales Head.</div>`; return; }
+  const months=data.months||[];
+  const due=Math.max(0,(Number(data.contract_active)||0)-(Number(data.collected_active)||0));
+  const max=Math.max(1,...months.map(m=>Number(m.collected)||0));
+  const tile=(label,val)=>`<div class="kpi" style="--kc:#4f7d52;cursor:default"><div class="kpi-val" title="${esc(fmt(val))}">${fmtC(val)||"₹0"}</div><div class="kpi-lbl">${esc(label)}</div></div>`;
+  const pctActive=data.contract_active?Math.min(100,Math.round((data.collected_active/data.contract_active)*100)):0;
+  host.innerHTML=`
+   <div class="dash-kpis" style="margin:0 0 12px">
+     ${tile("This month",Number(data.this_month)||0)}
+     ${tile("Last month",Number(data.last_month)||0)}
+     ${tile("Collected · FY "+(data.fy_label||""),Number(data.collected_fy)||0)}
+     ${tile("Outstanding · active",due)}
+   </div>
+   <div style="margin:4px 2px 14px">
+     <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft);margin-bottom:5px"><span>Collected on active projects</span><span><b title="${esc(fmt(data.collected_active))}">${fmtC(data.collected_active)||"₹0"}</b> of <b title="${esc(fmt(data.contract_active))}">${fmtC(data.contract_active)||"₹0"}</b> (${pctActive}%)</span></div>
+     <div style="height:12px;background:var(--line-2);border-radius:8px;overflow:hidden"><div style="height:100%;width:${pctActive}%;background:linear-gradient(90deg,#6aa06f,#4f7d52);border-radius:8px"></div></div>
+   </div>
+   <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 8px">By month</div>
+   <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+     ${months.map(m=>{const v=Number(m.collected)||0;const w=Math.round(v/max*100);return `<div style="display:flex;align-items:center;gap:10px;font-size:12px">
+       <span style="width:64px;flex:0 0 64px;color:var(--ink-soft)">${esc(m.label)}</span>
+       <div style="flex:1;min-width:0;background:var(--paper-2);border-radius:6px;overflow:hidden"><div style="height:18px;width:${Math.max(2,w)}%;background:linear-gradient(90deg,#C9A24B,#A9821F);border-radius:6px"></div></div>
+       <span style="width:80px;flex:0 0 80px;text-align:right;font-weight:600" title="${esc(fmt(v))}">${fmtC(v)||"₹0"}</span>
+       <span style="width:24px;flex:0 0 24px;text-align:right;color:var(--ink-soft)" title="payments">${m.n}</span></div>`;}).join("")}
+   </div>
+   ${(data.outstanding&&data.outstanding.length)?`
+   <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 8px">Top outstanding · active projects</div>
+   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px">
+     <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Project</th><th style="padding:5px 8px">Consultant</th><th class="num" style="padding:5px 8px">Contract</th><th class="num" style="padding:5px 8px">Collected</th><th class="num" style="padding:5px 8px">Due</th></tr></thead>
+     <tbody>${data.outstanding.map(o=>`<tr style="border-top:1px solid var(--line-2);cursor:pointer" data-cproj="${o.id}">
+       <td style="padding:6px 8px"><b>${esc(o.code||o.name||o.client_name||("#"+o.id))}</b>${(o.client_name&&o.code)?`<br><span style="color:var(--ink-soft);font-size:11px">${esc(o.client_name)}</span>`:""}</td>
+       <td style="padding:6px 8px">${esc(o.consultant||"—")}</td>
+       <td class="num mono" style="padding:6px 8px" title="${esc(fmt(o.contract))}">${fmtC(o.contract)||"—"}</td>
+       <td class="num mono" style="padding:6px 8px" title="${esc(fmt(o.collected))}">${fmtC(o.collected)||"—"}</td>
+       <td class="num mono" style="padding:6px 8px;color:#B4453A;font-weight:600" title="${esc(fmt(o.due))}">${fmtC(o.due)||"—"}</td></tr>`).join("")}</tbody></table></div>`:""}
+   <div class="s2l-hint" style="margin-top:8px">Collections are the actual receipts logged on each project's Payments tab (Razorpay, bank, cash, UPI, cheque, card). "Due" is contract value minus everything received.</div>`;
+  host.querySelectorAll("[data-cproj]").forEach(el=>el.onclick=()=>{
+    activeProject=Number(el.dataset.cproj); projectTab="finance"; try{projSubSel.finance="payments";}catch(_){}
+    activeLead=null; render("projects");
+    document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+    setTimeout(()=>renderProjectWorkspace(activeProject),60);
+  });
 }
 /* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
 const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
@@ -13451,7 +13505,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b95 · 3 Oct 2026";
+const APP_BUILD = "b96 · 5 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
