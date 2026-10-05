@@ -2314,10 +2314,10 @@ async function renderCollections(){
      ${tile("This month",Number(data.this_month)||0)}
      ${tile("Last month",Number(data.last_month)||0)}
      ${tile("Collected · FY "+(data.fy_label||""),Number(data.collected_fy)||0)}
-     ${tile("Outstanding · active",due)}
+     <div class="kpi" id="collOutTile" style="--kc:#B4453A;cursor:pointer" title="Click to see every project"><div class="kpi-val" title="${esc(fmt(due))}">${fmtC(due)||"\u20b90"}</div><div class="kpi-lbl">Outstanding · active →</div></div>
    </div>
    <div style="margin:4px 2px 14px">
-     <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft);margin-bottom:5px"><span>Collected on active projects</span><span><b title="${esc(fmt(data.collected_active))}">${fmtC(data.collected_active)||"₹0"}</b> of <b title="${esc(fmt(data.contract_active))}">${fmtC(data.contract_active)||"₹0"}</b> (${pctActive}%)</span></div>
+     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11.5px;color:var(--ink-soft);margin-bottom:5px"><button class="linkbtn" id="collViewAll" style="font-size:11.5px;padding:0">View all projects →</button><span id="collTotActive" style="cursor:pointer"><b title="${esc(fmt(data.collected_active))}">${fmtC(data.collected_active)||"₹0"}</b> of <b title="${esc(fmt(data.contract_active))}">${fmtC(data.contract_active)||"₹0"}</b> (${pctActive}%)</span></div>
      <div style="height:12px;background:var(--line-2);border-radius:8px;overflow:hidden"><div style="height:100%;width:${pctActive}%;background:linear-gradient(90deg,#6aa06f,#4f7d52);border-radius:8px"></div></div>
    </div>
    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 8px">By month</div>
@@ -2339,12 +2339,52 @@ async function renderCollections(){
        <td class="num mono" style="padding:6px 8px" title="${esc(fmt(o.collected))}">${fmtC(o.collected)||"—"}</td>
        <td class="num mono" style="padding:6px 8px;color:#B4453A;font-weight:600" title="${esc(fmt(o.due))}">${fmtC(o.due)||"—"}</td></tr>`).join("")}</tbody></table></div>`:""}
    <div class="s2l-hint" style="margin-top:8px">Collections are the actual receipts logged on each project's Payments tab (Razorpay, bank, cash, UPI, cheque, card). "Due" is contract value minus everything received.</div>`;
+  ["collOutTile","collViewAll","collTotActive"].forEach(id=>{const el=$("#"+id); if(el) el.onclick=()=>collectionsAllModal();});
   host.querySelectorAll("[data-cproj]").forEach(el=>el.onclick=()=>{
     activeProject=Number(el.dataset.cproj); projectTab="finance"; try{projSubSel.finance="payments";}catch(_){}
     activeLead=null; render("projects");
     document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
     setTimeout(()=>renderProjectWorkspace(activeProject),60);
   });
+}
+/* COLLECT-02: full per-project collections drill-down (click a total on the Collections card). */
+async function collectionsAllModal(){
+  openModal(`<div class="modal-h">All projects · collections</div><div class="modal-b" style="max-height:70vh;overflow:auto"><div id="collAllBody" style="color:var(--ink-soft)">Loading…</div></div><div class="modal-f"><button class="ghost" id="collCsv">Export CSV</button><button class="primary" onclick="closeModal()">Close</button></div>`);
+  const {data,error}=await sb.rpc("collections_projects");
+  const body=$("#collAllBody"); if(!body) return;
+  if(error||!data){ body.innerHTML="Couldn't load the project list."; return; }
+  if(data.denied){ body.innerHTML="Visible to Admin / Sales Head only."; return; }
+  const rows=Array.isArray(data)?data:[];
+  if(!rows.length){ body.innerHTML="No projects with a contract or payments yet."; return; }
+  let sort="due";
+  const draw=()=>{
+    const r=[...rows].sort((a,b)=> sort==="collected"?(b.collected-a.collected): sort==="name"?String(a.code||a.name||"").localeCompare(String(b.code||b.name||"")) : (b.due-a.due));
+    const tC=r.reduce((s2,x)=>s2+Number(x.contract||0),0), tP=r.reduce((s2,x)=>s2+Number(x.collected||0),0), tD=r.reduce((s2,x)=>s2+Number(x.due||0),0);
+    body.innerHTML=`<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:10px;font-size:12px"><span style="color:var(--ink-soft)">Sort:</span>
+      <button class="linkbtn" data-sort="due" style="${sort==='due'?'font-weight:700':''}">Due</button> ·
+      <button class="linkbtn" data-sort="collected" style="${sort==='collected'?'font-weight:700':''}">Collected</button> ·
+      <button class="linkbtn" data-sort="name" style="${sort==='name'?'font-weight:700':''}">Name</button>
+      <span style="margin-left:auto;color:var(--ink-soft)">${r.length} projects</span></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Project</th><th style="padding:5px 8px">Status</th><th class="num" style="padding:5px 8px">Contract</th><th class="num" style="padding:5px 8px">Collected</th><th class="num" style="padding:5px 8px">Due</th><th class="num" style="padding:5px 8px">%</th></tr></thead>
+      <tbody>${r.map(o=>{const pct=o.contract?Math.round(o.collected/o.contract*100):0;return `<tr style="border-top:1px solid var(--line-2);cursor:pointer" data-cproj="${o.id}">
+        <td style="padding:6px 8px"><b>${esc(o.code||o.name||("#"+o.id))}</b>${o.client_name?`<br><span style="color:var(--ink-soft);font-size:11px">${esc(o.client_name)}${o.consultant?" · "+esc(o.consultant):""}</span>`:""}</td>
+        <td style="padding:6px 8px">${esc(o.status||"")}</td>
+        <td class="num mono" style="padding:6px 8px" title="${esc(fmt(o.contract))}">${fmtC(o.contract)||"—"}</td>
+        <td class="num mono" style="padding:6px 8px" title="${esc(fmt(o.collected))}">${fmtC(o.collected)||"—"}</td>
+        <td class="num mono" style="padding:6px 8px;color:${o.due>0?'#B4453A':'#4f7d52'};font-weight:600" title="${esc(fmt(o.due))}">${o.due>0?(fmtC(o.due)||"—"):"✓ paid"}</td>
+        <td class="num" style="padding:6px 8px">${pct}%</td></tr>`;}).join("")}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line-2);font-weight:700"><td style="padding:6px 8px">Total · ${r.length}</td><td></td><td class="num mono" style="padding:6px 8px" title="${esc(fmt(tC))}">${fmtC(tC)}</td><td class="num mono" style="padding:6px 8px" title="${esc(fmt(tP))}">${fmtC(tP)}</td><td class="num mono" style="padding:6px 8px;color:#B4453A" title="${esc(fmt(tD))}">${fmtC(tD)}</td><td class="num" style="padding:6px 8px">${tC?Math.round(tP/tC*100):0}%</td></tr></tfoot>
+      </table></div>`;
+    body.querySelectorAll("[data-sort]").forEach(b=>b.onclick=()=>{ sort=b.dataset.sort; draw(); });
+    body.querySelectorAll("[data-cproj]").forEach(el=>el.onclick=()=>{ closeModal(); activeProject=Number(el.dataset.cproj); projectTab="finance"; try{projSubSel.finance="payments";}catch(_){} activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(activeProject),60); });
+  };
+  draw();
+  const csvb=$("#collCsv"); if(csvb) csvb.onclick=()=>{
+    const head=["Project","Client","Consultant","Status","Contract","Collected","Due","Last paid"];
+    const lines=[head.join(",")].concat(rows.map(o=>[o.code||o.name,o.client_name||"",o.consultant||"",o.status||"",o.contract,o.collected,o.due,o.last_paid||""].map(x=>`"${String(x==null?"":x).replace(/"/g,'""')}"`).join(",")));
+    const blob=new Blob([lines.join("\n")],{type:"text/csv"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="collections.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  };
 }
 /* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
 const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
@@ -13505,7 +13545,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b96 · 5 Oct 2026";
+const APP_BUILD = "b97 · 5 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
