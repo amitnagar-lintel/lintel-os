@@ -400,6 +400,17 @@
   .ex-st{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;white-space:nowrap}
   .ex-st.todo{background:var(--paper-2);color:var(--ink-soft)} .ex-st.in_progress{background:#FFF6E5;color:#A9791E}
   .ex-st.done{background:#EDF3EE;color:var(--green)} .ex-st.late{background:#FBEFEA;color:var(--clay)}
+  /* scope matrix (SCOPE-01) */
+  .sm-tbl{width:100%;border-collapse:collapse} .sm-tbl th{position:sticky;top:0;background:var(--paper);z-index:1;font-size:11px}
+  .sm-tbl td{padding:6px 7px;vertical-align:top;font-size:12.5px}
+  .sm-in{font:inherit;font-size:12px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;background:#fff;max-width:150px}
+  .sm-in:disabled{background:transparent;border-color:transparent;color:var(--ink);appearance:none;-webkit-appearance:none;opacity:1}
+  .sm-st.todo{background:var(--paper-2)} .sm-st.in_progress{background:#FFF6E5;color:#A9791E} .sm-st.done{background:#EDF3EE;color:var(--green)} .sm-st.late{background:#FBEFEA;color:var(--clay)}
+  .sm-row.sm-late td:first-child{box-shadow:inset 3px 0 var(--clay)} .sm-row.sm-gap td:first-child{box-shadow:inset 3px 0 #D4B06A}
+  .sm-ghead td{background:var(--paper-2);padding:8px 10px;cursor:pointer;border-top:1px solid var(--line)}
+  .sm-bar{display:flex;height:8px;border-radius:8px;overflow:hidden;background:var(--line-2)} .sm-bar i{display:block;height:100%}
+  .sm-bulk{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .sm-gapbtn.on{outline:2px solid var(--navy)}
   /* overview command center */
   .cc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
   .cc{background:#fff;border:1px solid var(--line);border-left:3px solid transparent;border-radius:12px;padding:20px}
@@ -4992,10 +5003,10 @@ const TICKET_PRIOS=["low","normal","high","urgent"];
 const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
 function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
-  finance:[["payments","Payments"],["packages","Packages"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
+  finance:[["payments","Payments"],["packages","Packages"],["scope","Scope Matrix"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
   site:[["kom","Kick-off"],["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",packages:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+const PROJ_SUB2GROUP={payments:"finance",packages:"finance",scope:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / Payments / Work Orders (RLS blocks the data anyway).
 // BOQ appears only on projects where the partner is the assigned designer (canBoqProject).
@@ -5055,6 +5066,7 @@ async function drawProjectTab(p){
 function drawProjectSub(p,sub,body){
   if(sub==="payments")   return pwPayments(p,body);
   if(sub==="packages")   return pwPackages(p,body);
+  if(sub==="scope")      return pwScope(p,body);
   if(sub==="orders")     return pwOrders(p,body);
   if(sub==="procurement")return pwProcurement(p,body);
   if(sub==="changes")    return pwChanges(p,body);
@@ -6578,7 +6590,8 @@ async function generatePOs(p,body,prefilter){
   // group by category (A2: excluded/optional lines are outside contracted scope — never in work orders)
   let inScope=items.filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
   if(!inScope.length) return toast("The BOQ has no included line items");
-  if(prefilter&&prefilter.pkg){ await schedLoadMaster(); inScope=inScope.filter(r=>packageOf(r)===prefilter.pkg); }
+  if(prefilter&&prefilter.ids){ const set=new Set(prefilter.ids.map(Number)); inScope=inScope.filter(r=>set.has(r.id)); }
+  else if(prefilter&&prefilter.pkg){ await schedLoadMaster(); inScope=inScope.filter(r=>packageOf(r)===prefilter.pkg); }
   else if(prefilter&&prefilter.room){ await schedLoadMaster(); inScope=inScope.filter(r=>String(r.room||r.room_tag||'')===String(prefilter.room)); }
   if(!inScope.length) return toast("No included lines in that scope");
   const cats={};
@@ -6621,11 +6634,13 @@ async function generatePOs(p,body,prefilter){
         rows.push({ project_id:p.id, boq_version_id:ver.id, po_number:nums[k],
           category:cat, rate_basis:basis, status:"draft", items:its, subtotal, created_by:me.id });
       });
-      const {data:created,error}=await sb.from("purchase_orders").insert(rows).select("id");
+      const {data:created,error}=await sb.from("purchase_orders").insert(rows).select("id,category");
       if(error){ toast(error.message); return; }
       // Best-effort package tag (works once PKG-01 adds the column; ignored otherwise).
       if(prefilter&&prefilter.pkg&&created&&created.length){ await sb.from("purchase_orders").update({package_code:prefilter.pkg}).in("id",created.map(x=>x.id)); }
-      closeModal(); toast(`${rows.length} work order(s) created`); pwOrders(p,body);
+      closeModal(); toast(`${rows.length} work order(s) created`);
+      if(prefilter&&prefilter.onDone){ prefilter.onDone(created||[]); return; }
+      pwOrders(p,body);
     }finally{ btn.disabled=false; }
   };
 }
@@ -6999,12 +7014,15 @@ async function newVendorPO(p,body,divKey,ver,prefilter){
   const dv=DIVISIONS.find(d=>d.key===divKey);
   if(!dv) return toast("Unknown division");
   if(!ver) return toast("No BOQ on this project yet — build one first");
-  const {data:vends}=await sb.from("vendors").select("*").eq("is_active",true).contains("divisions",[divKey]).order("name");
+  // SCOPE-01: a selection of scope lines may span divisions — offer every active vendor then.
+  let vq=sb.from("vendors").select("*").eq("is_active",true); if(!(prefilter&&prefilter.ids)) vq=vq.contains("divisions",[divKey]);
+  const {data:vends}=await vq.order("name");
   if(!vends||!vends.length) return toast(`No active ${dv.label} vendors yet — add one under Vendors first`);
   const {data:its}=await sb.from("boq_items").select("*").eq("boq_version_id",ver.id).order("sort_idx");
   let pool=(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional');
   let scopeLabel=dv.label;
-  if(prefilter&&prefilter.pkg){ await schedLoadMaster(); pool=pool.filter(r=>packageOf(r)===prefilter.pkg); scopeLabel=PKG_LABEL(prefilter.pkg); }
+  if(prefilter&&prefilter.ids){ const set=new Set(prefilter.ids.map(Number)); pool=pool.filter(r=>set.has(r.id)); scopeLabel=prefilter.label||'Selected lines'; }
+  else if(prefilter&&prefilter.pkg){ await schedLoadMaster(); pool=pool.filter(r=>packageOf(r)===prefilter.pkg); scopeLabel=PKG_LABEL(prefilter.pkg); }
   else if(prefilter&&prefilter.room){ await schedLoadMaster(); pool=pool.filter(r=>String(r.room||r.room_tag||'')===String(prefilter.room)); scopeLabel=prefilter.room; }
   else pool=pool.filter(r=>dv.streams.includes(normStream(r.stream)));
   if(!pool.length) return toast("No included "+scopeLabel+" lines in the BOQ");
@@ -7012,7 +7030,7 @@ async function newVendorPO(p,body,divKey,ver,prefilter){
     <div class="modal-h">New PO · ${esc(scopeLabel)}</div>
     <div class="modal-b">
       <div class="grid2">
-        <div class="field"><label>Vendor</label><select id="vpo_vendor">${vends.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Vendor</label><select id="vpo_vendor">${vends.map(v=>`<option value="${v.id}" ${(prefilter&&prefilter.vendor_id===v.id)?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Expected delivery</label><input id="vpo_del" type="date"></div>
       </div>
       <div class="grid2">
@@ -7074,7 +7092,9 @@ async function newVendorPO(p,body,divKey,ver,prefilter){
       if(iErr){ toast(iErr.message); return; }
       // Best-effort package tag (works once PKG-01 adds the column; ignored otherwise).
       if(prefilter&&prefilter.pkg){ await sb.from("vendor_pos").update({package_code:prefilter.pkg}).eq("id",po.id); }
-      closeModal(); toast(`${num} created as draft`);
+      closeModal();
+      if(prefilter&&prefilter.onDone){ prefilter.onDone(po); return; }
+      toast(`${num} created as draft`);
       activeVPO=po.id; vpoDetail(p,body,po.id);
     }finally{ btn.disabled=false; }
   };
@@ -7527,6 +7547,411 @@ async function pwPackages(p,body){
     const {error}=await sb.from("project_expenses").delete().eq("id",b.dataset.delexp);
     if(error) return toast(error.message);
     toast("Expense removed"); pwPackages(p,body); });
+}
+
+/* ===================== SCOPE MATRIX (SCOPE-01) =====================
+   One screen that turns the contract (locked / paid) BOQ into an execution plan:
+   every INCLUDED line, clubbed by trade package (civil · electrical · plumbing · tiling ·
+   stone · ceiling · painting · onsite carpentry · modular/KWS · décor · furniture), with
+   WHO executes it (vendor / executor), HOW material is sourced, WHEN it is needed on site
+   (defaulted from the schedule), WHEN it must therefore be ordered (required − lead days)
+   and WHERE it stands in production:
+     pending → drawings → ordered → in_production → ready → delivered → installed → done
+   Package resolution reuses packageOf() so this agrees with the Package Scheduler.
+   Vendor POs link per line (vendor_po_items.boq_item_id) and move status FORWARD only.
+   Tables: scope_items (one row per BOQ line, unique) + scope_events (trigger audit).
+   "Nothing gets missed" = the Gaps strip: order date passed, needed on site and not
+   delivered, no vendor decided, no date, ordered on word of mouth (no PO/WO), Lintel
+   buys the material but nothing planned. */
+const SCOPE_STATUS=[
+  ['pending','Pending','todo'],['drawings','Drawings ready','todo'],['ordered','Ordered','in_progress'],
+  ['in_production','In production','in_progress'],['ready','Ready / QC','in_progress'],['delivered','On site','in_progress'],
+  ['installed','Installed','done'],['done','Done','done'],['on_hold','On hold','late'],['dropped','Dropped','todo']];
+const SCOPE_FLOW=['pending','drawings','ordered','in_production','ready','delivered','installed','done'];
+const SCOPE_RANK=Object.fromEntries(SCOPE_FLOW.map((s,i)=>[s,i]));
+const SCOPE_ST=Object.fromEntries(SCOPE_STATUS.map(x=>[x[0],{label:x[1],cls:x[2]}]));
+const SCOPE_COLOR={pending:'#DDD6C8',drawings:'#C9BFAE',ordered:'#D7A758',in_production:'#C28E2B',ready:'#8FB08A',delivered:'#3F7FA6',installed:'#4F8A5B',done:'#2E6B3B',on_hold:'#B4453A',dropped:'#9A9490'};
+const SCOPE_MAT_BY={vendor:'Vendor supplies',lintel:'Lintel buys',client:'Client supplies',na:'No material'};
+const SCOPE_MAT_ST={na:'—',to_buy:'To buy',ordered:'Ordered',received:'Received'};
+const SCOPE_LEAD={modular:30,carpentry:7,civil:3,electrical:5,plumbing:5,tiling:7,countertop:10,false_ceiling:5,painting:3,decor:15,furnishing:21};
+const SCOPE_MATBY_DEFAULT={carpentry:'lintel',furnishing:'lintel'};
+const SCOPE_GAP={
+  order_overdue:['Order date passed — not ordered yet','late'],
+  site_late:['Needed on site already — not delivered','late'],
+  no_vendor:['No vendor / executor decided','todo'],
+  no_date:['No required-on-site date','todo'],
+  order_soon:['Must be ordered within 7 days','in_progress'],
+  no_po:['Marked ordered but no PO / WO attached','in_progress'],
+  material_plan:['Lintel buys the material — nothing planned','todo']};
+let scopeAxis='package', scopeOpen={}, scopeSel=new Set(), scopeFilter={status:'',gap:'',q:''}, scopeCache=null;
+const scopeRank=s=>(s in SCOPE_RANK)?SCOPE_RANK[s]:-1;
+const scopeActive=r=>r.status!=='dropped'&&r.status!=='on_hold';
+const scopeVendorLabel=(r,L)=>{ if(r.vendor_id){ const v=(L.vends||[]).find(x=>x.id===r.vendor_id); return v?v.name:('Vendor #'+r.vendor_id); } return r.vendor_note||''; };
+
+function scopeRequiredDefault(line,pkgCode,tasks){
+  if(!tasks||!tasks.length) return null;
+  const pk=PKG_BY_CODE[pkgCode]; const trades=new Set(pk?pk.trades:[]);
+  const rm=normCat(line.room||line.room_tag);
+  const cand=tasks.filter(t=>t.kind==='trade'&&t.planned_start&&trades.has(t.trade_code));
+  let m=cand.filter(t=>normCat(t.room)===rm); if(!m.length) m=cand;
+  if(!m.length) return null;
+  return m.map(t=>t.planned_start).sort()[0];
+}
+
+async function scopeLoad(p){
+  await schedLoadMaster(); await ensureStaff();
+  if(!Object.keys(PROFILE_NAMES).length){ try{ await loadProfileNames(); }catch(e){} }
+  // contract BOQ = the most recently LOCKED version; falls back to the latest draft (flagged in the UI)
+  const {data:vers}=await sb.from("boq_versions").select("id,version,version_label,locked_at,total")
+    .eq("project_id",p.id).order("locked_at",{ascending:false,nullsFirst:false}).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  const ver=(vers||[])[0]||null; if(!ver) return {ver:null};
+  const [{data:its},{data:rows},{data:vends},{data:pos},{data:sch},{data:wos}]=await Promise.all([
+    sb.from("boq_items").select("id,room,room_tag,category,item_name,description,uom,qty,rate,cost_rate,stream,scope,width,height,sort_idx").eq("boq_version_id",ver.id).order("sort_idx"),
+    sb.from("scope_items").select("*").eq("project_id",p.id),
+    sb.from("vendors").select("id,name,divisions,trades,lead_time_days,phone").eq("is_active",true).order("name"),
+    sb.from("vendor_pos").select("id,po_number,status,vendor_id,delivered_at,expected_delivery").eq("project_id",p.id),
+    sb.from("project_schedule").select("id").eq("project_id",p.id).order("generated_at",{ascending:false}).limit(1),
+    sb.from("purchase_orders").select("id,po_number,status,category,target_date").eq("project_id",p.id)
+  ]);
+  let tasks=[]; if(sch&&sch.length){ const {data:t}=await sb.from("schedule_task").select("room,trade_code,kind,task_name,planned_start,planned_finish").eq("schedule_id",sch[0].id); tasks=t||[]; }
+  let poItems=[]; const poIds=(pos||[]).map(o=>o.id);
+  if(poIds.length){ const {data:pi}=await sb.from("vendor_po_items").select("po_id,boq_item_id").in("po_id",poIds); poItems=pi||[]; }
+  return {ver,items:(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional'),rows:rows||[],vends:vends||[],pos:pos||[],poItems,wos:wos||[],tasks};
+}
+
+/* Bring scope_items in line with the contract BOQ: add rows for new lines (carrying status,
+   vendor, dates and notes over from a previous BOQ version when the line matches on
+   room + category + item + qty), retire rows of superseded versions, and let vendor POs
+   pull status forward. Never moves a line backwards; never touches user-set fields. */
+const VPO_ORDER=['draft','pending_approval','approved','sent','in_progress','delivered','closed'];
+async function scopeSync(p,L){
+  const byItem={}; L.rows.forEach(r=>byItem[r.boq_item_id]=r);
+  const keyOf=r=>normCat(r.room||r.room_tag)+'|'+normCat(r.category)+'|'+normCat(r.item_name||r.description)+'|'+(Number(r.qty)||0);
+  const liveIds=new Set(L.items.map(i=>i.id));
+  const oldRows=L.rows.filter(r=>r.boq_version_id!==L.ver.id&&!liveIds.has(r.boq_item_id));
+  const oldKey={};
+  if(oldRows.length){ const {data:ol}=await sb.from("boq_items").select("id,room,room_tag,category,item_name,description,qty").in("id",oldRows.map(r=>r.boq_item_id)); (ol||[]).forEach(l=>{ oldKey[l.id]=keyOf(l); }); }
+  const oldByKey={}; oldRows.forEach(r=>{ const k=oldKey[r.boq_item_id]; if(k&&!oldByKey[k]&&r.status!=='dropped') oldByKey[k]=r; });
+  const inserts=[];
+  L.items.forEach(it=>{
+    if(byItem[it.id]) return;
+    const code=packageOf(it); const prev=oldByKey[keyOf(it)];
+    inserts.push({project_id:p.id,boq_version_id:L.ver.id,boq_item_id:it.id,
+      package_code:prev?prev.package_code:code, room:it.room||it.room_tag||null,
+      status:prev?prev.status:'pending', vendor_id:prev?prev.vendor_id:null, vendor_note:prev?prev.vendor_note:null,
+      material_by:prev?prev.material_by:(SCOPE_MATBY_DEFAULT[code]||'vendor'), material_status:prev?prev.material_status:'na', material_note:prev?prev.material_note:null,
+      required_on_site:prev?prev.required_on_site:scopeRequiredDefault(it,code,L.tasks), lead_days:prev?prev.lead_days:(SCOPE_LEAD[code]||7),
+      owner_id:prev?prev.owner_id:null, note:prev?(prev.note||null):null, created_by:me.id});
+  });
+  let changed=false;
+  if(inserts.length){ const {error}=await sb.from("scope_items").insert(inserts); if(error){ toast("Scope sync: "+error.message); return false; } changed=true; }
+  const toDrop=oldRows.filter(r=>r.status!=='dropped').map(r=>r.id);
+  if(toDrop.length){ await sb.from("scope_items").update({status:'dropped'}).in("id",toDrop); changed=true; }
+  if(changed){ const {data:rows}=await sb.from("scope_items").select("*").eq("project_id",p.id); L.rows=rows||[]; }
+  // vendor POs → link + forward-only status
+  const poById={}; L.pos.forEach(o=>poById[o.id]=o);
+  const best={}; L.poItems.forEach(x=>{ const o=poById[x.po_id]; if(!o||o.status==='cancelled') return; const cur=best[x.boq_item_id]; if(!cur||VPO_ORDER.indexOf(o.status)>VPO_ORDER.indexOf(cur.status)) best[x.boq_item_id]=o; });
+  const ups=[];
+  L.rows.forEach(r=>{
+    const o=best[r.boq_item_id]; if(!o||!scopeActive(r)) return;
+    const target = (o.status==='delivered'||o.status==='closed'||o.delivered_at)?'delivered' : o.status==='in_progress'?'in_production' : (o.status==='approved'||o.status==='sent')?'ordered' : null;
+    const patch={};
+    if(r.vendor_po_id!==o.id) patch.vendor_po_id=o.id;
+    if(!r.vendor_id&&o.vendor_id) patch.vendor_id=o.vendor_id;
+    if(target&&scopeRank(r.status)<SCOPE_RANK[target]) patch.status=target;
+    if(Object.keys(patch).length) ups.push(sb.from("scope_items").update(patch).eq("id",r.id).select().single().then(x=>{ if(x.data){ const i=L.rows.findIndex(q=>q.id===r.id); if(i>=0) L.rows[i]=x.data; } }));
+  });
+  if(ups.length) await Promise.all(ups);
+  return true;
+}
+
+function scopeGaps(r,today){
+  const g=[]; if(!scopeActive(r)) return g;
+  const rk=scopeRank(r.status);
+  if(rk<SCOPE_RANK.ordered){
+    if(!r.vendor_id&&!r.vendor_note) g.push('no_vendor');
+    if(!r.required_on_site) g.push('no_date');
+    else if(r.order_by&&r.order_by<today) g.push('order_overdue');
+    else if(r.order_by&&r.order_by<=schedAddDays(today,7)) g.push('order_soon');
+  }
+  if(rk>=SCOPE_RANK.ordered&&rk<SCOPE_RANK.delivered&&!r.vendor_po_id&&!r.wo_id) g.push('no_po');
+  if(r.required_on_site&&r.required_on_site<today&&rk<SCOPE_RANK.delivered) g.push('site_late');
+  if(r.material_by==='lintel'&&r.material_status==='na'&&rk<SCOPE_RANK.delivered) g.push('material_plan');
+  return g;
+}
+const scopeGapsOf=(rows,today)=>{ const by={}; rows.forEach(r=>{ r._gaps=scopeGaps(r,today); r._gaps.forEach(k=>{ by[k]=(by[k]||0)+1; }); }); return by; };
+
+async function pwScope(p,body){
+  await ensureStaff();
+  if(isDesignPartner()){ body.innerHTML=`<div class="pw-card">${emptyState("Scope matrix is internal","Vendor and production tracking is visible to Lintel staff only.")}</div>`; return; }
+  body.innerHTML=`<div class="empty" style="padding:24px">Loading scope matrix…</div>`;
+  const L=await scopeLoad(p);
+  if(!L.ver){ body.innerHTML=`<div class="pw-card">${emptyState("No BOQ yet","The scope matrix is built from the project's contract BOQ. Build, price and lock the BOQ first.")}</div>`; return; }
+  if(canWrite()) await scopeSync(p,L);
+  scopeCache=L; scopeSel=new Set();
+  scopeRender(p,body);
+}
+
+function scopeRows(L){
+  const live={}; L.items.forEach(i=>live[i.id]=i);
+  return L.rows.filter(r=>live[r.boq_item_id]).map(r=>Object.assign(r,{line:live[r.boq_item_id]})).sort((a,b)=>(a.line.sort_idx||0)-(b.line.sort_idx||0));
+}
+function scopeStack(rows){
+  const c={}; rows.forEach(r=>{ c[r.status]=(c[r.status]||0)+1; });
+  const n=rows.length||1;
+  return `<div class="sm-bar" title="${SCOPE_STATUS.filter(s=>c[s[0]]).map(s=>s[1]+' '+c[s[0]]).join(' · ')}">${SCOPE_STATUS.filter(s=>c[s[0]]).map(s=>`<i style="width:${100*c[s[0]]/n}%;background:${SCOPE_COLOR[s[0]]}"></i>`).join('')}</div>`;
+}
+
+function scopeRender(p,body){
+  const L=scopeCache; if(!L) return;
+  const today=todayISO(), w=canWrite(), costs=canSeeOps(p);
+  const all=scopeRows(L); scopeGapsOf(all,today);
+  const active=all.filter(scopeActive);
+  const cnt=k=>active.filter(r=>scopeRank(r.status)>=SCOPE_RANK[k]).length;
+  const pct=k=>active.length?Math.round(100*cnt(k)/active.length):0;
+  const gapBy={}; all.forEach(r=>r._gaps.forEach(k=>{ gapBy[k]=(gapBy[k]||0)+1; }));
+  const gapTotal=all.filter(r=>r._gaps.length).length;
+  const late=all.filter(r=>r._gaps.includes('order_overdue')||r._gaps.includes('site_late')).length;
+  // filters
+  const q=normCat(scopeFilter.q);
+  const shown=all.filter(r=>{
+    if(scopeFilter.status&&r.status!==scopeFilter.status) return false;
+    if(scopeFilter.gap==='any'&&!r._gaps.length) return false;
+    if(scopeFilter.gap&&scopeFilter.gap!=='any'&&!r._gaps.includes(scopeFilter.gap)) return false;
+    if(q){ const hay=normCat([r.line.room,r.line.category,r.line.item_name,r.line.description,scopeVendorLabel(r,L),r.note,r.material_note].join(' ')); if(!hay.includes(q)) return false; }
+    return true;
+  });
+  // grouping
+  const groups={};
+  const keyFor=r=> scopeAxis==='vendor' ? (r.vendor_id?('v:'+r.vendor_id):(r.vendor_note?('x:'+normCat(r.vendor_note)):'_none'))
+                 : scopeAxis==='room' ? (r.line.room||r.line.room_tag||'—') : (r.package_code||'civil');
+  shown.forEach(r=>{ const k=keyFor(r); (groups[k]=groups[k]||[]).push(r); });
+  let order=Object.keys(groups);
+  if(scopeAxis==='package'){ const idx=c=>{ const i=PACKAGES.findIndex(x=>x.code===c); return i<0?99:i; }; order.sort((a,b)=>idx(a)-idx(b)); }
+  else if(scopeAxis==='vendor'){ order.sort((a,b)=>(a==='_none'?-1:b==='_none'?1:(groups[a][0]&&scopeVendorLabel(groups[a][0],L)||'').localeCompare(groups[b][0]&&scopeVendorLabel(groups[b][0],L)||''))); }
+  else order.sort();
+  const gLabel=k=> scopeAxis==='package' ? PKG_LABEL(k) : scopeAxis==='vendor' ? (k==='_none'?'Not assigned yet':scopeVendorLabel(groups[k][0],L)) : k;
+  const gColor=k=> scopeAxis==='package'&&PKG_BY_CODE[k] ? PKG_BY_CODE[k].color : 'var(--brass)';
+  const vendOpts=r=>`<option value="">— pick —</option>${L.vends.map(v=>`<option value="${v.id}" ${r.vendor_id===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}<option value="__other" ${(!r.vendor_id&&r.vendor_note)?'selected':''}>${(!r.vendor_id&&r.vendor_note)?esc(r.vendor_note):'✎ Other / in-house…'}</option>`;
+  const ownerOpts=r=>`<option value="">—</option>${Object.entries(PROFILE_NAMES).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}" ${r.owner_id===id?'selected':''}>${esc(n)}</option>`).join('')}`;
+  const poCell=r=>{
+    if(r.vendor_po_id){ const o=L.pos.find(x=>x.id===r.vendor_po_id); return `<button class="linkbtn mono" data-openpo="${r.vendor_po_id}" title="Open vendor PO">${esc(o?o.po_number:'PO #'+r.vendor_po_id)}</button>${o?`<div style="font-size:10px;color:var(--ink-soft)">${esc(String(o.status).replace(/_/g,' '))}</div>`:''}`; }
+    if(r.wo_id){ const o=L.wos.find(x=>x.id===r.wo_id); return `<button class="linkbtn mono" data-openwo="${r.wo_id}" title="Open work order">${esc(o?o.po_number:'WO #'+r.wo_id)}</button>`; }
+    return `<span style="color:var(--ink-soft)">—</span>`;
+  };
+  const rowHtml=r=>{
+    const it=r.line; const rk=scopeRank(r.status); const st=SCOPE_ST[r.status]||{label:r.status,cls:'todo'};
+    const lateCls=r._gaps.includes('order_overdue')||r._gaps.includes('site_late')?'sm-late':(r._gaps.length?'sm-gap':'');
+    const next=rk>=0&&rk<SCOPE_FLOW.length-1?SCOPE_FLOW[rk+1]:null;
+    const size=(it.width&&it.height)?`${Number(it.width)}×${Number(it.height)} ft`:'';
+    const orderOver=r.order_by&&r.order_by<today&&rk<SCOPE_RANK.ordered&&scopeActive(r);
+    const dis=w?'':'disabled';
+    return `<tr class="sm-row ${lateCls}" data-id="${r.id}">
+      <td>${w?`<input type="checkbox" class="sm-chk" data-id="${r.id}" ${scopeSel.has(r.id)?'checked':''}>`:''}</td>
+      <td style="font-size:11px;color:var(--ink-soft);white-space:nowrap">${esc(it.room||it.room_tag||'')}</td>
+      <td><div>${esc(it.item_name||it.description||'')}</div><div style="font-size:10px;color:var(--ink-soft)">${esc(it.category||'')}${scopeAxis!=='package'?` · ${esc(PKG_LABEL(r.package_code))}`:''}</div></td>
+      <td class="num mono" style="white-space:nowrap">${Number(it.qty)||0} <span style="font-family:Inter;font-size:10px;color:var(--ink-soft)">${esc(it.uom||'')}</span>${size?`<div style="font-size:10px;color:var(--ink-soft)">${size}</div>`:''}</td>
+      ${costs?`<td class="num mono" style="font-size:11px">${(Number(it.cost_rate)||0)?fmt(Math.round(Number(it.cost_rate)*Number(it.qty||0))):'<span style="color:var(--ink-soft)">—</span>'}</td>`:''}
+      <td><select class="sm-in" data-f="vendor" data-id="${r.id}" ${dis}>${vendOpts(r)}</select></td>
+      <td style="white-space:nowrap"><select class="sm-in" data-f="material_by" data-id="${r.id}" ${dis}>${Object.entries(SCOPE_MAT_BY).map(([k,v])=>`<option value="${k}" ${r.material_by===k?'selected':''}>${v}</option>`).join('')}</select>
+        ${r.material_by==='na'?'':`<select class="sm-in" data-f="material_status" data-id="${r.id}" ${dis} style="margin-top:2px">${Object.entries(SCOPE_MAT_ST).map(([k,v])=>`<option value="${k}" ${r.material_status===k?'selected':''}>${v}</option>`).join('')}</select>`}
+        <button class="linkbtn" data-matnote="${r.id}" title="${esc(r.material_note||'What exactly to buy / spec')}" style="font-size:11px">${r.material_note?'📝':'✎'}</button>${r.material_note?`<div style="font-size:10px;color:var(--ink-soft);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.material_note)}</div>`:''}</td>
+      <td><input type="date" class="sm-in" data-f="required_on_site" data-id="${r.id}" value="${r.required_on_site||''}" ${dis}></td>
+      <td style="white-space:nowrap;font-size:12px" class="${orderOver?'overdue':''}">${r.order_by?dShort(r.order_by):'—'} <button class="linkbtn" data-lead="${r.id}" title="Lead time: order this many days before it is needed on site" style="font-size:10px;color:var(--ink-soft)">−${r.lead_days}d</button></td>
+      <td style="white-space:nowrap"><select class="sm-in sm-st ${st.cls}" data-f="status" data-id="${r.id}" ${dis}>${SCOPE_STATUS.map(s=>`<option value="${s[0]}" ${r.status===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select>${(w&&next)?` <button class="linkbtn" data-next="${r.id}" data-to="${next}" title="Move to ${SCOPE_ST[next].label}">→</button>`:''}
+        ${r._gaps.length?`<div style="font-size:10px;color:${lateCls==='sm-late'?'var(--clay)':'#A9791E'}">${r._gaps.map(k=>SCOPE_GAP[k][0]).join(' · ')}</div>`:''}</td>
+      <td>${poCell(r)}</td>
+      <td><select class="sm-in" data-f="owner_id" data-id="${r.id}" ${dis}>${ownerOpts(r)}</select></td>
+      <td><input class="sm-in" data-f="note" data-id="${r.id}" value="${esc(r.note||'')}" placeholder="note" ${dis} style="width:120px"></td>
+    </tr>`;
+  };
+  const groupHtml=k=>{
+    const rows=groups[k]; const open=scopeOpen[scopeAxis+':'+k]!==false;
+    const budget=costs?rows.reduce((s,r)=>s+(Number(r.line.cost_rate)||0)*(Number(r.line.qty)||0),0):0;
+    const nextOrder=rows.filter(r=>scopeActive(r)&&scopeRank(r.status)<SCOPE_RANK.ordered&&r.order_by).map(r=>r.order_by).sort()[0];
+    const gaps=rows.filter(r=>r._gaps.length).length;
+    const toOrder=rows.filter(r=>scopeActive(r)&&scopeRank(r.status)<SCOPE_RANK.ordered);
+    const vendorsIn=[...new Set(rows.map(r=>scopeVendorLabel(r,L)).filter(Boolean))];
+    return `<tr class="sm-ghead" data-g="${esc(k)}"><td colspan="${costs?13:12}">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${gColor(k)}"></span>
+        <b style="font-size:14px">${esc(gLabel(k))}</b>
+        <span style="font-size:11px;color:var(--ink-soft)">${rows.length} line${rows.length===1?'':'s'}${budget?` · budget ${fmt(Math.round(budget))}`:''}${scopeAxis!=='vendor'&&vendorsIn.length?` · ${vendorsIn.slice(0,3).map(esc).join(', ')}${vendorsIn.length>3?' +'+(vendorsIn.length-3):''}`:''}</span>
+        <span style="flex:1;min-width:120px;max-width:260px">${scopeStack(rows)}</span>
+        ${nextOrder?`<span style="font-size:11px;color:${nextOrder<today?'var(--clay)':'var(--ink-soft)'}">next order by <b>${dShort(nextOrder)}</b></span>`:''}
+        ${gaps?`<span class="ex-st ${rows.some(r=>r._gaps.includes('order_overdue')||r._gaps.includes('site_late'))?'late':'in_progress'}">${gaps} gap${gaps===1?'':'s'}</span>`:'<span class="ex-st done">clean</span>'}
+        <span style="margin-left:auto;white-space:nowrap">${w?`<button class="linkbtn" data-selg="${esc(k)}">select all</button>${toOrder.length?` · <button class="linkbtn" data-pog="${esc(k)}" title="One vendor PO for every line in this group not yet ordered">Raise PO (${toOrder.length})</button>`:''}`:''} <span style="color:var(--ink-soft);font-size:11px">${open?'▾':'▸'}</span></span>
+      </div></td></tr>${open?rows.map(rowHtml).join(''):''}`;
+  };
+  const sel=[...scopeSel].filter(id=>all.some(r=>r.id===id)); scopeSel=new Set(sel);
+  body.innerHTML=`
+    <div class="wallet">
+      <div class="wcell"><div class="wl">Scope lines</div><div class="wv mono">${active.length}</div><div style="font-size:10px;color:var(--ink-soft)">${all.length-active.length?`${all.length-active.length} on hold / dropped · `:''}${esc(L.ver.version_label||('v'+L.ver.version))}${L.ver.locked_at?' · locked':''}</div></div>
+      <div class="wcell"><div class="wl">Ordered</div><div class="wv mono">${pct('ordered')}%</div><div style="font-size:10px;color:var(--ink-soft)">${cnt('ordered')} of ${active.length} lines</div></div>
+      <div class="wcell"><div class="wl">In production +</div><div class="wv mono">${cnt('in_production')}</div><div style="font-size:10px;color:var(--ink-soft)">${active.filter(r=>r.status==='in_production').length} at factory / vendor</div></div>
+      <div class="wcell"><div class="wl">On site</div><div class="wv mono">${cnt('delivered')}</div><div style="font-size:10px;color:var(--ink-soft)">${cnt('installed')} installed · ${cnt('done')} done</div></div>
+      <div class="wcell ${late?'wdue':(gapTotal?'':'wgood')}"><div class="wl">Gaps</div><div class="wv mono">${gapTotal}</div><div style="font-size:10px;color:var(--ink-soft)">${late?`${late} already late`:(gapTotal?'need a decision':'nothing missed')}</div></div>
+    </div>
+    <div style="margin:0 0 10px">${scopeStack(active)}<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--ink-soft);margin-top:4px">${SCOPE_FLOW.map(s=>`<span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SCOPE_COLOR[s]};margin-right:3px"></i>${SCOPE_ST[s].label}</span>`).join('')}</div></div>
+    ${!L.ver.locked_at?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>This BOQ is not locked yet</b> — the matrix is built from the latest draft (${esc(L.ver.version_label||('v'+L.ver.version))}). Lock the contract BOQ so production plans against the paid scope; lines carry their status over when the locked version matches.</div>`:''}
+    ${gapTotal?`<div class="pw-card" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em">What will be missed</span>
+      ${Object.keys(SCOPE_GAP).filter(k=>gapBy[k]).map(k=>`<button class="ex-st ${SCOPE_GAP[k][1]} sm-gapbtn ${scopeFilter.gap===k?'on':''}" data-gap="${k}" style="border:none;cursor:pointer">${gapBy[k]} · ${SCOPE_GAP[k][0]}</button>`).join('')}
+      ${scopeFilter.gap?`<button class="linkbtn" data-gap="">show all</button>`:''}</div></div>`:''}
+    <div class="gbar" style="flex-wrap:wrap;gap:8px">
+      <div class="gsub" style="display:inline-flex"><button data-axis="package" class="${scopeAxis==='package'?'on':''}">By package</button><button data-axis="vendor" class="${scopeAxis==='vendor'?'on':''}">By vendor</button><button data-axis="room" class="${scopeAxis==='room'?'on':''}">By room</button></div>
+      <select id="smStatus" class="sm-in"><option value="">All statuses</option>${SCOPE_STATUS.map(s=>`<option value="${s[0]}" ${scopeFilter.status===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select>
+      <input id="smQ" class="sm-in" placeholder="search item / room / vendor" value="${esc(scopeFilter.q)}" style="width:200px">
+      <div class="gact" style="margin-left:auto"><button class="ghost sm" id="smSync" title="Re-read the contract BOQ and vendor POs">↻ Sync</button><button class="ghost sm" id="smCsv">⬇ CSV</button><button class="ghost sm" id="smPrint">🖨 Purchase plan</button></div>
+    </div>
+    ${sel.length?`<div class="banner sm-bulk"><b>${sel.length} selected</b> → <button class="ghost sm" data-bulk="vendor">Vendor</button><button class="ghost sm" data-bulk="dates">Dates</button><button class="ghost sm" data-bulk="status">Status</button><button class="ghost sm" data-bulk="material">Material</button><button class="ghost sm" data-bulk="owner">Owner</button><button class="ghost sm" data-bulk="package">Package</button><button class="primary sm" data-bulk="po">Raise vendor PO</button><button class="ghost sm" data-bulk="wo">Raise work order</button><button class="linkbtn" data-bulk="clear">clear</button></div>`:''}
+    <div class="pw-card" style="padding:0;overflow:auto">
+      <table class="sm-tbl"><thead><tr><th style="width:24px"></th><th>Room</th><th>Item</th><th class="num">Qty</th>${costs?'<th class="num">Cost</th>':''}<th>Vendor / executor</th><th>Material</th><th>Needed on site</th><th>Order by</th><th>Status</th><th>PO / WO</th><th>Owner</th><th>Note</th></tr></thead>
+      <tbody>${order.length?order.map(groupHtml).join(''):`<tr><td colspan="${costs?13:12}" style="padding:16px;color:var(--ink-soft)">${all.length?'No lines match this filter.':'No included BOQ lines.'}</td></tr>`}</tbody></table>
+    </div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-top:8px">Needed-on-site defaults from the project schedule (room + trade); Order by = needed − lead days. Status moves forward automatically when a vendor PO is approved, in progress or delivered. Costs are internal and never printed on the purchase plan.</div>`;
+  scopeBind(p,body,all,groups);
+}
+
+function scopeBind(p,body,all,groups){
+  const L=scopeCache, w=canWrite();
+  const byId={}; all.forEach(r=>byId[r.id]=r);
+  body.querySelectorAll("[data-axis]").forEach(b=>b.onclick=()=>{ scopeAxis=b.dataset.axis; scopeRender(p,body); });
+  body.querySelectorAll("[data-gap]").forEach(b=>b.onclick=()=>{ scopeFilter.gap=(scopeFilter.gap===b.dataset.gap)?'':b.dataset.gap; scopeRender(p,body); });
+  $("#smStatus").onchange=e=>{ scopeFilter.status=e.target.value; scopeRender(p,body); };
+  let qt; $("#smQ").oninput=e=>{ clearTimeout(qt); qt=setTimeout(()=>{ scopeFilter.q=e.target.value; scopeRender(p,body); const i=$("#smQ"); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },250); };
+  $("#smSync").onclick=()=>pwScope(p,body);
+  $("#smCsv").onclick=()=>scopeCsv(p,all);
+  $("#smPrint").onclick=()=>scopePrint(p,all);
+  body.querySelectorAll(".sm-ghead").forEach(tr=>tr.onclick=e=>{ if(e.target.closest("button")) return; const k=scopeAxis+':'+tr.dataset.g; scopeOpen[k]=scopeOpen[k]===false; scopeRender(p,body); });
+  body.querySelectorAll("[data-openpo]").forEach(b=>b.onclick=()=>{ activeVPO=Number(b.dataset.openpo); projSubSel.finance='procurement'; drawProjectTab(p); });
+  body.querySelectorAll("[data-openwo]").forEach(b=>b.onclick=()=>{ activePO=Number(b.dataset.openwo); projSubSel.finance='orders'; drawProjectTab(p); });
+  if(!w) return;
+  body.querySelectorAll(".sm-chk").forEach(c=>c.onchange=()=>{ const id=Number(c.dataset.id); if(c.checked) scopeSel.add(id); else scopeSel.delete(id); scopeRender(p,body); });
+  body.querySelectorAll("[data-selg]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const rows=groups[b.dataset.selg]||[]; const allIn=rows.every(r=>scopeSel.has(r.id)); rows.forEach(r=>allIn?scopeSel.delete(r.id):scopeSel.add(r.id)); scopeRender(p,body); });
+  body.querySelectorAll("[data-pog]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const rows=(groups[b.dataset.pog]||[]).filter(r=>scopeActive(r)&&scopeRank(r.status)<SCOPE_RANK.ordered); scopeRaisePO(p,body,rows); });
+  body.querySelectorAll(".sm-in[data-f]").forEach(el=>el.onchange=async()=>{
+    const id=Number(el.dataset.id), f=el.dataset.f, r=byId[id]; if(!r) return;
+    let patch={};
+    if(f==='vendor'){
+      if(el.value==='__other'){ const t=prompt("Who executes this line? (vendor not in the registry, or in-house team)", r.vendor_note||''); if(t==null){ scopeRender(p,body); return; } patch={vendor_id:null,vendor_note:t.trim()||null}; }
+      else patch={vendor_id:el.value?Number(el.value):null,vendor_note:null};
+    } else if(f==='owner_id') patch={owner_id:el.value||null};
+    else if(f==='required_on_site') patch={required_on_site:el.value||null};
+    else if(f==='note') patch={note:el.value.trim()||null};
+    else if(f==='material_by'){ patch={material_by:el.value}; if(el.value==='na') patch.material_status='na'; else if(r.material_status==='na') patch.material_status='to_buy'; }
+    else patch[f]=el.value;
+    await scopeSet(p,body,[id],patch,null);
+  });
+  body.querySelectorAll("[data-next]").forEach(b=>b.onclick=()=>scopeSet(p,body,[Number(b.dataset.next)],{status:b.dataset.to},SCOPE_ST[b.dataset.to].label));
+  body.querySelectorAll("[data-lead]").forEach(b=>b.onclick=()=>{ const r=byId[Number(b.dataset.lead)]; const v=prompt("Lead time in days — order this many days before the line is needed on site", r.lead_days); if(v==null||isNaN(Number(v))) return; scopeSet(p,body,[r.id],{lead_days:Math.max(0,Math.round(Number(v)))},"Lead time updated"); });
+  body.querySelectorAll("[data-matnote]").forEach(b=>b.onclick=()=>{ const r=byId[Number(b.dataset.matnote)]; const v=prompt("Material to buy / spec for this line (brand, code, finish, thickness…)", r.material_note||''); if(v==null) return; scopeSet(p,body,[r.id],{material_note:v.trim()||null},null); });
+  body.querySelectorAll("[data-bulk]").forEach(b=>b.onclick=()=>scopeBulk(p,body,b.dataset.bulk,[...scopeSel].map(id=>byId[id]).filter(Boolean)));
+}
+
+async function scopeSet(p,body,ids,patch,label){
+  const {error}=await sb.from("scope_items").update(patch).in("id",ids);
+  if(error){ toast(error.message); scopeRender(p,body); return false; }
+  const {data:fresh}=await sb.from("scope_items").select("*").in("id",ids);
+  (fresh||[]).forEach(f=>{ const i=scopeCache.rows.findIndex(r=>r.id===f.id); if(i>=0) scopeCache.rows[i]=f; });
+  if(label) toast(label);
+  scopeRender(p,body); return true;
+}
+
+function scopeBulk(p,body,kind,rows){
+  const L=scopeCache; const ids=rows.map(r=>r.id);
+  if(kind==='clear'){ scopeSel=new Set(); scopeRender(p,body); return; }
+  if(!ids.length) return toast("Select some lines first");
+  if(kind==='po') return scopeRaisePO(p,body,rows);
+  if(kind==='wo') return scopeRaiseWO(p,body,rows);
+  const n=ids.length;
+  const H=t=>`<div class="modal-h">${t} · ${n} line${n===1?'':'s'}</div>`;
+  const F=`<div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="smb_go">Apply to ${n}</button></div>`;
+  let html='', getPatch=null;
+  if(kind==='vendor'){
+    html=H("Assign vendor / executor")+`<div class="modal-b"><div class="field"><label>Vendor</label><select id="smb_v"><option value="">— pick —</option>${L.vends.map(v=>`<option value="${v.id}">${esc(v.name)}${v.lead_time_days?` · ${v.lead_time_days}d lead`:''}</option>`).join('')}<option value="__other">Other / in-house…</option></select></div>
+      <div class="field"><label>Executor name <span style="font-weight:400;color:var(--ink-soft)">(only for Other / in-house)</span></label><input id="smb_vn" placeholder="e.g. Ravi · electrician"></div>
+      <label style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="smb_lead"> Also set lead time from the vendor's card</label>
+      <div class="hint">Vendors come from <b>Procurement → Vendors</b>. Add new ones there; pick "Other" for one-off executors.</div></div>`+F;
+    getPatch=()=>{ const v=$("#smb_v").value; if(v==='__other'){ const t=$("#smb_vn").value.trim(); if(!t) return toast("Name the executor"),null; return {vendor_id:null,vendor_note:t}; } if(!v) return toast("Pick a vendor"),null; const vend=L.vends.find(x=>x.id===Number(v)); const pt={vendor_id:Number(v),vendor_note:null}; if($("#smb_lead").checked&&vend&&vend.lead_time_days!=null) pt.lead_days=Number(vend.lead_time_days); return pt; };
+  } else if(kind==='dates'){
+    html=H("Set dates")+`<div class="modal-b"><div class="grid2"><div class="field"><label>Needed on site</label><input id="smb_d" type="date"></div><div class="field"><label>Lead time (days)</label><input id="smb_l" type="number" min="0" placeholder="leave blank to keep"></div></div>
+      <div class="hint">Order-by date = needed on site − lead time. Leave a field blank to keep each line's current value.</div></div>`+F;
+    getPatch=()=>{ const pt={}; if($("#smb_d").value) pt.required_on_site=$("#smb_d").value; if($("#smb_l").value!=='') pt.lead_days=Math.max(0,Math.round(Number($("#smb_l").value))); if(!Object.keys(pt).length) return toast("Nothing to change"),null; return pt; };
+  } else if(kind==='status'){
+    html=H("Set status")+`<div class="modal-b"><div class="field"><label>Status</label><select id="smb_s">${SCOPE_STATUS.map(s=>`<option value="${s[0]}">${s[1]}</option>`).join('')}</select></div><div class="hint">Every change is logged with who and when. Use <b>On hold</b> for client-paused lines and <b>Dropped</b> for lines removed from scope — both leave the gap checks.</div></div>`+F;
+    getPatch=()=>({status:$("#smb_s").value});
+  } else if(kind==='material'){
+    html=H("Material plan")+`<div class="modal-b"><div class="grid2"><div class="field"><label>Material sourced by</label><select id="smb_mb">${Object.entries(SCOPE_MAT_BY).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div><div class="field"><label>Material status</label><select id="smb_ms">${Object.entries(SCOPE_MAT_ST).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div></div>
+      <div class="field"><label>What to buy / spec <span style="font-weight:400;color:var(--ink-soft)">(optional, applied to all)</span></label><input id="smb_mn" placeholder="e.g. Century BWP 18mm · Merino 1234 SF laminate"></div></div>`+F;
+    getPatch=()=>{ const pt={material_by:$("#smb_mb").value,material_status:$("#smb_ms").value}; if(pt.material_by==='na') pt.material_status='na'; const mn=$("#smb_mn").value.trim(); if(mn) pt.material_note=mn; return pt; };
+  } else if(kind==='owner'){
+    html=H("Set owner")+`<div class="modal-b"><div class="field"><label>Owner (who chases this)</label><select id="smb_o"><option value="">— none —</option>${Object.entries(PROFILE_NAMES).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,nm])=>`<option value="${id}">${esc(nm)}</option>`).join('')}</select></div></div>`+F;
+    getPatch=()=>({owner_id:$("#smb_o").value||null});
+  } else if(kind==='package'){
+    html=H("Move to another package")+`<div class="modal-b"><div class="field"><label>Trade package</label><select id="smb_p">${PACKAGES.map(x=>`<option value="${x.code}">${esc(x.label)}</option>`).join('')}</select></div><div class="hint">Use this when the auto-classification put a line in the wrong trade (e.g. a stone ledge under Modular).</div></div>`+F;
+    getPatch=()=>({package_code:$("#smb_p").value});
+  } else return;
+  openModal(html);
+  $("#smb_go").onclick=async()=>{ const pt=getPatch(); if(!pt) return; const btn=$("#smb_go"); btn.disabled=true; closeModal(); const ok=await scopeSet(p,body,ids,pt,`${n} line${n===1?'':'s'} updated`); if(ok){ scopeSel=new Set(); scopeRender(p,body); } };
+}
+
+async function scopeRaisePO(p,body,rows){
+  rows=(rows||[]).filter(r=>scopeActive(r)); if(!rows.length) return toast("No active lines selected");
+  const cnt={}; rows.forEach(r=>{ const dv=divOfPackage(r.package_code); cnt[dv]=(cnt[dv]||0)+1; });
+  const div=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||'onsite';
+  const vids=[...new Set(rows.map(r=>r.vendor_id).filter(Boolean))];
+  const label=rows.length+' scope line'+(rows.length===1?'':'s');
+  newVendorPO(p,body,div,scopeCache.ver,{ids:rows.map(r=>r.boq_item_id),label,vendor_id:vids.length===1?vids[0]:null,onDone:async po=>{
+    const patch={vendor_po_id:po.id}; if(po.vendor_id) patch.vendor_id=po.vendor_id;
+    await sb.from("scope_items").update(patch).in("id",rows.map(r=>r.id));
+    toast(`${po.po_number} created as draft · ${rows.length} line${rows.length===1?'':'s'} linked. Approve it under Procurement to move them to Ordered.`,4000);
+    scopeSel=new Set(); pwScope(p,body);
+  }});
+}
+async function scopeRaiseWO(p,body,rows){
+  rows=(rows||[]).filter(r=>scopeActive(r)); if(!rows.length) return toast("No active lines selected");
+  generatePOs(p,body,{ids:rows.map(r=>r.boq_item_id),onDone:async created=>{
+    const byCat={}; (created||[]).forEach(c=>{ byCat[normCat(c.category)]=c.id; });
+    await Promise.all(rows.map(r=>{ const wid=byCat[normCat(r.line.category||'Uncategorised')]; return wid?sb.from("scope_items").update({wo_id:wid}).eq("id",r.id):Promise.resolve(); }));
+    scopeSel=new Set(); pwScope(p,body);
+  }});
+}
+
+function scopeCsv(p,rows){
+  const L=scopeCache, costs=canSeeOps(p);
+  const c=v=>{ v=String(v??''); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const head=['Package','Room','Category','Item','Qty','Unit','Width ft','Height ft'].concat(costs?['Cost ₹']:[]).concat(['Vendor / executor','Material by','Material status','Material note','Needed on site','Lead days','Order by','Status','PO / WO','Owner','Note','Gaps','Status changed']);
+  const lines=[head.map(c).join(',')];
+  rows.forEach(r=>{ const it=r.line; const po=r.vendor_po_id?(L.pos.find(x=>x.id===r.vendor_po_id)||{}).po_number:(r.wo_id?(L.wos.find(x=>x.id===r.wo_id)||{}).po_number:'');
+    const row=[PKG_LABEL(r.package_code),it.room||it.room_tag||'',it.category||'',it.item_name||it.description||'',Number(it.qty)||0,it.uom||'',it.width||'',it.height||''].concat(costs?[Math.round((Number(it.cost_rate)||0)*(Number(it.qty)||0))]:[])
+      .concat([scopeVendorLabel(r,L),SCOPE_MAT_BY[r.material_by]||r.material_by,SCOPE_MAT_ST[r.material_status]||r.material_status,r.material_note||'',r.required_on_site||'',r.lead_days,r.order_by||'',(SCOPE_ST[r.status]||{}).label||r.status,po||'',PROFILE_NAMES[r.owner_id]||'',r.note||'',(r._gaps||[]).map(k=>SCOPE_GAP[k][0]).join('; '),r.status_updated_at?String(r.status_updated_at).slice(0,10):'']);
+    lines.push(row.map(c).join(',')); });
+  const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,﻿'+encodeURIComponent(lines.join('\n'));
+  a.download='Lintel_ScopeMatrix_'+String(p.code||p.name||'Project').replace(/\s+/g,'_')+'.csv'; a.click();
+}
+
+/* Vendor-facing purchase & production plan: grouped by vendor (or by package when no
+   vendor is set), quantities, sizes, material notes and dates. No rates, no costs. */
+function scopePrint(p,rows){
+  const L=scopeCache; const act=rows.filter(scopeActive);
+  const groups={}; act.forEach(r=>{ const k=scopeVendorLabel(r,L)||('Unassigned · '+PKG_LABEL(r.package_code)); (groups[k]=groups[k]||[]).push(r); });
+  const keys=Object.keys(groups).sort((a,b)=>a.startsWith('Unassigned')-b.startsWith('Unassigned')||a.localeCompare(b));
+  const td='padding:5px 7px;border-bottom:1px solid #ddd;font-size:11.5px;vertical-align:top';
+  const doc=`<div style="font-family:Inter,Arial,sans-serif;color:#1C1A17;padding:28px 32px;max-width:1000px;margin:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0D0D27;padding-bottom:10px;margin-bottom:14px">
+      <div><div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#565571">Lintel Space Atelier · Purchase &amp; production plan</div>
+        <div style="font-size:20px;font-weight:700;margin-top:4px">${esc(p.code||'')} · ${esc(p.name||'')}</div>
+        <div style="font-size:12px;color:#565571">${esc(p.client_name||'')}${p.site_address?' · '+esc(p.site_address):''}</div></div>
+      <div style="text-align:right;font-size:11px;color:#565571">BOQ ${esc(L.ver.version_label||('v'+L.ver.version))}<br>Printed ${new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}<br>${act.length} lines</div></div>
+    ${keys.map(k=>{ const rs=groups[k]; const nextOrder=rs.filter(r=>scopeRank(r.status)<SCOPE_RANK.ordered&&r.order_by).map(r=>r.order_by).sort()[0];
+      return `<div style="page-break-inside:avoid;margin-bottom:18px"><div style="display:flex;justify-content:space-between;background:#F7F4EE;padding:6px 8px;border-left:4px solid #D7A758;margin-bottom:4px"><b style="font-size:13px">${esc(k)}</b><span style="font-size:11px;color:#565571">${rs.length} line${rs.length===1?'':'s'}${nextOrder?' · first order by '+dShort(nextOrder):''}</span></div>
+      <table style="width:100%;border-collapse:collapse"><thead><tr style="text-align:left;font-size:10.5px;color:#565571;text-transform:uppercase;letter-spacing:.05em"><th style="${td}">#</th><th style="${td}">Room</th><th style="${td}">Item</th><th style="${td}">Package</th><th style="${td};text-align:right">Qty</th><th style="${td}">Size</th><th style="${td}">Material</th><th style="${td}">Needed on site</th><th style="${td}">Order by</th><th style="${td}">Status</th></tr></thead><tbody>
+      ${rs.map((r,i)=>{ const it=r.line; return `<tr><td style="${td}">${i+1}</td><td style="${td}">${esc(it.room||it.room_tag||'')}</td><td style="${td}"><b>${esc(it.item_name||it.description||'')}</b><div style="color:#565571;font-size:10.5px">${esc(it.category||'')}</div>${r.note?`<div style="font-size:10.5px">${esc(r.note)}</div>`:''}</td><td style="${td}">${esc(PKG_LABEL(r.package_code))}</td><td style="${td};text-align:right;white-space:nowrap">${Number(it.qty)||0} ${esc(it.uom||'')}</td><td style="${td}">${(it.width&&it.height)?`${Number(it.width)}×${Number(it.height)} ft`:''}</td><td style="${td}">${esc(SCOPE_MAT_BY[r.material_by]||'')}${r.material_note?`<div style="font-size:10.5px;color:#565571">${esc(r.material_note)}</div>`:''}</td><td style="${td}">${r.required_on_site?dShort(r.required_on_site):'—'}</td><td style="${td}">${r.order_by?dShort(r.order_by):'—'}</td><td style="${td}">${esc((SCOPE_ST[r.status]||{}).label||r.status)}</td></tr>`; }).join('')}
+      </tbody></table></div>`; }).join('')}
+    <div style="font-size:10px;color:#565571;margin-top:12px">Internal planning document. Quantities are from the contract BOQ; confirm site measurements before production.</div></div>`;
+  const wnd=window.open("","_blank"); if(!wnd) return toast("Allow pop-ups to print");
+  wnd.document.write(`<html><head><meta charset="utf-8"><title>Purchase plan · ${esc(p.code||p.name||'')}</title><style>@page{size:A4 landscape;margin:12mm}</style></head><body style="margin:0">${doc}</body></html>`);
+  wnd.document.close(); setTimeout(()=>wnd.print(),400);
 }
 
 /* ---- Direct expense quick-add (non-PO spend). One-ledger rule: if it belongs to a
@@ -11587,6 +12012,13 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b98",date:"8 Oct 2026",title:"Scope Matrix — one sheet from paid BOQ to installed",points:[
+    "Open a project → <b>Finance → Scope Matrix</b>. Every included line of the contract (locked) BOQ is already there, clubbed by trade — civil, electrical, plumbing, tiling, stone, ceiling, painting, onsite carpentry, modular/KWS, décor, furniture. Switch to <b>By vendor</b> or <b>By room</b> with the toggle. Nothing to set up: the sheet syncs itself from the BOQ each time you open it.",
+    "Plan procurement in one shot: tick lines (or press <b>select all</b> on a package), then <b>Vendor</b>, <b>Dates</b>, <b>Material</b>, <b>Owner</b> — or <b>Raise vendor PO</b> to turn the selection into one PO with every line attached. <b>Raise PO</b> on a package header does the same for everything in that trade not yet ordered.",
+    "Track production line by line: the <b>Status</b> column runs Pending → Drawings ready → Ordered → In production → Ready → On site → Installed → Done. Press <b>→</b> to move a line one step. Approving, sending or delivering a vendor PO moves its lines forward on its own.",
+    "<b>Needed on site</b> fills from the project schedule (room + trade) and <b>Order by</b> = needed − lead time (press the <b>−Nd</b> to change the lead time). The <b>What will be missed</b> strip lists every line whose order date has passed, that is needed on site but not delivered, has no vendor decided, no date, or is ordered without a PO — click a reason to see only those lines.",
+    "<b>⬇ CSV</b> exports the whole matrix; <b>🖨 Purchase plan</b> prints a vendor-wise sheet with quantities, sizes, material notes and dates — no rates or costs on it.",
+  ]},
   {build:"b87",date:"25 Sep 2026",title:"2D CAD drawings from a 3D model",points:[
     "Open a project → <b>Studio → Design → Files</b> and press <b>3D → 2D drawing</b>. Drop the model exported from 3ds Max or SketchUp (OBJ, DAE, FBX, glTF, STL, PLY) — or pick one already uploaded to that project — drag the cut height, and you get a layered <b>DXF</b> with the floor plan (true section), front and side elevations and a top view, plus an SVG. Press <b>Save to project</b> and they land back in this Files list, ready to share to the client or send for approval.",
     "Native <b>.max</b> and <b>.skp</b> files cannot be read outside their own apps — drop one and the page shows the exact export steps to use instead. If the model appears lying on its side, switch the <b>Up axis</b>.",
@@ -13545,7 +13977,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b97 · 5 Oct 2026";
+const APP_BUILD = "b98 · 8 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
