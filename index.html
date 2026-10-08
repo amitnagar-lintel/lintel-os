@@ -409,6 +409,7 @@
   .sm-row.sm-late td:first-child{box-shadow:inset 3px 0 var(--clay)} .sm-row.sm-gap td:first-child{box-shadow:inset 3px 0 #D4B06A}
   .sm-ghead td{background:var(--paper-2);padding:8px 10px;cursor:pointer;border-top:1px solid var(--line)}
   .sm-bar{display:flex;height:8px;border-radius:8px;overflow:hidden;background:var(--line-2)} .sm-bar i{display:block;height:100%}
+  .pr-row{cursor:pointer} .pr-row:hover td{background:var(--paper-2)} .pr-row td[data-rgo]{cursor:pointer;text-decoration:underline dotted}
   .sm-bulk{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .sm-gapbtn.on{outline:2px solid var(--navy)}
   /* overview command center */
@@ -2034,6 +2035,10 @@ async function renderDashboard(){
       <div class="sec-label">Collections <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— money received from clients, by month</span></div>
       <div id="dashCollectionsBody">${skel(2,120)}</div>
     </section>`:""}
+    ${isAdminLevel()?`<section class="pw-card" id="dashRadar" style="margin-bottom:14px">
+      <div class="sec-label">Production radar <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— every active project's Scope Matrix: lines late, to order this week, no vendor</span></div>
+      <div id="dashRadarBody">${skel(2,120)}</div>
+    </section>`:""}
     ${isAdminLevel()?`<section class="pw-card" id="dashRoi" style="margin-bottom:14px">
       <div class="sec-label">Source ROI <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— this financial year · won value ex-GST · spend from the weekly campaign entry</span></div>
       <div id="dashRoiBody">${skel(3,40)}</div>
@@ -2093,6 +2098,7 @@ async function renderDashboard(){
   renderMonthlySales();
   if(isAdminLevel()) renderSourceRoi();
   if(isAdminLevel()) renderCollections();
+  if(isAdminLevel()){ radarCache=null; renderProductionRadar(); }
   if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
@@ -2396,6 +2402,101 @@ async function collectionsAllModal(){
     const lines=[head.join(",")].concat(rows.map(o=>[o.code||o.name,o.client_name||"",o.consultant||"",o.status||"",o.contract,o.collected,o.due,o.last_paid||""].map(x=>`"${String(x==null?"":x).replace(/"/g,'""')}"`).join(",")));
     const blob=new Blob([lines.join("\n")],{type:"text/csv"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="collections.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
   };
+}
+/* SCOPE-02: Production radar — every active project's Scope Matrix on one founder card
+   (admin / sales_head, same gate as Collections). Reads scope_items across projects and
+   reuses scopeGaps() so the counts agree line-for-line with each project's "what will be
+   missed" strip. Projects with a locked BOQ whose matrix has never been opened are listed
+   too — a paid BOQ nobody has planned is itself the first thing that gets missed.
+   Views: by project (late ↓) · by owner (owner_id → PROFILE_NAMES, you first). */
+let radarView='project', radarCache=null;
+const radarOpen=(pid,gap)=>{
+  scopeFilter={status:'',gap:gap||'',q:''};
+  activeProject=Number(pid); projectTab="finance"; try{projSubSel.finance="scope";}catch(_){}
+  activeLead=null; render("projects");
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active",x.dataset.view==="projects"));
+  setTimeout(()=>renderProjectWorkspace(activeProject),60);
+};
+async function radarLoad(){
+  if(!Object.keys(PROFILE_NAMES).length){ try{ await loadProfileNames(); }catch(_){} }
+  const {data:projs,error:pe}=await sb.from("projects").select("id,code,name,client_name,status,pm_id").eq("status","active").order("code");
+  if(pe) throw pe;
+  const ids=(projs||[]).map(p=>p.id); if(!ids.length) return {projs:[],rows:[],locked:new Set()};
+  // scope_items can exceed the 1 000-row page: pull active projects' rows page by page
+  let rows=[];
+  for(let from=0;;from+=1000){
+    const {data,error}=await sb.from("scope_items")
+      .select("id,project_id,package_code,status,vendor_id,vendor_note,vendor_po_id,wo_id,required_on_site,lead_days,order_by,owner_id,material_by,material_status")
+      .in("project_id",ids).order("id").range(from,from+999);
+    if(error) throw error;
+    rows=rows.concat(data||[]); if(!data||data.length<1000) break;
+  }
+  const {data:lv}=await sb.from("boq_versions").select("project_id").in("project_id",ids).not("locked_at","is",null);
+  return {projs:projs||[],rows,locked:new Set((lv||[]).map(v=>v.project_id))};
+}
+async function renderProductionRadar(){
+  const host=$("#dashRadarBody"); if(!host) return;
+  if(!isAdminLevel()){ host.innerHTML=""; return; }
+  if(!radarCache){ try{ radarCache=await radarLoad(); }catch(e){ host.innerHTML=`<div class="empty" style="padding:10px 0">Couldn't load the production radar.</div>`; return; } }
+  const {projs,rows,locked}=radarCache; const today=todayISO();
+  if(!projs.length){ host.innerHTML=`<div class="empty" style="padding:10px 0">No active projects.</div>`; return; }
+  const projById={}; projs.forEach(p=>projById[p.id]=p);
+  const mk=()=>({rows:[],late:0,soon:0,novendor:0,gaps:0,next:null});
+  const tally=(o,r)=>{ o.rows.push(r); const g=r._gaps;
+    if(g.includes('order_overdue')||g.includes('site_late')) o.late++;
+    if(g.includes('order_soon')) o.soon++;
+    if(g.includes('no_vendor')) o.novendor++;
+    if(g.length) o.gaps++;
+    if(scopeActive(r)&&scopeRank(r.status)<SCOPE_RANK.ordered&&r.order_by&&r.order_by>=today&&(!o.next||r.order_by<o.next)) o.next=r.order_by; };
+  const byProj={}, byOwner={};
+  rows.forEach(r=>{ if(!projById[r.project_id]) return; r._gaps=scopeGaps(r,today);
+    tally(byProj[r.project_id]=byProj[r.project_id]||mk(),r);
+    const ok=r.owner_id||''; const ow=byOwner[ok]=byOwner[ok]||Object.assign(mk(),{projs:{}});
+    tally(ow,r); tally(ow.projs[r.project_id]=ow.projs[r.project_id]||mk(),r); });
+  const planned=Object.keys(byProj).map(id=>Object.assign({p:projById[id]},byProj[id]));
+  const unplanned=projs.filter(p=>!byProj[p.id]&&locked.has(p.id));
+  const tot=planned.reduce((a,o)=>({late:a.late+o.late,soon:a.soon+o.soon,novendor:a.novendor+o.novendor,lines:a.lines+o.rows.filter(scopeActive).length}),{late:0,soon:0,novendor:0,lines:0});
+  const sortFn=(a,b)=>(b.late-a.late)||(b.soon-a.soon)||(b.novendor-a.novendor)||String((a.p||{}).code||"").localeCompare(String((b.p||{}).code||""));
+  planned.sort(sortFn);
+  const ownerName=uid=>!uid?"Unassigned":(me&&uid===me.id?((PROFILE_NAMES[uid]||staffNameByProfile(uid)||"You")+" (you)"):(PROFILE_NAMES[uid]||staffNameByProfile(uid)||"Owner"));
+  const num=(v,color,pid,gap)=>`<td class="num" style="padding:6px 8px;font-weight:${v?700:400};color:${v?color:'var(--ink-soft)'}"${pid&&v?` data-rgo="${pid}" data-rgap="${gap}" title="Open these lines"`:""}>${v||"—"}</td>`;
+  const barCell=o=>{ const act=o.rows.filter(scopeActive); const done=act.filter(r=>scopeRank(r.status)>=SCOPE_RANK.installed).length; const pct=act.length?Math.round(100*done/act.length):0;
+    return `<td style="padding:6px 8px;min-width:140px"><div style="display:flex;align-items:center;gap:8px"><span style="flex:1;min-width:90px">${scopeStack(act)}</span><span style="font-size:11px;color:var(--ink-soft);flex:0 0 34px;text-align:right" title="installed or done">${pct}%</span></div></td>`; };
+  const projCell=(p,sub)=>`<td style="padding:6px 8px"><b>${esc(p.code||p.name||("#"+p.id))}</b>${p.code&&p.name?`<br><span style="color:var(--ink-soft);font-size:11px">${esc(p.name)}${sub?" · "+esc(sub):""}</span>`:(sub?`<br><span style="color:var(--ink-soft);font-size:11px">${esc(sub)}</span>`:"")}</td>`;
+  const head=`<thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">${radarView==='owner'?"Owner / project":"Project"}</th><th class="num" style="padding:5px 8px" title="Included lines of the contract BOQ (not on hold / dropped)">Lines</th><th class="num" style="padding:5px 8px" title="Order date passed and not ordered, or needed on site and not delivered">Late</th><th class="num" style="padding:5px 8px" title="Must be ordered within 7 days">Order ≤7d</th><th class="num" style="padding:5px 8px" title="No vendor / executor decided">No vendor</th><th style="padding:5px 8px">Status</th><th style="padding:5px 8px" title="Next order-by date still ahead">Next order</th></tr></thead>`;
+  const projRow=(o,indent,sub)=>`<tr class="pr-row" style="border-top:1px solid var(--line-2)" data-rgo="${o.p.id}">
+      ${indent?`<td style="padding:6px 8px 6px 24px">${esc(o.p.code||o.p.name||("#"+o.p.id))}${o.p.name&&o.p.code?` <span style="color:var(--ink-soft);font-size:11px">${esc(o.p.name)}</span>`:""}</td>`:projCell(o.p,sub)}
+      <td class="num" style="padding:6px 8px">${o.rows.filter(scopeActive).length}</td>
+      ${num(o.late,'#B4453A',o.p.id,'late')}${num(o.soon,'#B98A42',o.p.id,'order_soon')}${num(o.novendor,'#B98A42',o.p.id,'no_vendor')}
+      ${barCell(o)}<td style="padding:6px 8px;white-space:nowrap;color:var(--ink-soft)">${o.next?dShort(o.next):"—"}</td></tr>`;
+  let table="";
+  if(radarView==='owner'){
+    const owners=Object.keys(byOwner).map(k=>Object.assign({uid:k},byOwner[k]));
+    owners.sort((a,b)=>(me&&b.uid===me.id)-(me&&a.uid===me.id)||(b.late-a.late)||(b.soon-a.soon)||(!a.uid)-(!b.uid)||ownerName(a.uid).localeCompare(ownerName(b.uid)));
+    table=owners.map(ow=>{ const ps=Object.keys(ow.projs).map(id=>Object.assign({p:projById[id]},ow.projs[id])).sort(sortFn);
+      return `<tr style="border-top:2px solid var(--line-2);background:var(--paper-2)"><td style="padding:7px 8px;font-weight:700">${esc(ownerName(ow.uid))} <span style="color:var(--ink-soft);font-weight:400;font-size:11px">· ${ps.length} project${ps.length===1?"":"s"}</span></td>
+        <td class="num" style="padding:7px 8px;font-weight:700">${ow.rows.filter(scopeActive).length}</td>${num(ow.late,'#B4453A')}${num(ow.soon,'#B98A42')}${num(ow.novendor,'#B98A42')}${barCell(ow)}<td style="padding:7px 8px;white-space:nowrap;color:var(--ink-soft)">${ow.next?dShort(ow.next):"—"}</td></tr>`+ps.map(o=>projRow(o,true)).join(""); }).join("");
+  } else table=planned.map(o=>projRow(o,false,o.p.pm_id?"PM "+staffName(o.p.pm_id):"")).join("");
+  const tile=(label,val,color,title)=>`<div class="kpi" style="--kc:${color};cursor:default" title="${esc(title||"")}"><div class="kpi-val">${val}</div><div class="kpi-lbl">${esc(label)}</div></div>`;
+  host.innerHTML=`
+   <div class="dash-kpis" style="margin:0 0 12px">
+     ${tile("Lines late",tot.late,"#B4453A","Order date passed and not ordered, or needed on site and not delivered — across all active projects")}
+     ${tile("To order · 7 days",tot.soon,"#B98A42","Lines whose order-by date falls within the next 7 days")}
+     ${tile("No vendor",tot.novendor,"#B98A42","Lines not yet ordered with no vendor or executor decided")}
+     ${tile("Not planned",unplanned.length,unplanned.length?"#B4453A":"#4f7d52","Active projects with a locked BOQ whose Scope Matrix has never been opened")}
+   </div>
+   ${planned.length?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 2px 8px;flex-wrap:wrap">
+     <div class="viewtoggle" id="radarTabs"><button data-k="project" class="${radarView==='project'?'on':''}">By project</button><button data-k="owner" class="${radarView==='owner'?'on':''}">By owner</button></div>
+     <span style="font-size:11.5px;color:var(--ink-soft)">${planned.length} project${planned.length===1?"":"s"} · ${tot.lines} lines in production</span></div>
+   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px">${head}<tbody>${table}</tbody></table></div>`
+   :`<div class="empty" style="padding:10px 0">No project has a Scope Matrix yet. Open a project → <b>Finance → Scope Matrix</b> once and its lines appear here.</div>`}
+   ${unplanned.length?`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:14px 2px 6px">Not planned yet <span style="font-weight:400;text-transform:none;letter-spacing:0">— locked BOQ, Scope Matrix never opened. Click to plan.</span></div>
+   <div style="display:flex;flex-wrap:wrap;gap:6px">${unplanned.map(p=>`<button class="chip" data-rgo="${p.id}" title="${esc(p.name||"")}">${esc(p.code||p.name||("#"+p.id))}${p.pm_id&&staffName(p.pm_id)?` <span style="color:var(--ink-soft)">· ${esc(staffName(p.pm_id))}</span>`:""}</button>`).join("")}</div>`:""}
+   <div class="s2l-hint" style="margin-top:8px">Counts come from each project's Scope Matrix as last synced (it re-syncs from the contract BOQ every time it is opened). Click a project to open its matrix; click a red or amber number to open it filtered to those lines.</div>`;
+  host.querySelectorAll("#radarTabs button").forEach(b=>b.onclick=()=>{ radarView=b.dataset.k; renderProductionRadar(); });
+  host.querySelectorAll("td[data-rgo]").forEach(td=>td.onclick=e=>{ e.stopPropagation(); const pid=Number(td.dataset.rgo); const o=byProj[pid]||mk();
+    const gap=td.dataset.rgap==='late'?(o.rows.some(r=>r._gaps.includes('order_overdue'))?'order_overdue':'site_late'):td.dataset.rgap; radarOpen(pid,gap); });
+  host.querySelectorAll("tr[data-rgo],button[data-rgo]").forEach(el=>el.onclick=()=>radarOpen(Number(el.dataset.rgo),''));
 }
 /* SCORE-01: Consultant Scorecard league table (weights 25/15/25/15/10/10). Same numbers everyone sees on Monday. */
 const SC_DIMS=[["speed","Speed",25],["persistence","Persist",15],["progression","Progress",25],["hygiene","Hygiene",15],["truth","Truth",10],["voice","Client",10]];
@@ -12012,6 +12113,11 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b99",date:"8 Oct 2026",title:"Production radar — every project's late lines on one card",points:[
+    "Admin / Sales Head: the Dashboard now has a <b>Production radar</b> card under Collections. It reads every active project's Scope Matrix and shows, per project, <b>lines late</b> (order date passed and not ordered, or needed on site and not delivered), <b>to order within 7 days</b>, <b>no vendor decided</b>, a status bar and the next order-by date — worst project first. Click a project to land on its Scope Matrix; click a red or amber number to open it already filtered to those lines.",
+    "Switch to <b>By owner</b> to see the same lines grouped by the person who owns them (you float to the top), so each coordinator's overdue list is one glance away.",
+    "<b>Not planned yet</b> lists active projects whose BOQ is locked but whose Scope Matrix has never been opened — a paid BOQ nobody has planned is the first thing that gets missed. Click one to open and plan it.",
+  ]},
   {build:"b98",date:"8 Oct 2026",title:"Scope Matrix — one sheet from paid BOQ to installed",points:[
     "Open a project → <b>Finance → Scope Matrix</b>. Every included line of the contract (locked) BOQ is already there, clubbed by trade — civil, electrical, plumbing, tiling, stone, ceiling, painting, onsite carpentry, modular/KWS, décor, furniture. Switch to <b>By vendor</b> or <b>By room</b> with the toggle. Nothing to set up: the sheet syncs itself from the BOQ each time you open it.",
     "Plan procurement in one shot: tick lines (or press <b>select all</b> on a package), then <b>Vendor</b>, <b>Dates</b>, <b>Material</b>, <b>Owner</b> — or <b>Raise vendor PO</b> to turn the selection into one PO with every line attached. <b>Raise PO</b> on a package header does the same for everything in that trade not yet ordered.",
@@ -13977,7 +14083,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b98 · 8 Oct 2026";
+const APP_BUILD = "b99 · 8 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
