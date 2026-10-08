@@ -2431,8 +2431,9 @@ async function radarLoad(){
     if(error) throw error;
     rows=rows.concat(data||[]); if(!data||data.length<1000) break;
   }
-  const {data:lv}=await sb.from("boq_versions").select("project_id").in("project_id",ids).not("locked_at","is",null);
-  return {projs:projs||[],rows,locked:new Set((lv||[]).map(v=>v.project_id))};
+  // SCOPE-03: a project "has a contract BOQ" when its default scope version is locked AND has lines
+  const {data:lv}=await sb.from("v_scope_boq_versions").select("project_id,lines,locked_at").in("project_id",ids).eq("is_default",true);
+  return {projs:projs||[],rows,locked:new Set((lv||[]).filter(v=>v.locked_at&&v.lines>0).map(v=>v.project_id))};
 }
 async function renderProductionRadar(){
   const host=$("#dashRadarBody"); if(!host) return;
@@ -7702,10 +7703,11 @@ function scopeRequiredDefault(line,pkgCode,tasks){
 async function scopeLoad(p){
   await schedLoadMaster(); await ensureStaff();
   if(!Object.keys(PROFILE_NAMES).length){ try{ await loadProfileNames(); }catch(e){} }
-  // contract BOQ = the most recently LOCKED version; falls back to the latest draft (flagged in the UI)
-  const {data:vers}=await sb.from("boq_versions").select("id,version,version_label,locked_at,total")
-    .eq("project_id",p.id).order("locked_at",{ascending:false,nullsFirst:false}).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
-  const ver=(vers||[])[0]||null; if(!ver) return {ver:null};
+  // SCOPE-03: every version with its included-line count. The view ranks the contract BOQ as
+  // is_default — pinned (projects.scope_boq_version_id) → highest LOCKED version that has lines
+  // → highest version with lines. "Most recently locked" was wrong: stray 0–1 line locked versions.
+  const {data:vers}=await sb.from("v_scope_boq_versions").select("*").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false});
+  const list=vers||[]; const ver=list.find(v=>v.is_default)||list[0]||null; if(!ver) return {ver:null,vers:[]};
   const [{data:its},{data:rows},{data:vends},{data:pos},{data:sch},{data:wos}]=await Promise.all([
     sb.from("boq_items").select("id,room,room_tag,category,item_name,description,uom,qty,rate,cost_rate,stream,scope,width,height,sort_idx").eq("boq_version_id",ver.id).order("sort_idx"),
     sb.from("scope_items").select("*").eq("project_id",p.id),
@@ -7717,7 +7719,7 @@ async function scopeLoad(p){
   let tasks=[]; if(sch&&sch.length){ const {data:t}=await sb.from("schedule_task").select("room,trade_code,kind,task_name,planned_start,planned_finish").eq("schedule_id",sch[0].id); tasks=t||[]; }
   let poItems=[]; const poIds=(pos||[]).map(o=>o.id);
   if(poIds.length){ const {data:pi}=await sb.from("vendor_po_items").select("po_id,boq_item_id").in("po_id",poIds); poItems=pi||[]; }
-  return {ver,items:(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional'),rows:rows||[],vends:vends||[],pos:pos||[],poItems,wos:wos||[],tasks};
+  return {ver,vers:list,items:(its||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional'),rows:rows||[],vends:vends||[],pos:pos||[],poItems,wos:wos||[],tasks};
 }
 
 /* Bring scope_items in line with the contract BOQ: add rows for new lines (carrying status,
@@ -7895,6 +7897,7 @@ function scopeRender(p,body){
     </div>
     <div style="margin:0 0 10px">${scopeStack(active)}<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--ink-soft);margin-top:4px">${SCOPE_FLOW.map(s=>`<span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SCOPE_COLOR[s]};margin-right:3px"></i>${SCOPE_ST[s].label}</span>`).join('')}</div></div>
     ${!L.ver.locked_at?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>This BOQ is not locked yet</b> — the matrix is built from the latest draft (${esc(L.ver.version_label||('v'+L.ver.version))}). Lock the contract BOQ so production plans against the paid scope; lines carry their status over when the locked version matches.</div>`:''}
+    ${!L.items.length?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>${esc(L.ver.version_label||('v'+L.ver.version))} has no included lines.</b> Pick the version that carries the paid scope in the <b>Contract BOQ</b> box below${(L.vers||[]).some(v=>v.lines>0)?'':' — none of this project\'s BOQ versions has lines yet'}.</div>`:''}
     ${gapTotal?`<div class="pw-card" style="padding:10px 14px;margin-bottom:10px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em">What will be missed</span>
       ${Object.keys(SCOPE_GAP).filter(k=>gapBy[k]).map(k=>`<button class="ex-st ${SCOPE_GAP[k][1]} sm-gapbtn ${scopeFilter.gap===k?'on':''}" data-gap="${k}" style="border:none;cursor:pointer">${gapBy[k]} · ${SCOPE_GAP[k][0]}</button>`).join('')}
       ${scopeFilter.gap?`<button class="linkbtn" data-gap="">show all</button>`:''}</div></div>`:''}
@@ -7902,6 +7905,7 @@ function scopeRender(p,body){
       <div class="gsub" style="display:inline-flex"><button data-axis="package" class="${scopeAxis==='package'?'on':''}">By package</button><button data-axis="vendor" class="${scopeAxis==='vendor'?'on':''}">By vendor</button><button data-axis="room" class="${scopeAxis==='room'?'on':''}">By room</button></div>
       <select id="smStatus" class="sm-in"><option value="">All statuses</option>${SCOPE_STATUS.map(s=>`<option value="${s[0]}" ${scopeFilter.status===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select>
       <input id="smQ" class="sm-in" placeholder="search item / room / vendor" value="${esc(scopeFilter.q)}" style="width:200px">
+      <label style="font-size:11px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px" title="Which BOQ version this matrix plans against. Automatic = the highest locked version that has lines; pick one to pin it for this project.">Contract BOQ <select id="smVer" class="sm-in" style="max-width:280px" ${w?'':'disabled'}>${(L.vers||[]).map(v=>`<option value="${v.id}" ${v.id===L.ver.id?'selected':''}>${esc(v.version_label||('v'+v.version))} · ${v.lines} line${v.lines===1?'':'s'} · ${v.locked_at?'locked':'draft'}${Number(v.total)?' · '+fmt(v.total):''}</option>`).join('')}</select>${L.ver.pinned?`<button class="linkbtn" id="smUnpin" title="Back to automatic choice">pinned · unpin</button>`:''}</label>
       <div class="gact" style="margin-left:auto"><button class="ghost sm" id="smSync" title="Re-read the contract BOQ and vendor POs">↻ Sync</button><button class="ghost sm" id="smCsv">⬇ CSV</button><button class="ghost sm" id="smPrint">🖨 Purchase plan</button></div>
     </div>
     ${sel.length?`<div class="banner sm-bulk"><b>${sel.length} selected</b> → <button class="ghost sm" data-bulk="vendor">Vendor</button><button class="ghost sm" data-bulk="dates">Dates</button><button class="ghost sm" data-bulk="status">Status</button><button class="ghost sm" data-bulk="material">Material</button><button class="ghost sm" data-bulk="owner">Owner</button><button class="ghost sm" data-bulk="package">Package</button><button class="primary sm" data-bulk="po">Raise vendor PO</button><button class="ghost sm" data-bulk="wo">Raise work order</button><button class="linkbtn" data-bulk="clear">clear</button></div>`:''}
@@ -7921,6 +7925,10 @@ function scopeBind(p,body,all,groups){
   $("#smStatus").onchange=e=>{ scopeFilter.status=e.target.value; scopeRender(p,body); };
   let qt; $("#smQ").oninput=e=>{ clearTimeout(qt); qt=setTimeout(()=>{ scopeFilter.q=e.target.value; scopeRender(p,body); const i=$("#smQ"); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } },250); };
   $("#smSync").onclick=()=>pwScope(p,body);
+  if($("#smVer")) $("#smVer").onchange=async e=>{ const id=Number(e.target.value); if(!id||id===L.ver.id) return;
+    const {error}=await sb.from("projects").update({scope_boq_version_id:id}).eq("id",p.id); if(error){ toast(error.message); scopeRender(p,body); return; }
+    p.scope_boq_version_id=id; toast("Contract BOQ pinned for this project — re-syncing"); pwScope(p,body); };
+  if($("#smUnpin")) $("#smUnpin").onclick=async()=>{ const {error}=await sb.from("projects").update({scope_boq_version_id:null}).eq("id",p.id); if(error) return toast(error.message); p.scope_boq_version_id=null; pwScope(p,body); };
   $("#smCsv").onclick=()=>scopeCsv(p,all);
   $("#smPrint").onclick=()=>scopePrint(p,all);
   body.querySelectorAll(".sm-ghead").forEach(tr=>tr.onclick=e=>{ if(e.target.closest("button")) return; const k=scopeAxis+':'+tr.dataset.g; scopeOpen[k]=scopeOpen[k]===false; scopeRender(p,body); });
@@ -12113,6 +12121,10 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b100",date:"8 Oct 2026",title:"Scope Matrix picks the right contract BOQ",points:[
+    "If a project's Scope Matrix opened empty (LSA-2026-007 did), it was planning against a stray locked BOQ version with no lines. It now uses the <b>highest locked version that actually has lines</b>, and the <b>Contract BOQ</b> box on the matrix shows every version with its line count — pick one to pin it for that project, press <b>unpin</b> to go back to automatic.",
+    "The founder dashboard's Production radar uses the same rule, so \"not planned yet\" means a real paid scope with no plan, not an empty version.",
+  ]},
   {build:"b99",date:"8 Oct 2026",title:"Production radar — every project's late lines on one card",points:[
     "Admin / Sales Head: the Dashboard now has a <b>Production radar</b> card under Collections. It reads every active project's Scope Matrix and shows, per project, <b>lines late</b> (order date passed and not ordered, or needed on site and not delivered), <b>to order within 7 days</b>, <b>no vendor decided</b>, a status bar and the next order-by date — worst project first. Click a project to land on its Scope Matrix; click a red or amber number to open it already filtered to those lines.",
     "Switch to <b>By owner</b> to see the same lines grouped by the person who owns them (you float to the top), so each coordinator's overdue list is one glance away.",
@@ -14083,7 +14095,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b99 · 8 Oct 2026";
+const APP_BUILD = "b100 · 8 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
