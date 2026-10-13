@@ -4816,7 +4816,7 @@ function newProjectForm(){
    Execution   = Production/Installation/Handover. Handover needs 100% collected and
                  starts with snags open; once snag-free the project can be closed. */
 const DESIGN_STAGES=["Briefing","Design","Proposal/BOQ"];
-const EXEC_STAGES=["Production","Dispatch to Site","Installation","Handover"];
+const EXEC_STAGES=["Production","Payment Collection","Dispatch to Site","Installation","Handover"];
 const PROJ_LIST_TABS=[["all","All"],["design","Design"],["execution","Execution"],["closed","Closed"]];
 function projPhase(p){
   if(p.status==="completed"||p.status==="cancelled") return "closed";
@@ -5062,7 +5062,7 @@ async function projMarkHandover(p,pct){
   const {error}=await sb.from("projects").update(hoPatch).eq("id",p.id);
   if(error) return toast(error.message);
   Object.assign(p,hoPatch);
-  await projSyncStones(p.id,[...DESIGN_STAGES,"Production","Dispatch to Site","Installation"],"Handover");
+  await projSyncStones(p.id,[...DESIGN_STAGES,"Production","Payment Collection","Dispatch to Site","Installation"],"Handover");
   await projLog(p,`Handed over · ${pct}% collected · snag list open`);
   toast("Handed over — snags open");
   csatTrigger("execution",{project_id:p.id});   // CSAT #4: execution/installation feedback (next morning 9 AM)
@@ -5712,7 +5712,7 @@ function snagForm(p,body){
 }
 
 /* ---- Overview (timeline) ---- */
-const STAGE_FLOW=["Briefing","Design","Proposal/BOQ","Production","Dispatch to Site","Installation","Handover"];
+const STAGE_FLOW=["Briefing","Design","Proposal/BOQ","Production","Payment Collection","Dispatch to Site","Installation","Handover"];
 /* ---- Project activity: continues the lead's timeline (same lead_activities feed) ---- */
 async function renderProjectActivity(p){
   const box=$("#pjAct"); if(!box) return;
@@ -5945,7 +5945,7 @@ async function pwReview(p,body){
     if(!T.kickoff) flags.push(["warn","No kick-off meeting date"]);
     if(!T.boq_locked) flags.push(["bad","BOQ not locked"]);
     if(M.total===0) flags.push(["warn","No payment schedule"]);
-    if(["Production","Dispatch to Site","Installation","Handover"].includes(T.stage)&&pct<50) flags.push(["bad","In execution with only "+pct+"% collected"]);
+    if(["Production","Payment Collection","Dispatch to Site","Installation","Handover"].includes(T.stage)&&pct<50) flags.push(["bad","In execution with only "+pct+"% collected"]);
     if(T.stage==="Handover"&&pct<100) flags.push(["bad","Handover with "+pct+"% collected"]);
     if((MT.unclosed||0)>0) flags.push(["warn",MT.unclosed+" meeting"+(MT.unclosed>1?"s":"")+" not closed out"]);
     if((D.overdue||0)>0) flags.push(["warn",D.overdue+" design task"+(D.overdue>1?"s":"")+" overdue"]);
@@ -14095,7 +14095,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b101 · 13 Oct 2026";
+const APP_BUILD = "b102 · 13 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
