@@ -5909,6 +5909,12 @@ async function pwOverview(p,body){
   if(!ro){
     body.querySelectorAll(".tl2-sel").forEach(sel=>sel.onchange=async()=>{
       const status=sel.value, id=sel.dataset.ms;
+      // Payment gate: the Payment Collection stage can't be marked done until 90% is collected
+      // (final 10% falls at Handover, which has its own 100% gate). Admins may override.
+      const _m=(stones||[]).find(s=>String(s.id)===String(id))||{};
+      if(_m.stage==="Payment Collection" && status==="done" && !projGate(paidPct,90,"Payment Collection — collect before dispatch")){
+        sel.value=_m.status||"todo"; return;
+      }
       const patch={status,updated_at:new Date().toISOString()};
       if(status==="done") patch.done_date=new Date().toISOString().slice(0,10);
       await sb.from("project_milestones").update(patch).eq("id",id);
@@ -14095,7 +14101,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b102 · 13 Oct 2026";
+const APP_BUILD = "b103 · 14 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
