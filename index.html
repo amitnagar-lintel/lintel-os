@@ -10775,6 +10775,7 @@ function gRender(p, body){
       ${!ro&&!L.locked&&!G.partnerBoq?`<button class="ghost" id="gFinal" title="Freeze this BOQ exactly as shared — then raise a new option for a different finish">🔒 Finalise &amp; lock</button>`:''}
       ${(canWrite()||G.partnerBoq)&&L.locked?`<button class="ghost" id="gRevise" title="Copy this BOQ into a new, unlocked version — quote a different finish or a change-order while this one stays frozen">＋ New option</button>`:''}
       <button class="ghost" id="gCsv">Export CSV</button>
+      ${canWrite()?`<button class="ghost" id="gRfq" title="Request vendor quotations — download this BOQ unpriced, import filled quotes to compare">📨 RFQ</button>`:''}
       ${G.partnerBoq?'':`<button class="ghost" id="gPdf" title="Download the client quotation as a PDF file">⬇ Download PDF</button>`}
       <button class="ghost" id="gChat" title="Share this quotation PDF with the team chat">💬 Send to chat</button>
       ${canWrite()?`<button class="ghost" id="gStudio" title="Send the client quotation to the Canon printer in the studio">🖨 Print at studio</button>`:''}
@@ -10797,6 +10798,7 @@ function gRender(p, body){
   if($("#gBackList")) $("#gBackList").onclick=()=>{ if(G.dirty&&G.boqId)gSave(p,true); gStopAutosave(); G.boqView="list"; pwBoq(p,body); };
   if($("#gVerPick")) $("#gVerPick").onchange=e=>{ G.openVersionId=e.target.value; gStopAutosave(); G.projectId?pwBoq(p,body):leadBoqGenerator(p,body); };
   if($("#gCsv")) $("#gCsv").onclick=gExportCSV;
+  if($("#gRfq")) $("#gRfq").onclick=()=>gRfqModal(p);
   if($("#gPdf")) $("#gPdf").onclick=()=>gDownloadPdf(p);
   if($("#gChat")) $("#gChat").onclick=()=>gSendToChat(p);
   if($("#gPrint")) $("#gPrint").onclick=()=>{ G.tab='cli'; gRender(p,body); setTimeout(()=>window.print(),250); };
@@ -13786,6 +13788,166 @@ function gStartAutosave(p){
   }, 5000);
 }
 function gStopAutosave(){ if(G._autosaveTimer){ clearInterval(G._autosaveTimer); G._autosaveTimer=null; } }
+/* ===================== RFQ · vendor quotations on a BOQ (RFQ-01) =====================
+   Staff download the BOQ *unpriced* (our rates stripped), send it to a vendor, then import
+   the vendor's filled CSV to capture and compare their quote. Keyed on boq_items.id (the
+   "Line ID" column) so a round-tripped Excel/CSV re-matches reliably. Our rates/costs are
+   never written into the file we hand out. Persisted in boq_rfqs / boq_rfq_lines. */
+function rfqParseCsv(text){
+  const rows=[]; let i=0,f="",row=[],q=false; text=String(text||"");
+  while(i<text.length){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false; } else f+=c; }
+    else { if(c==='"') q=true; else if(c===',') {row.push(f);f="";}
+      else if(c==='\n'){ row.push(f); rows.push(row); row=[]; f=""; }
+      else if(c==='\r'){} else f+=c; }
+    i++; }
+  if(f.length||row.length){ row.push(f); rows.push(row); }
+  return rows;
+}
+function rfqNum(v){ return Number(String(v==null?"":v).replace(/[^0-9.\-]/g,""))||0; }
+
+async function gRfqModal(p){
+  if(!canWrite()) return toast("RFQ is for Lintel staff.");
+  if(!G.boqId) return toast("Open a BOQ first.");
+  openModal(`<div class="modal-h">RFQ · vendor quotations · ${esc(p.code||p.name||"")}</div>
+    <div class="modal-b" style="max-height:72vh;overflow:auto">
+      <div class="banner">Send this BOQ to vendors <b>unpriced</b> and import their filled CSV to compare quotes. Your own rates are never in the file you share.</div>
+      <div class="field"><label>New RFQ — vendor name</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="rfqVendor" list="rfqVendorList" placeholder="e.g. Sri Venkateshwara Interiors" style="flex:1;min-width:200px">
+          <button class="primary" id="rfqNew">⬇ Create &amp; download unpriced CSV</button>
+        </div><datalist id="rfqVendorList"></datalist></div>
+      <div id="rfqList" style="margin-top:14px;color:var(--ink-soft)">Loading…</div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Close</button></div>`);
+  try{ const {data:vs}=await sb.from("vendors").select("name").eq("is_active",true).order("name");
+    if($("#rfqVendorList")) $("#rfqVendorList").innerHTML=(vs||[]).map(v=>`<option value="${esc(v.name)}">`).join(""); }catch(e){}
+  $("#rfqNew").onclick=()=>gRfqCreate(p);
+  gRfqRenderList(p);
+}
+
+async function gRfqRenderList(p){
+  const host=$("#rfqList"); if(!host) return;
+  const {data:rfqs,error}=await sb.from("boq_rfqs").select("*").eq("boq_version_id",G.boqId).order("created_at",{ascending:false});
+  if(error){ host.innerHTML=`<div class="empty" style="padding:10px 0">Couldn't load RFQs: ${esc(error.message)}</div>`; return; }
+  const internal=Math.round((gGrand().subM)||0);   // our work subtotal (ex fee/GST) as the baseline
+  if(!rfqs||!rfqs.length){ host.innerHTML=`<div class="empty" style="padding:10px 0">No RFQs on this BOQ yet. Create one above.</div>`; return; }
+  host.innerHTML=`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--brass-deep);font-weight:600;margin-bottom:8px">Vendor quotes <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">· our work subtotal ${fmt(internal)}</span></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px">
+    <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Vendor</th><th style="padding:5px 8px">Status</th><th class="num" style="padding:5px 8px">Vendor total</th><th class="num" style="padding:5px 8px">vs ours</th><th style="padding:5px 8px">Date</th><th style="padding:5px 8px"></th></tr></thead>
+    <tbody>${rfqs.map(r=>{
+      const d=(r.total!=null&&internal)?(r.total-internal):null;
+      const dc=d==null?"var(--ink-soft)":d<0?"#4f7d52":"#B4453A";
+      const dtxt=d==null?"—":(d<0?"−":"+")+fmt(Math.abs(d));
+      return `<tr style="border-top:1px solid var(--line-2)">
+        <td style="padding:6px 8px"><b>${esc(r.vendor_name)}</b></td>
+        <td style="padding:6px 8px"><span style="font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;${r.status==='quoted'?'color:#2E7D5B;background:#E7F0E8':'color:#B7791F;background:#F6ECD4'}">${r.status==='quoted'?'Quoted':'Awaiting'}</span></td>
+        <td class="num mono" style="padding:6px 8px">${r.total!=null?fmt(r.total):"—"}</td>
+        <td class="num mono" style="padding:6px 8px;color:${dc};font-weight:600">${dtxt}</td>
+        <td style="padding:6px 8px">${new Date(r.created_at).toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}</td>
+        <td style="padding:6px 8px;white-space:nowrap">
+          <button class="linkbtn" data-rfqcsv="${r.id}" title="Re-download the unpriced CSV">⬇ CSV</button> ·
+          <label class="linkbtn" style="cursor:pointer">⬆ Import<input type="file" accept=".csv" data-rfqimp="${r.id}" style="display:none"></label>
+          ${r.status==='quoted'?` · <button class="linkbtn" data-rfqcmp="${r.id}">Compare</button>`:""}
+          · <button class="linkbtn del" data-rfqdel="${r.id}">✕</button>
+        </td></tr>`;}).join("")}</tbody></table></div>`;
+  host.querySelectorAll("[data-rfqcsv]").forEach(b=>b.onclick=async()=>{ const {data:r}=await sb.from("boq_rfqs").select("*").eq("id",b.dataset.rfqcsv).single(); if(r) gRfqDownloadCsv(p,r,gIncluded()); });
+  host.querySelectorAll("[data-rfqimp]").forEach(inp=>inp.onchange=()=>{ if(inp.files&&inp.files[0]) gRfqImport(p,Number(inp.dataset.rfqimp),inp.files[0]); });
+  host.querySelectorAll("[data-rfqcmp]").forEach(b=>b.onclick=()=>gRfqCompare(p,Number(b.dataset.rfqcmp)));
+  host.querySelectorAll("[data-rfqdel]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this RFQ and its imported quote?")) return; await sb.from("boq_rfqs").delete().eq("id",b.dataset.rfqdel); gRfqRenderList(p); });
+}
+
+async function gRfqCreate(p){
+  const vendor=($("#rfqVendor").value||"").trim(); if(!vendor) return toast("Enter the vendor's name");
+  const lines=gIncluded(); if(!lines.length) return toast("No in-scope lines to quote");
+  const {data:rfq,error}=await sb.from("boq_rfqs").insert({
+    boq_version_id:G.boqId, project_id:G.projectId||null, vendor_name:vendor,
+    title:(G.ver&&((G.ver.title&&G.ver.title.trim())||G.ver.version_label))||null,
+    created_by:me.id, status:"open"
+  }).select().single();
+  if(error) return toast(error.message);
+  gRfqDownloadCsv(p,rfq,lines);
+  try{ gLogActivity(p,`RFQ #${rfq.id} created for ${vendor} — unpriced BOQ downloaded`); }catch(e){}
+  if($("#rfqVendor")) $("#rfqVendor").value="";
+  toast("RFQ created — unpriced CSV downloaded. Send it to "+vendor+".");
+  gRfqRenderList(p);
+}
+
+function gRfqDownloadCsv(p,rfq,lines){
+  const esc2=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  let csv="Lintel Space Atelier — Request for Quotation\n";
+  csv+="RFQ Ref,"+rfq.id+"\n";
+  csv+="Project,"+esc2(p.code||p.name||"")+"\n";
+  csv+="Vendor,"+esc2(rfq.vendor_name||"")+"\n";
+  csv+="Instructions,"+esc2("Fill ONLY the 'Your Rate' column. Do not change the Line ID, Item or Qty. Save as CSV and send it back to us.")+"\n\n";
+  csv+="Line ID,Section,Room,Category,Item,Remarks,UOM,Qty,Your Rate,Your Amount\n";
+  (lines||[]).forEach(r=>{
+    csv+=[ (r.dbid||r.id), esc2(STREAM_LABEL[rowStream(r)]||""), esc2(r.room), esc2(r.cat), esc2(r.item), esc2(r.remarks||""), esc2(r.unit), (r.qty||0), "", "" ].join(",")+"\n";
+  });
+  const a=document.createElement("a");
+  a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+  a.download="RFQ-"+rfq.id+"-"+String(rfq.vendor_name||"vendor").replace(/[^A-Za-z0-9]+/g,"_")+".csv";
+  a.click();
+}
+
+async function gRfqImport(p,rfqId,file){
+  let text=""; try{ text=await file.text(); }catch(e){ return toast("Couldn't read the file"); }
+  const rows=rfqParseCsv(text);
+  const hi=rows.findIndex(r=>r.map(x=>(x||"").trim().toLowerCase()).includes("line id"));
+  if(hi<0) return toast("Couldn't find the 'Line ID' header row — please import the CSV we generated.");
+  const H=rows[hi].map(x=>(x||"").trim().toLowerCase());
+  const idIdx=H.indexOf("line id"), rateIdx=H.indexOf("your rate");
+  if(rateIdx<0) return toast("No 'Your Rate' column found in the file.");
+  const byId={}; gIncluded().forEach(r=>{ byId[String(r.dbid||r.id)]=r; });
+  const lines=[]; let total=0, matched=0, priced=0;
+  for(let k=hi+1;k<rows.length;k++){
+    const r=rows[k]; if(!r) continue; const lid=(r[idIdx]||"").trim(); const g=byId[lid]; if(!lid||!g) continue;
+    matched++; const rate=rfqNum(r[rateIdx]); if(rate>0) priced++;
+    const amt=rate*(Number(g.qty)||0); total+=amt;
+    lines.push({rfq_id:rfqId, boq_item_id:(g.dbid||null), item:g.item, uom:g.unit, qty:Number(g.qty)||0, vendor_rate:rate, vendor_amount:Math.round(amt)});
+  }
+  if(!matched) return toast("No matching lines found — the Line ID column may have been changed.");
+  await sb.from("boq_rfq_lines").delete().eq("rfq_id",rfqId);
+  const {error:iErr}=await sb.from("boq_rfq_lines").insert(lines);
+  if(iErr) return toast("Could not save: "+iErr.message);
+  await sb.from("boq_rfqs").update({status:"quoted", total:Math.round(total), quoted_at:new Date().toISOString()}).eq("id",rfqId);
+  toast(`Imported ${priced} priced of ${matched} lines · vendor total ${fmt(total)}`);
+  gRfqRenderList(p);
+}
+
+async function gRfqCompare(p,rfqId){
+  const [{data:rfq},{data:ls}]=await Promise.all([
+    sb.from("boq_rfqs").select("*").eq("id",rfqId).single(),
+    sb.from("boq_rfq_lines").select("*").eq("rfq_id",rfqId).order("id")
+  ]);
+  const byId={}; gIncluded().forEach(r=>{ byId[String(r.dbid)]=r; });
+  let ourTot=0, venTot=0;
+  const rowsHtml=(ls||[]).map(l=>{
+    const g=byId[String(l.boq_item_id)]||{}; const ourRate=Number(g.originalRate||g.rate||0); const ourAmt=ourRate*(Number(l.qty)||0);
+    ourTot+=ourAmt; venTot+=Number(l.vendor_amount||0);
+    const d=Number(l.vendor_rate||0)-ourRate; const dc=d<0?"#4f7d52":d>0?"#B4453A":"var(--ink-soft)";
+    return `<tr style="border-top:1px solid var(--line-2)">
+      <td style="padding:5px 8px">${esc(l.item||"")}</td>
+      <td class="num" style="padding:5px 8px">${l.qty} ${esc(l.uom||"")}</td>
+      <td class="num mono" style="padding:5px 8px">${ourRate?fmt(ourRate):"—"}</td>
+      <td class="num mono" style="padding:5px 8px;font-weight:600">${fmt(l.vendor_rate||0)}</td>
+      <td class="num mono" style="padding:5px 8px;color:${dc}">${d?((d<0?"−":"+")+fmt(Math.abs(d))):"—"}</td>
+      <td class="num mono" style="padding:5px 8px">${fmt(l.vendor_amount||0)}</td></tr>`;
+  }).join("");
+  const diff=venTot-ourTot; const dcol=diff<0?"#4f7d52":"#B4453A";
+  openModal(`<div class="modal-h">Quote compare · ${esc(rfq&&rfq.vendor_name||"")}</div>
+    <div class="modal-b" style="max-height:72vh;overflow:auto">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:600px">
+      <thead><tr style="text-align:left;color:var(--ink-soft);font-size:11px"><th style="padding:5px 8px">Item</th><th class="num" style="padding:5px 8px">Qty</th><th class="num" style="padding:5px 8px">Our rate</th><th class="num" style="padding:5px 8px">Vendor rate</th><th class="num" style="padding:5px 8px">Δ/unit</th><th class="num" style="padding:5px 8px">Vendor amt</th></tr></thead>
+      <tbody>${rowsHtml||`<tr><td colspan="6" style="padding:10px;color:var(--ink-soft)">No priced lines.</td></tr>`}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--line-2);font-weight:700"><td style="padding:6px 8px" colspan="4">Totals — ours ${fmt(Math.round(ourTot))} vs vendor</td><td class="num mono" style="padding:6px 8px;color:${dcol}">${diff<0?"−":"+"}${fmt(Math.abs(Math.round(diff)))}</td><td class="num mono" style="padding:6px 8px">${fmt(Math.round(venTot))}</td></tr></tfoot>
+      </table></div>
+      <div class="s2l-hint" style="margin-top:8px">Vendor amounts are recomputed from our quantities × the vendor's rate, so a vendor can't change scope. "Our rate" is this BOQ's selling rate.</div>
+    </div>
+    <div class="modal-f"><button class="ghost" id="rfqCmpBack">← RFQs</button><button class="primary" onclick="closeModal()">Close</button></div>`);
+  if($("#rfqCmpBack")) $("#rfqCmpBack").onclick=()=>gRfqModal(p);
+}
+
 function gExportCSV(){
   if(!G.rows.length) return toast("No items to export");
   const g=gGrand();
@@ -14101,7 +14263,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b103 · 14 Oct 2026";
+const APP_BUILD = "b104 · 14 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
