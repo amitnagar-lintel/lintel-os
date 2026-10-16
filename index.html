@@ -5792,6 +5792,7 @@ async function pwOverview(p,body){
   const doneCount=stones.filter(s=>s.status==="done").length;
   const pct=Math.round(doneCount/stones.length*100);
   const curr=stones.find(s=>s.status==="in_progress")||stones.find(s=>s.status==="todo")||stones[stones.length-1];
+  const dispStone=stones.find(s=>s.stage==="Dispatch to Site"); const dispDate=p.dispatch_date||(dispStone&&dispStone.target_date)||null;
   const team=[["Consultant",p.consultant_id],["Designer",p.designer_id],["PM",p.pm_id]].filter(x=>x[1]).map(x=>`${x[0]}: <b>${esc(staffName(x[1]))}</b>`).join(" · ")||"—";
   const ro=!canWrite();
   body.innerHTML=`
@@ -5816,6 +5817,11 @@ async function pwOverview(p,body){
         <div class="ccl">Execution</div>
         <div class="ccv">${lateActs.length?lateActs.length:"On track"}</div>
         <div class="ccs">${lateActs.length?"activities delayed":"no delays"}</div>
+      </div>
+      <div class="cc ${(dispDate||p.dispatch_asked_at)?"":""}">
+        <div class="ccl">Dispatch to site</div>
+        <div class="ccv" style="font-size:15px">${dispDate?new Date(dispDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):(p.dispatch_asked_at?"Awaiting":"—")}</div>
+        <div class="ccs">${dispDate?(p.dispatch_date?"confirmed by Akshay":"as per schedule"):(p.dispatch_asked_at?"asked Akshay — no date yet":"set after production")}</div>
       </div>
       ${ops?`<div class="cc ${ops.pct===null?"":(ops.pct<0?"alert":"good")}">
         <div class="ccl">Projected margin</div>
@@ -14263,7 +14269,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b104 · 14 Oct 2026";
+const APP_BUILD = "b105 · 16 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
