@@ -5000,8 +5000,7 @@ function projGate(pct,need,label){
   return false;
 }
 async function projLog(p,text){
-  if(!p.lead_id) return;
-  try{ await sb.from("lead_activities").insert({lead_id:p.lead_id,type:"Note",text,by_user:me.id}); }catch(e){}
+  try{ await sb.from("lead_activities").insert({lead_id:p.lead_id||null,project_id:p.id,type:"Note",text,by_user:me.id}); }catch(e){}
 }
 /* keep the Overview timeline milestones in step when a phase gate is crossed */
 async function projSyncStones(pid,doneStages,currentStage){
@@ -5716,11 +5715,10 @@ const STAGE_FLOW=["Briefing","Design","Proposal/BOQ","Production","Payment Colle
 /* ---- Project activity: continues the lead's timeline (same lead_activities feed) ---- */
 async function renderProjectActivity(p){
   const box=$("#pjAct"); if(!box) return;
-  if(!p.lead_id){
-    box.innerHTML=`<div class="tl-empty">This project was created without a linked lead, so there's no carried-forward activity history.</div>`;
-    return;
-  }
-  const {data:acts}=await sb.from("lead_activities").select("*").eq("lead_id",p.lead_id).order("created_at",{ascending:false});
+  // Project-scoped: carried-forward lead history (lead_id) OR entries logged against the project (project_id).
+  let _q=sb.from("lead_activities").select("*");
+  _q = p.lead_id ? _q.or(`lead_id.eq.${p.lead_id},project_id.eq.${p.id}`) : _q.eq("project_id",p.id);
+  const {data:acts}=await _q.order("created_at",{ascending:false});
   const w=canWorkProject();
   box.innerHTML=`
     ${w?`<div class="actadd">
@@ -5740,7 +5738,7 @@ async function renderProjectActivity(p){
     const add=$("#pact_add");
     if(add) add.onclick=async()=>{
       const text=$("#pact_text").value.trim(); if(!text) return;
-      const {error}=await sb.from("lead_activities").insert({lead_id:p.lead_id,type:$("#pact_type").value,text,by_user:me.id});
+      const {error}=await sb.from("lead_activities").insert({lead_id:p.lead_id||null,project_id:p.id,type:$("#pact_type").value,text,by_user:me.id});
       if(error) return toast(error.message);
       renderProjectActivity(p);
     };
@@ -14269,7 +14267,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b105 · 16 Oct 2026";
+const APP_BUILD = "b106 · 17 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
