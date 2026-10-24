@@ -2035,6 +2035,10 @@ async function renderDashboard(){
       <div class="sec-label">Collections <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— money received from clients, by month</span></div>
       <div id="dashCollectionsBody">${skel(2,120)}</div>
     </section>`:""}
+    ${isAdminLevel()?`<section class="pw-card" id="dashCash" style="margin-bottom:14px">
+      <div class="sec-label">Cash &amp; payables <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— money in vs out by month, and what vendors are owed</span></div>
+      <div id="dashCashBody">${skel(2,120)}</div>
+    </section>`:""}
     ${isAdminLevel()?`<section class="pw-card" id="dashRadar" style="margin-bottom:14px">
       <div class="sec-label">Production radar <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— every active project's Scope Matrix: lines late, to order this week, no vendor</span></div>
       <div id="dashRadarBody">${skel(2,120)}</div>
@@ -2098,6 +2102,7 @@ async function renderDashboard(){
   renderMonthlySales();
   if(isAdminLevel()) renderSourceRoi();
   if(isAdminLevel()) renderCollections();
+  if(isAdminLevel()) renderCashflow();
   if(isAdminLevel()){ radarCache=null; renderProductionRadar(); }
   if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
@@ -5104,10 +5109,10 @@ const TICKET_PRIOS=["low","normal","high","urgent"];
 const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
 function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
-  finance:[["payments","Payments"],["packages","Packages"],["scope","Scope Matrix"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
+  finance:[["payments","Payments"],["invoices","Tax Invoices"],["packages","Packages"],["scope","Scope Matrix"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
   site:[["kom","Kick-off"],["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",packages:"finance",scope:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+const PROJ_SUB2GROUP={payments:"finance",invoices:"finance",packages:"finance",scope:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / Payments / Work Orders (RLS blocks the data anyway).
 // BOQ appears only on projects where the partner is the assigned designer (canBoqProject).
@@ -5166,6 +5171,7 @@ async function drawProjectTab(p){
 }
 function drawProjectSub(p,sub,body){
   if(sub==="payments")   return pwPayments(p,body);
+  if(sub==="invoices")   return pwInvoices(p,body);
   if(sub==="packages")   return pwPackages(p,body);
   if(sub==="scope")      return pwScope(p,body);
   if(sub==="orders")     return pwOrders(p,body);
@@ -6073,6 +6079,7 @@ async function pwPayments(p,body){
           ${ro?'':`<td style="white-space:nowrap">
             ${m.status!=='paid'?`<button class="linkbtn" data-mrec="${m.id}">✓ Mark received</button>`:''}
             <button class="linkbtn" data-pi="${m.id}" style="margin-left:6px">${m.pi_number?'View PI':'Generate PI'}</button>
+            <button class="linkbtn" data-ti="${m.id}" style="margin-left:6px" title="Raise the GST tax invoice for this milestone (Finance → Tax Invoices)">Tax invoice</button>
             ${m.status!=='paid'?`<button class="linkbtn" data-plink="${m.id}" style="margin-left:6px">${m.razorpay_link?'Copy link':'Create link'}</button>`:''}
           </td>`}
         </tr>`).join("")}
@@ -6112,6 +6119,10 @@ async function pwPayments(p,body){
     body.querySelectorAll("[data-plink]").forEach(b=>b.onclick=()=>{
       const m=mlist.find(x=>String(x.id)===String(b.dataset.plink));
       if(m) createRazorpayLink(p,m);
+    });
+    body.querySelectorAll("[data-ti]").forEach(b=>b.onclick=()=>{
+      const m=mlist.find(x=>String(x.id)===String(b.dataset.ti));
+      if(m) invoiceForm(p,{milestone:m,miles:mlist},()=>{ projSubSel.finance="invoices"; drawProjectTab(p); });
     });
     body.querySelectorAll("[data-mrec]").forEach(b=>b.onclick=()=>{
       const m=mlist.find(x=>String(x.id)===String(b.dataset.mrec));
@@ -7216,11 +7227,14 @@ async function vpoDetail(p,body,id){
   await ensureStaff();
   const {data:o}=await sb.from("vendor_pos").select("*, vendors(*)").eq("id",id).single();
   if(!o||o.project_id!==p.id){ activeVPO=null; return pwProcurement(p,body); }
-  const [{data:its},{data:pays}]=await Promise.all([
+  const [{data:its},{data:pays},{data:bls}]=await Promise.all([
     sb.from("vendor_po_items").select("*").eq("po_id",id).order("sort_idx"),
-    sb.from("vendor_payments").select("*").eq("po_id",id).order("paid_on")
+    sb.from("vendor_payments").select("*").eq("po_id",id).order("paid_on"),
+    sb.from("v_vendor_bill_status").select("*").eq("po_id",id).order("bill_date")
   ]);
-  const items=its||[], plist=pays||[];
+  const items=its||[], plist=pays||[], bills=bls||[];
+  const liveBills=bills.filter(b=>b.status!=='cancelled'&&Number(b.outstanding)>0);
+  const billedTot=bills.filter(b=>b.status!=='cancelled').reduce((s,b)=>s+Number(b.total||0),0);
   const v=o.vendors||{};
   const total=vpoTotal(o);
   const paid=plist.reduce((s,r)=>s+Number(r.amount||0),0);
@@ -7275,12 +7289,13 @@ async function vpoDetail(p,body,id){
         <tr><td colspan="5" class="num" style="font-weight:700">Total</td><td class="num mono" style="font-weight:700">${fmt(total)}</td></tr>
       </tfoot></table>
     </div>
+    ${vpoBillsCard(o,bills,total)}
     <div class="pw-card">
       <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Payments to vendor</div>
         <div style="font-size:12px;color:var(--ink-soft)">${fmt(paid)} of ${fmt(total)} · ${payPct}%</div></div>
       <div class="ov-bar" style="margin:6px 0 12px"><div style="width:${Math.min(100,payPct)}%"></div></div>
       ${plist.length?`<table><thead><tr><th>Date</th><th>Type</th><th>Mode</th><th>Reference</th><th class="num">Amount</th></tr></thead><tbody>
-        ${plist.map(r=>`<tr><td>${dShort(r.paid_on)}</td><td>${esc(r.kind.replace(/_/g,' '))}</td><td>${esc(r.mode||'—')}</td><td style="font-size:12px">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td></tr>`).join('')}
+        ${plist.map(r=>`<tr><td>${dShort(r.paid_on)}</td><td>${esc(r.kind.replace(/_/g,' '))}${r.bill_id?`<div style="font-size:10px;color:var(--ink-soft)">bill ${esc((bills.find(b=>String(b.id)===String(r.bill_id))||{}).bill_no||'#'+r.bill_id)}</div>`:''}</td><td>${esc(r.mode||'—')}</td><td style="font-size:12px">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td></tr>`).join('')}
       </tbody></table>`:`<div style="font-size:13px;color:var(--ink-soft)">No payments recorded.</div>`}
       ${isAdminLevel()?`
       <div class="grid4" style="margin-top:12px">
@@ -7290,6 +7305,7 @@ async function vpoDetail(p,body,id){
         <div class="field"><label>Mode</label><select id="vpay_mode">${opts(["UPI","Bank Transfer","Cheque","Cash","Card"],"Bank Transfer")}</select></div>
       </div>
       <div class="grid2">
+        <div class="field"><label>Against bill</label><select id="vpay_bill"><option value="">— none (advance on PO)</option>${liveBills.map(b=>`<option value="${b.id}">${esc(b.bill_no)} · ${fmt(b.outstanding)} due</option>`).join('')}</select></div>
         <div class="field"><label>Reference</label><input id="vpay_ref" placeholder="UTR / cheque no."></div>
         <div class="field"><label>&nbsp;</label><button class="primary" id="vpayAdd">Record payment</button></div>
       </div>`:`<div class="hint">Recording vendor payments is admin-only.</div>`}
@@ -7377,11 +7393,15 @@ async function vpoDetail(p,body,id){
     if(!amt) return toast("Enter the amount");
     const {error}=await sb.from("vendor_payments").insert({
       po_id:o.id, kind:$("#vpay_kind").value, amount:amt, paid_on:$("#vpay_on").value||todayISO(),
-      mode:$("#vpay_mode").value||null, reference:$("#vpay_ref").value.trim()||null, recorded_by:me.id
+      mode:$("#vpay_mode").value||null, reference:$("#vpay_ref").value.trim()||null, recorded_by:me.id,
+      bill_id:$("#vpay_bill")&&$("#vpay_bill").value?Number($("#vpay_bill").value):null
     });
     if(error) return toast(error.message);
     toast("Payment recorded"); vpoDetail(p,body,o.id);
   };
+  if($("#billAdd")) $("#billAdd").onclick=()=>billForm(p,o,total,billedTot,()=>vpoDetail(p,body,o.id));
+  body.querySelectorAll("[data-billx]").forEach(b=>b.onclick=async()=>{ if(!confirm("Cancel this bill? It leaves payables; payments already recorded against it stay.")) return; const {error}=await sb.from("vendor_bills").update({status:'cancelled'}).eq("id",b.dataset.billx); if(error) return toast(error.message); toast("Bill cancelled"); vpoDetail(p,body,o.id); });
+  body.querySelectorAll("[data-billf]").forEach(b=>b.onclick=()=>{ const x=bills.find(y=>String(y.id)===b.dataset.billf); if(x&&x.file_path) billOpenFile(x.file_path); });
 }
 
 async function sendVendorPO(p,body,o,v,total){
@@ -8071,6 +8091,449 @@ function scopePrint(p,rows){
   const wnd=window.open("","_blank"); if(!wnd) return toast("Allow pop-ups to print");
   wnd.document.write(`<html><head><meta charset="utf-8"><title>Purchase plan · ${esc(p.code||p.name||'')}</title><style>@page{size:A4 landscape;margin:12mm}</style></head><body style="margin:0">${doc}</body></html>`);
   wnd.document.close(); setTimeout(()=>wnd.print(),400);
+}
+
+/* ===== FINANCE HUB (FIN-01) — GST tax invoices · vendor bills & payables · cash view =====
+   Money IN that is legally issuable (tax_invoices, one company-wide FY series, immutable once
+   issued), money OUT booked against approved POs (vendor_bills, settled by vendor_payments),
+   and the founder's monthly cash picture (cash_summary / payables_summary RPCs).
+   Company identity (GSTIN, address, bank, default SAC) is read from app_flags.company so an
+   admin can fill it in without a deploy. Schema: migrations/FIN-01_finance_hub.sql. */
+const COMPANY_DEFAULT={legal_name:"LINTEL SPACE ATELIER INDIA PRIVATE LIMITED",gstin:"",pan:"",state_code:"29",state_name:"Karnataka",
+  address:"Survey No.36/4, site no.25 to 30, Ground Floor, Ramky House, Kalyan Nagar, Bengaluru 560043",
+  phone:"+91 9916558777",email:"contact@lintelspace.com",
+  bank:"IDFC FIRST Bank · Jayanagar Branch · A/c 10218270193 · IFSC IDFB0080156",upi:"Lintels234@idfcbank",default_sac:"995478",default_gst_pct:18};
+let COMPANY=null;
+async function loadCompany(force){
+  if(COMPANY&&!force) return COMPANY;
+  try{ const {data}=await sb.from("app_flags").select("value").eq("key","company").maybeSingle(); COMPANY={...COMPANY_DEFAULT,...((data&&data.value)||{})}; }
+  catch(_){ COMPANY={...COMPANY_DEFAULT}; }
+  return COMPANY;
+}
+// GST state codes (2-digit) → name. Used for place of supply and the intra/inter decision.
+const GST_STATES={"01":"Jammu & Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","26":"Dadra & Nagar Haveli and Daman & Diu","27":"Maharashtra","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman & Nicobar","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh","97":"Other Territory"};
+const gstStateOf=gstin=>{ const s=String(gstin||"").trim().slice(0,2); return GST_STATES[s]?s:""; };
+// Indian-system amount in words (₹, rounded to the rupee).
+function inrWords(n){
+  n=Math.round(Math.abs(Number(n)||0)); if(!n) return "Zero rupees only";
+  const a=["","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"];
+  const b=["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
+  const two=x=>x<20?a[x]:b[Math.floor(x/10)]+(x%10?" "+a[x%10]:"");
+  const three=x=>(x>=100?a[Math.floor(x/100)]+" hundred"+(x%100?" and ":""):"")+(x%100?two(x%100):"");
+  const parts=[]; const crore=Math.floor(n/1e7); n%=1e7; const lakh=Math.floor(n/1e5); n%=1e5; const th=Math.floor(n/1e3); n%=1e3;
+  if(crore) parts.push(three(crore)+" crore"); if(lakh) parts.push(three(lakh)+" lakh"); if(th) parts.push(three(th)+" thousand"); if(n) parts.push(three(n));
+  const s=parts.join(" ").replace(/\s+/g," ").trim(); return s.charAt(0).toUpperCase()+s.slice(1)+" rupees only";
+}
+const invTotals=(lines,supply)=>{
+  let taxable=0,tax=0;
+  (lines||[]).forEach(l=>{ const amt=Math.round((Number(l.qty)||0)*(Number(l.rate)||0)); l.amount=amt; taxable+=amt; tax+=amt*(Number(l.gst_pct)||0)/100; });
+  tax=Math.round(tax*100)/100;
+  const cgst=supply==='intra'?Math.round(tax/2*100)/100:0, sgst=cgst, igst=supply==='inter'?tax:0;
+  const gross=taxable+cgst+sgst+igst, total=Math.round(gross), round_off=Math.round((total-gross)*100)/100;
+  return {taxable,cgst,sgst,igst,round_off,total};
+};
+const INV_STATUS_PILL=s=>s==='issued'?'<span class="ex-st done">Issued</span>':s==='cancelled'?'<span class="ex-st" style="background:#F3DEDC;color:#B4453A">Cancelled</span>':'<span class="ex-st in_progress">Draft</span>';
+
+/* ---- Project → Finance → Tax Invoices ---- */
+async function pwInvoices(p,body){
+  const co=await loadCompany();
+  const [{data:invs},{data:pays},{data:miles}]=await Promise.all([
+    sb.from("tax_invoices").select("*").eq("project_id",p.id).order("invoice_date",{ascending:false}).order("id",{ascending:false}),
+    sb.from("project_payments").select("amount").eq("project_id",p.id),
+    sb.from("payment_milestones").select("id,label,amount,status,pi_number").eq("project_id",p.id).order("sort_idx")
+  ]);
+  const list=invs||[], ro=!canWrite();
+  const received=(pays||[]).reduce((s,r)=>s+Number(r.amount||0),0);
+  const issued=list.filter(i=>i.status==='issued');
+  const invoiced=issued.reduce((s,i)=>s+(i.kind==='credit_note'?-1:1)*Number(i.total||0),0);
+  const contract=Number(p.contract_value)||Number(p.invoiced_total)||0;
+  const uncovered=Math.max(0,received-invoiced);
+  body.innerHTML=`
+    <div class="wallet">
+      <div class="wcell"><div class="wl">Contract (incl. GST)</div><div class="wv mono">${fmt(contract)}</div></div>
+      <div class="wcell"><div class="wl">Tax-invoiced</div><div class="wv mono">${fmt(invoiced)}</div><div style="font-size:10px;color:var(--ink-soft)">${issued.length} issued</div></div>
+      <div class="wcell wgood"><div class="wl">Received</div><div class="wv mono">${fmt(received)}</div></div>
+      <div class="wcell ${uncovered>0?'wdue':''}"><div class="wl">Received, not yet invoiced</div><div class="wv mono">${fmt(uncovered)}</div></div>
+    </div>
+    ${!co.gstin&&isAdminLevel()?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>Company GSTIN not set.</b> Invoices print "GSTIN: —" until an admin fills <span class="mono">app_flags → company → gstin</span> (also PAN). Everything else on the sheet comes from the same record.</div>`:''}
+    <div class="pw-card">
+      <div class="ov-head"><div class="sec-label" style="border:none;padding:0">GST tax invoices</div>
+        ${ro?'':`<button class="primary" id="invNew">+ New tax invoice</button>`}</div>
+      ${list.length?`<table><thead><tr><th>Invoice</th><th>Date</th><th>Bill to</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th>Status</th>${ro?'':'<th></th>'}</tr></thead><tbody>
+        ${list.map(i=>`<tr>
+          <td class="mono" style="font-size:12px">${i.invoice_no?esc(i.invoice_no):'<span style="color:var(--ink-soft)">draft</span>'}${i.kind==='credit_note'?' <span class="ex-st" style="font-size:10px">CN</span>':''}</td>
+          <td>${dShort(i.invoice_date)}</td>
+          <td>${esc(i.bill_to_name)}${i.bill_to_gstin?`<div style="font-size:10px;color:var(--ink-soft)">${esc(i.bill_to_gstin)}</div>`:''}</td>
+          <td class="num mono">${fmt(i.taxable_value)}</td>
+          <td class="num mono">${fmt(Number(i.cgst)+Number(i.sgst)+Number(i.igst))}</td>
+          <td class="num mono" style="font-weight:600">${fmt(i.total)}</td>
+          <td>${INV_STATUS_PILL(i.status)}</td>
+          ${ro?'':`<td style="white-space:nowrap">
+            ${i.status==='draft'?`<button class="linkbtn" data-inve="${i.id}">Edit / Issue</button> <button class="linkbtn del" data-invd="${i.id}">Delete</button>`:
+              `<button class="linkbtn" data-invv="${i.id}">View</button>${i.status==='issued'&&isAdminLevel()?` <button class="linkbtn del" data-invc="${i.id}">Cancel</button>`:''}`}
+          </td>`}
+        </tr>`).join('')}
+      </tbody></table>`:emptyState("No tax invoices yet",ro?"":"Raise one from a milestone on the Payments tab, or press + New tax invoice.")}
+      <div class="hint">Numbers run in one company series per financial year (LSA/TI/26-27/001) and are reserved only when you press <b>Issue</b>. An issued invoice cannot be edited — cancel it with a reason and raise a fresh one. Proforma invoices stay on the Payments tab for advances.</div>
+    </div>`;
+  if(ro) return;
+  if($("#invNew")) $("#invNew").onclick=()=>invoiceForm(p,{miles:miles||[]},()=>pwInvoices(p,body));
+  body.querySelectorAll("[data-inve]").forEach(b=>b.onclick=()=>{ const i=list.find(x=>String(x.id)===b.dataset.inve); if(i) invoiceForm(p,{inv:i,miles:miles||[]},()=>pwInvoices(p,body)); });
+  body.querySelectorAll("[data-invv]").forEach(b=>b.onclick=()=>{ const i=list.find(x=>String(x.id)===b.dataset.invv); if(i) showTaxInvoiceDoc(p,i); });
+  body.querySelectorAll("[data-invd]").forEach(b=>b.onclick=async()=>{ if(!confirm("Delete this draft invoice?")) return; const {error}=await sb.from("tax_invoices").delete().eq("id",b.dataset.invd); if(error) return toast(error.message); pwInvoices(p,body); });
+  body.querySelectorAll("[data-invc]").forEach(b=>b.onclick=()=>{ const i=list.find(x=>String(x.id)===b.dataset.invc); if(i) invoiceCancel(i,()=>pwInvoices(p,body)); });
+}
+async function invoiceCancel(inv,onDone){
+  const reason=prompt(`Cancel ${inv.invoice_no}?\n\nThis is permanent — the number stays used and the invoice is marked cancelled. Enter the reason (required):`,"");
+  if(reason==null) return; if(!reason.trim()) return toast("A reason is required to cancel an issued invoice");
+  const {error}=await sb.from("tax_invoices").update({status:'cancelled',cancel_reason:reason.trim()}).eq("id",inv.id);
+  if(error) return toast(error.message.replace(/^.*INV_LOCKED: /,''));
+  toast(inv.invoice_no+" cancelled"); if(onDone) onDone();
+}
+/* Draft / edit / issue form. opts: {inv} to edit a draft, {milestone} to prefill from a payment milestone. */
+async function invoiceForm(p,opts,onDone){
+  const co=await loadCompany();
+  const inv=opts.inv||null, m=opts.milestone||null;
+  const {data:bv}=await sb.from("boq_versions").select("version,gst_pct").eq("project_id",p.id).order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  const boqRef=inv?inv.boq_ref:`BOQ/${p.code||'LSA'}${bv&&bv[0]?'/v'+bv[0].version:''}`;
+  const gstDef=Number((bv&&bv[0]&&bv[0].gst_pct)||co.default_gst_pct||18);
+  const stateDef=p.client_state_code||gstStateOf(p.client_gstin)||co.state_code||"29";
+  let lines=inv?JSON.parse(JSON.stringify(inv.lines||[])):[];
+  if(!inv){
+    const amt=m?Number(m.amount)||0:0;
+    lines=[{description:m?`Interior works — ${m.label} (as per ${boqRef})`:`Interior design & execution works as per ${boqRef}`,sac:co.default_sac||"995478",qty:1,uom:"LS",rate:amt?Math.round(amt/(1+gstDef/100)):0,gst_pct:gstDef}];
+  }
+  const stateOpts=sel=>Object.keys(GST_STATES).map(k=>`<option value="${k}" ${k===sel?'selected':''}>${k} · ${GST_STATES[k]}</option>`).join('');
+  const milesOpt=(opts.miles||[]).map(x=>`<option value="${x.id}" ${(inv&&String(inv.milestone_id)===String(x.id))||(m&&String(m.id)===String(x.id))?'selected':''}>${esc(x.label)} · ${fmt(x.amount)}</option>`).join('');
+  openModal(`<div class="modal-h">${inv?'Edit draft invoice':'New tax invoice'} · ${esc(p.code||p.name||'')}</div>
+    <div class="modal-b" style="max-height:72vh;overflow:auto">
+      <div class="grid2">
+        <div class="field"><label>Bill to (legal name)</label><input id="ti_name" value="${esc(inv?inv.bill_to_name:(p.billing_name||p.client_name||p.name||''))}"></div>
+        <div class="field"><label>Client GSTIN <span style="color:var(--ink-soft);font-weight:400">(blank = B2C)</span></label><input id="ti_gstin" maxlength="15" style="text-transform:uppercase" value="${esc(inv?inv.bill_to_gstin||'':(p.client_gstin||''))}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Billing address</label><input id="ti_addr" value="${esc(inv?inv.bill_to_address||'':(p.billing_address||p.site_address||''))}"></div>
+        <div class="field"><label>Client PAN</label><input id="ti_pan" maxlength="10" style="text-transform:uppercase" value="${esc(inv?inv.bill_to_pan||'':(p.pan||''))}"></div>
+      </div>
+      <div class="grid4">
+        <div class="field"><label>Client state</label><select id="ti_state">${stateOpts(inv?(inv.bill_to_state_code||stateDef):stateDef)}</select></div>
+        <div class="field"><label>Place of supply</label><select id="ti_pos">${stateOpts(inv?(inv.place_of_supply||stateDef):stateDef)}</select></div>
+        <div class="field"><label>Invoice date</label><input id="ti_date" type="date" value="${inv?inv.invoice_date:todayISO()}"></div>
+        <div class="field"><label>Due date</label><input id="ti_due" type="date" value="${inv?(inv.due_date||''):''}"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Against milestone (optional)</label><select id="ti_mile"><option value="">—</option>${milesOpt}</select></div>
+        <div class="field"><label>Note on invoice</label><input id="ti_note" value="${esc(inv?inv.note||'':'')}" placeholder="e.g. Advance adjusted against PI LSA-2026-0xx/PI-1"></div>
+      </div>
+      <div class="sec-label" style="margin-top:8px">Lines</div>
+      <div id="ti_lines"></div>
+      <button class="ghost" id="ti_addline" style="margin-top:6px">+ Add line</button>
+      <div id="ti_tot" style="margin-top:12px"></div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:12px;margin-top:10px"><input type="checkbox" id="ti_save" checked> Save bill-to details (name, GSTIN, PAN, address, state) on this project</label>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="ghost" id="ti_draft">Save draft</button><button class="primary" id="ti_issue">Issue invoice →</button></div>`);
+  const supply=()=>($("#ti_pos").value===co.state_code?'intra':'inter');
+  const drawLines=()=>{
+    $("#ti_lines").innerHTML=`<table style="font-size:12px"><thead><tr><th>Description</th><th style="width:80px">SAC/HSN</th><th class="num" style="width:70px">Qty</th><th style="width:60px">Unit</th><th class="num" style="width:110px">Rate (ex-GST)</th><th class="num" style="width:60px">GST%</th><th class="num" style="width:100px">Amount</th><th></th></tr></thead><tbody>
+      ${lines.map((l,i)=>`<tr>
+        <td><input class="tl" data-i="${i}" data-k="description" value="${esc(l.description||'')}"></td>
+        <td><input class="tl mono" data-i="${i}" data-k="sac" value="${esc(l.sac||'')}"></td>
+        <td><input class="tl mono" data-i="${i}" data-k="qty" type="number" step="0.01" min="0" value="${Number(l.qty)||0}" style="text-align:right"></td>
+        <td><input class="tl" data-i="${i}" data-k="uom" value="${esc(l.uom||'')}"></td>
+        <td><input class="tl mono" data-i="${i}" data-k="rate" type="number" step="1" min="0" value="${Number(l.rate)||0}" style="text-align:right"></td>
+        <td><input class="tl mono" data-i="${i}" data-k="gst_pct" type="number" step="0.5" min="0" value="${Number(l.gst_pct)||0}" style="text-align:right"></td>
+        <td class="num mono" id="tl_amt_${i}">${fmt(Math.round((Number(l.qty)||0)*(Number(l.rate)||0)))}</td>
+        <td>${lines.length>1?`<button class="linkbtn del" data-rm="${i}">✕</button>`:''}</td></tr>`).join('')}
+      </tbody></table>`;
+    $("#ti_lines").querySelectorAll(".tl").forEach(inp=>inp.oninput=()=>{ const l=lines[Number(inp.dataset.i)]; const k=inp.dataset.k; l[k]=(k==='qty'||k==='rate'||k==='gst_pct')?Number(inp.value)||0:inp.value; const a=$("#tl_amt_"+inp.dataset.i); if(a) a.textContent=fmt(Math.round((Number(l.qty)||0)*(Number(l.rate)||0))); drawTot(); });
+    $("#ti_lines").querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{ lines.splice(Number(b.dataset.rm),1); drawLines(); drawTot(); });
+  };
+  const drawTot=()=>{
+    const t=invTotals(lines,supply());
+    $("#ti_tot").innerHTML=`<div style="display:flex;justify-content:flex-end"><div style="width:300px;font-size:12.5px">
+      <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Taxable value</span><span class="mono">${fmt(t.taxable)}</span></div>
+      ${supply()==='intra'?`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>CGST</span><span class="mono">₹${t.cgst.toLocaleString('en-IN')}</span></div><div style="display:flex;justify-content:space-between;padding:3px 0"><span>SGST</span><span class="mono">₹${t.sgst.toLocaleString('en-IN')}</span></div>`
+        :`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>IGST</span><span class="mono">₹${t.igst.toLocaleString('en-IN')}</span></div>`}
+      ${t.round_off?`<div style="display:flex;justify-content:space-between;padding:3px 0;color:var(--ink-soft)"><span>Round off</span><span class="mono">${t.round_off>0?'+':''}${t.round_off}</span></div>`:''}
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line-2);font-weight:700"><span>Total</span><span class="mono">${fmt(t.total)}</span></div>
+      <div style="font-size:11px;color:var(--ink-soft)">${supply()==='intra'?'Intra-state supply · CGST + SGST':'Inter-state supply · IGST'} · place of supply ${esc(GST_STATES[$("#ti_pos").value]||'')}</div></div></div>`;
+  };
+  $("#ti_gstin").oninput=()=>{ const s=gstStateOf($("#ti_gstin").value); if(s){ $("#ti_state").value=s; $("#ti_pos").value=s; drawTot(); } };
+  $("#ti_state").onchange=()=>{ $("#ti_pos").value=$("#ti_state").value; drawTot(); };
+  $("#ti_pos").onchange=drawTot;
+  $("#ti_addline").onclick=()=>{ lines.push({description:"",sac:co.default_sac||"",qty:1,uom:"Nos",rate:0,gst_pct:gstDef}); drawLines(); drawTot(); };
+  drawLines(); drawTot();
+  const collect=()=>{
+    const name=$("#ti_name").value.trim(); if(!name){ toast("Bill-to name is required"); return null; }
+    const gstin=$("#ti_gstin").value.trim().toUpperCase();
+    if(gstin&&!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)){ toast("That GSTIN doesn't look valid (15 characters, e.g. 29ABCDE1234F1Z5)"); return null; }
+    const live=lines.filter(l=>(l.description||'').trim()&&Number(l.qty)>0&&Number(l.rate)>0);
+    if(!live.length){ toast("Add at least one line with a description, quantity and rate"); return null; }
+    const sup=supply(); const t=invTotals(live,sup);
+    return {project_id:p.id, milestone_id:$("#ti_mile").value?Number($("#ti_mile").value):null,
+      invoice_date:$("#ti_date").value||todayISO(), due_date:$("#ti_due").value||null,
+      bill_to_name:name, bill_to_address:$("#ti_addr").value.trim()||null, bill_to_gstin:gstin||null, bill_to_pan:$("#ti_pan").value.trim().toUpperCase()||null,
+      bill_to_state_code:$("#ti_state").value, place_of_supply:$("#ti_pos").value, supply_type:sup,
+      lines:live, taxable_value:t.taxable, cgst:t.cgst, sgst:t.sgst, igst:t.igst, round_off:t.round_off, total:t.total,
+      boq_ref:boqRef, note:$("#ti_note").value.trim()||null};
+  };
+  const saveProject=async(rec)=>{
+    if(!$("#ti_save").checked) return;
+    await sb.from("projects").update({billing_name:rec.bill_to_name,client_gstin:rec.bill_to_gstin,billing_address:rec.bill_to_address,client_state_code:rec.bill_to_state_code,...(rec.bill_to_pan?{pan:rec.bill_to_pan}:{})}).eq("id",p.id);
+    Object.assign(p,{billing_name:rec.bill_to_name,client_gstin:rec.bill_to_gstin,billing_address:rec.bill_to_address,client_state_code:rec.bill_to_state_code});
+  };
+  $("#ti_draft").onclick=async()=>{
+    const rec=collect(); if(!rec) return;
+    const q=inv?sb.from("tax_invoices").update(rec).eq("id",inv.id):sb.from("tax_invoices").insert({...rec,created_by:me.id});
+    const {error}=await q; if(error) return toast(error.message);
+    await saveProject(rec); closeModal(); toast("Draft saved"); if(onDone) onDone();
+  };
+  $("#ti_issue").onclick=async()=>{
+    const rec=collect(); if(!rec) return;
+    if(!confirm(`Issue this tax invoice for ${fmt(rec.total)} to ${rec.bill_to_name}?\n\nA number will be reserved from the company series and the invoice becomes final.`)) return;
+    const btn=$("#ti_issue"); btn.disabled=true;
+    try{
+      const {data:no,error:nErr}=await sb.rpc("next_tax_invoice_number",{p_date:rec.invoice_date});
+      if(nErr||!no) throw new Error("Could not reserve an invoice number"+(nErr?": "+nErr.message:""));
+      const full={...rec,invoice_no:no,status:'issued'};
+      let saved;
+      if(inv){ const {data,error}=await sb.from("tax_invoices").update(full).eq("id",inv.id).select().single(); if(error) throw error; saved=data; }
+      else { const {data,error}=await sb.from("tax_invoices").insert({...full,created_by:me.id}).select().single(); if(error) throw error; saved=data; }
+      await saveProject(rec);
+      if(p.lead_id) sb.from("lead_activities").insert({lead_id:p.lead_id,type:"Note",text:`Tax invoice ${no} issued · ${fmt(rec.total)}`,by_user:me.id}).then(()=>{},()=>{});
+      closeModal(); toast("Issued "+no); if(onDone) onDone(); showTaxInvoiceDoc(p,saved);
+    }catch(e){ toast(String(e.message||e)); btn.disabled=false; }
+  };
+}
+/* The printable sheet — mirrors the proforma layout, plus everything a GST tax invoice must carry. */
+async function showTaxInvoiceDoc(p,inv){
+  const co=await loadCompany();
+  const lines=inv.lines||[]; const intra=inv.supply_type==='intra';
+  const gstSum=Number(inv.cgst)+Number(inv.sgst)+Number(inv.igst);
+  const bySac={}; lines.forEach(l=>{ const k=(l.sac||'—')+'|'+(Number(l.gst_pct)||0); bySac[k]=bySac[k]||{sac:l.sac||'—',pct:Number(l.gst_pct)||0,taxable:0}; bySac[k].taxable+=Number(l.amount)||0; });
+  const dl=d=>d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):'—';
+  const title=inv.kind==='credit_note'?'CREDIT NOTE':'TAX INVOICE';
+  const doc=`
+  <div id="tidoc" style="font-family:'Times New Roman',serif;max-width:760px;margin:0 auto;background:#fff;color:#1a1a1a;position:relative">
+    ${inv.status==='cancelled'?`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><div style="font-size:72px;font-weight:700;color:rgba(180,69,58,.18);transform:rotate(-24deg);letter-spacing:8px">CANCELLED</div></div>`:''}
+    <div style="background:#0D0D27;color:#fff;padding:24px 32px;display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:12px;letter-spacing:3px;color:#D7A758">${esc(co.legal_name||'LINTEL SPACE ATELIER')}</div>
+        <div style="font-size:11px;color:#9CA0B0;margin-top:6px;line-height:1.5">${esc(co.address||'')}<br>${esc(co.phone||'')} · ${esc(co.email||'')}<br>
+          GSTIN: <b style="color:#fff">${esc(co.gstin||'—')}</b>${co.pan?' · PAN: '+esc(co.pan):''} · State: ${esc(co.state_name||'')} (${esc(co.state_code||'')})</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;letter-spacing:1px">${title}</div>
+        <div style="font-size:13px;color:#D7A758;margin-top:6px">${esc(inv.invoice_no||'DRAFT')}</div>
+        <div style="font-size:12px;color:#9CA0B0;margin-top:4px">Date: ${dl(inv.invoice_date)}${inv.due_date?' · Due: '+dl(inv.due_date):''}</div>
+      </div>
+    </div>
+    <div style="padding:24px 32px">
+      <div style="display:flex;justify-content:space-between;gap:20px;margin-bottom:18px">
+        <div style="flex:1">
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Bill to</div>
+          <div style="font-size:15px;font-weight:600">${esc(inv.bill_to_name)}</div>
+          <div style="font-size:13px;color:#555">${esc(inv.bill_to_address||'')}</div>
+          <div style="font-size:12px;color:#555;margin-top:3px">${inv.bill_to_gstin?'GSTIN: <b>'+esc(inv.bill_to_gstin)+'</b>':'Unregistered (B2C)'}${inv.bill_to_pan?' · PAN: '+esc(inv.bill_to_pan):''}<br>State: ${esc(GST_STATES[inv.bill_to_state_code]||'')} (${esc(inv.bill_to_state_code||'')})</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:4px">Project</div>
+          <div style="font-size:14px;font-weight:600">${esc(p.code||'')}</div>
+          <div style="font-size:13px;color:#555">${esc(p.name||'')}</div>
+          <div style="font-size:12px;color:#555;margin-top:6px">Place of supply: ${esc(GST_STATES[inv.place_of_supply]||'')} (${esc(inv.place_of_supply||'')})<br>${esc(inv.boq_ref||'')}</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin:12px 0">
+        <thead><tr style="background:#F6F4EF;text-align:left">
+          <th style="padding:9px 10px;font-size:11px;color:#8A8FA3">#</th><th style="padding:9px 10px;font-size:11px;color:#8A8FA3">DESCRIPTION</th><th style="padding:9px 10px;font-size:11px;color:#8A8FA3">SAC/HSN</th>
+          <th style="padding:9px 10px;font-size:11px;color:#8A8FA3;text-align:right">QTY</th><th style="padding:9px 10px;font-size:11px;color:#8A8FA3;text-align:right">RATE</th><th style="padding:9px 10px;font-size:11px;color:#8A8FA3;text-align:right">GST</th><th style="padding:9px 10px;font-size:11px;color:#8A8FA3;text-align:right">TAXABLE</th></tr></thead>
+        <tbody>${lines.map((l,i)=>`<tr style="border-bottom:1px solid #ECECEC">
+          <td style="padding:10px;color:#999">${i+1}</td><td style="padding:10px">${esc(l.description)}</td><td style="padding:10px" class="mono">${esc(l.sac||'')}</td>
+          <td style="padding:10px;text-align:right">${Number(l.qty)} ${esc(l.uom||'')}</td><td style="padding:10px;text-align:right">₹${Number(l.rate).toLocaleString('en-IN')}</td><td style="padding:10px;text-align:right">${Number(l.gst_pct)}%</td>
+          <td style="padding:10px;text-align:right;font-weight:600">₹${Number(l.amount).toLocaleString('en-IN')}</td></tr>`).join('')}</tbody>
+      </table>
+      <div style="display:flex;justify-content:space-between;gap:24px;align-items:flex-start">
+        <div style="flex:1;font-size:12px">
+          <table style="border-collapse:collapse;font-size:12px"><thead><tr style="color:#8A8FA3"><th style="text-align:left;padding:4px 8px 4px 0">SAC/HSN</th><th style="text-align:right;padding:4px 8px">Taxable</th>${intra?'<th style="text-align:right;padding:4px 8px">CGST</th><th style="text-align:right;padding:4px 8px">SGST</th>':'<th style="text-align:right;padding:4px 8px">IGST</th>'}</tr></thead>
+            <tbody>${Object.values(bySac).map(s=>`<tr><td style="padding:3px 8px 3px 0" class="mono">${esc(s.sac)}</td><td style="text-align:right;padding:3px 8px">₹${s.taxable.toLocaleString('en-IN')}</td>${intra?`<td style="text-align:right;padding:3px 8px">${s.pct/2}% · ₹${(Math.round(s.taxable*s.pct/2)/100).toLocaleString('en-IN')}</td><td style="text-align:right;padding:3px 8px">${s.pct/2}% · ₹${(Math.round(s.taxable*s.pct/2)/100).toLocaleString('en-IN')}</td>`:`<td style="text-align:right;padding:3px 8px">${s.pct}% · ₹${(Math.round(s.taxable*s.pct)/100).toLocaleString('en-IN')}</td>`}</tr>`).join('')}</tbody></table>
+          <div style="margin-top:12px;color:#555"><b>Amount in words:</b> ${esc(inrWords(inv.total))}</div>
+          ${inv.note?`<div style="margin-top:8px;color:#555">${esc(inv.note)}</div>`:''}
+        </div>
+        <div style="width:270px;font-size:13px">
+          <div style="display:flex;justify-content:space-between;padding:4px 0"><span>Taxable value</span><span>₹${Number(inv.taxable_value).toLocaleString('en-IN')}</span></div>
+          ${intra?`<div style="display:flex;justify-content:space-between;padding:4px 0"><span>CGST</span><span>₹${Number(inv.cgst).toLocaleString('en-IN')}</span></div><div style="display:flex;justify-content:space-between;padding:4px 0"><span>SGST</span><span>₹${Number(inv.sgst).toLocaleString('en-IN')}</span></div>`
+                 :`<div style="display:flex;justify-content:space-between;padding:4px 0"><span>IGST</span><span>₹${Number(inv.igst).toLocaleString('en-IN')}</span></div>`}
+          ${Number(inv.round_off)?`<div style="display:flex;justify-content:space-between;padding:4px 0;color:#777"><span>Round off</span><span>${Number(inv.round_off)>0?'+':''}${Number(inv.round_off)}</span></div>`:''}
+          <div style="display:flex;justify-content:space-between;padding:12px;background:#0D0D27;color:#fff;border-radius:6px;margin-top:6px"><span style="font-weight:600">Total${inv.kind==='credit_note'?' credit':' payable'}</span><span style="font-weight:700;color:#D7A758">₹${Number(inv.total).toLocaleString('en-IN')}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:22px;display:flex;gap:24px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px"><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Pay via UPI</div><div style="font-size:14px;font-weight:600">${esc(co.upi||'')}</div></div>
+        <div style="flex:1;min-width:220px"><div style="font-size:11px;color:#8A8FA3;text-transform:uppercase;margin-bottom:6px">Bank details</div><div style="font-size:13px;line-height:1.6">A/c: ${esc(co.legal_name||'')}<br>${esc(co.bank||'')}</div></div>
+      </div>
+      <div style="margin-top:22px;display:flex;justify-content:space-between;align-items:flex-end;gap:20px">
+        <div style="font-size:11px;color:#999;line-height:1.6;flex:1">Declaration: we declare that this invoice shows the actual price of the goods and services described and that all particulars are true and correct. Whether tax is payable on reverse charge: No. Subject to Bengaluru jurisdiction. This is a computer-generated invoice.</div>
+        <div style="text-align:center;font-size:12px;color:#555;min-width:180px">For ${esc(co.legal_name||'Lintel Space Atelier')}<div style="height:44px"></div><div style="border-top:1px solid #999;padding-top:4px">Authorised signatory</div></div>
+      </div>
+    </div>
+  </div>`;
+  openModal(`<div class="modal-h">${inv.kind==='credit_note'?'Credit note':'Tax invoice'} · ${esc(inv.invoice_no||'draft')}</div>
+    <div class="modal-b">${doc}</div>
+    <div class="modal-f">
+      <button class="ghost" onclick="closeModal()">Close</button>
+      ${p.client_phone&&inv.status==='issued'?`<button class="wa-btn" id="ti-wa">Send on WhatsApp</button>`:''}
+      ${inv.status==='issued'?`<button class="ghost" id="ti-chat" title="Share the PDF with the team chat">💬 Send to chat</button>`:''}
+      <button class="primary" id="ti-print">Print / PDF</button>
+    </div>`);
+  $("#ti-print").onclick=()=>{ const w=window.open("","_blank"); w.document.write(`<html><head><title>${esc(inv.invoice_no||'Invoice')}</title></head><body style="margin:0">${doc}</body></html>`); w.document.close(); setTimeout(()=>w.print(),300); };
+  if($("#ti-wa")) $("#ti-wa").onclick=()=>waOpen(p.client_phone,`Dear ${p.client_name||'Client'},\n\nPlease find GST tax invoice ${inv.invoice_no} dated ${dl(inv.invoice_date)} for your project${p.code?' ('+p.code+')':''}.\n\nTotal: ₹${Number(inv.total).toLocaleString('en-IN')} (incl. GST)${inv.due_date?'\nDue by: '+dl(inv.due_date):''}\n\nPay via UPI: ${co.upi||''}\nBank: ${co.bank||''}\n\nThe PDF follows. Thank you,\nLintel Space Atelier`);
+  if($("#ti-chat")) $("#ti-chat").onclick=()=>docSendToChat({label:inv.invoice_no+" · "+(p.code||p.name||"")+" · "+fmt(inv.total),fname:("Lintel_"+inv.invoice_no).replace(/[^A-Za-z0-9._-]+/g,"_")+".pdf",kind:"Tax invoice",docHtml:doc,p});
+}
+/* Generic "share this sheet as a PDF in team chat" — same path as piSendToChat. */
+async function docSendToChat({label,fname,kind,docHtml,p}){
+  if(!CHAT.people.length){ try{ await chatLoadPeople(); }catch(e){} }
+  openModal(`<div class="modal-h">Send ${esc(kind.toLowerCase())} to chat</div>
+    <div class="modal-b"><div class="banner">Shares the PDF of <b>${esc(label)}</b> in chat.</div>
+      <div class="field"><label>Send to</label><select id="dsc_dest"><option value="team"># Lintel Team (everyone)</option>${CHAT.people.map(pe=>`<option value="${pe.id}">${esc(chatName(pe))}</option>`).join("")}</select></div>
+      <div class="field"><label>Note (optional)</label><input id="dsc_note"></div></div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="dsc_go">Send →</button></div>`);
+  $("#dsc_go").onclick=async()=>{
+    const dest=$("#dsc_dest").value, note=$("#dsc_note").value.trim(); const btn=$("#dsc_go"); btn.disabled=true; btn.textContent="Building PDF…";
+    try{
+      await gLoadLib(GPDF_LIB);
+      const host=document.createElement("div"); host.style.cssText="position:fixed;left:-2000px;top:0;width:760px;background:#fff;z-index:-1"; host.innerHTML=docHtml; document.body.appendChild(host);
+      let blob; try{ blob=await html2pdf().from(host.firstElementChild||host).set({margin:[8,8,10,8],jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},html2canvas:{scale:2,useCORS:true,windowWidth:Math.max(window.innerWidth,900)}}).outputPdf("blob"); } finally { host.remove(); }
+      btn.textContent="Uploading…";
+      const convKey=dest==="team"?"team":chatDmKey(me.id,dest);
+      const path=(dest==="team"?"team":convKey.replace(/[^A-Za-z0-9-]+/g,"_"))+"/"+Date.now()+"_"+fname;
+      const {error:upErr}=await sb.storage.from("chat-files").upload(path,blob,{contentType:"application/pdf"}); if(upErr) throw new Error("Upload failed: "+upErr.message);
+      const {error}=await sb.from("chat_messages").insert({conv_key:convKey,sender:me.id,recipient:dest==="team"?null:dest,body:note||(kind+" · "+label),file_path:path,file_name:fname,file_size:blob.size}); if(error) throw new Error(error.message);
+      closeModal(); toast(kind+" sent to "+(dest==="team"?"# Lintel Team":chatName(CHAT.people.find(x=>x.id===dest)||{})));
+      if(p&&p.lead_id) sb.from("lead_activities").insert({lead_id:p.lead_id,type:"Note",text:kind+" shared to chat · "+label,by_user:me.id}).then(()=>{},()=>{});
+    }catch(e){ toast(String(e.message||e)); btn.disabled=false; btn.textContent="Send →"; }
+  };
+}
+
+/* ---- Vendor bills (inside a vendor PO) ---- */
+const BILL_KINDS=[["bill","Bill"],["advance_request","Advance request"],["ra_bill","RA bill"],["final","Final bill"],["debit_note","Debit note"]];
+const billPayPill=s=>s==='paid'?'<span class="ex-st done">Paid</span>':s==='part_paid'?'<span class="ex-st in_progress">Part-paid</span>':s==='cancelled'?'<span class="ex-st">Cancelled</span>':'<span class="ex-st" style="background:#F3DEDC;color:#B4453A">Unpaid</span>';
+function vpoBillsCard(o,bills,total){
+  const live=bills.filter(b=>b.status!=='cancelled');
+  const billed=live.reduce((s,b)=>s+Number(b.total||0),0), outstanding=live.reduce((s,b)=>s+Number(b.outstanding||0),0);
+  const canBill=VPO_COMMITTED.includes(o.status)&&canWrite();
+  return `<div class="pw-card">
+    <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Vendor bills</div>
+      <div style="display:flex;gap:10px;align-items:center"><span style="font-size:12px;color:var(--ink-soft)">billed ${fmt(billed)} of ${fmt(total)}${outstanding?` · <b style="color:#B4453A">${fmt(outstanding)} payable</b>`:''}</span>${canBill?`<button class="primary" id="billAdd">+ Add bill</button>`:''}</div></div>
+    ${bills.length?`<table><thead><tr><th>Bill no.</th><th>Date</th><th>Due</th><th>Type</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">TDS</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Outstanding</th><th>Status</th><th></th></tr></thead><tbody>
+      ${bills.map(b=>`<tr>
+        <td class="mono" style="font-size:12px">${esc(b.bill_no)}${b.file_path?` <button class="linkbtn" data-billf="${b.id}" title="Open the bill scan">📎</button>`:''}</td>
+        <td>${dShort(b.bill_date)}</td><td class="${b.pay_status!=='paid'?dueClass(b.due_date):''}">${dShort(b.due_date)}${b.days_overdue>0?`<div style="font-size:10px;color:#B4453A">${b.days_overdue}d overdue</div>`:''}</td>
+        <td style="font-size:12px">${esc((BILL_KINDS.find(k=>k[0]===b.kind)||[,b.kind])[1])}</td>
+        <td class="num mono">${fmt(b.taxable)}</td><td class="num mono">${fmt(b.gst_amount)}</td><td class="num mono">${Number(b.tds_amount)?'−'+fmt(b.tds_amount):'—'}</td>
+        <td class="num mono" style="font-weight:600">${fmt(b.total)}</td><td class="num mono">${fmt(b.paid)}</td><td class="num mono" style="color:${Number(b.outstanding)>0?'#B4453A':'inherit'}">${fmt(b.outstanding)}</td>
+        <td>${billPayPill(b.pay_status)}</td>
+        <td style="white-space:nowrap">${b.status!=='cancelled'&&isAdminLevel()?`<button class="linkbtn del" data-billx="${b.id}">Cancel</button>`:''}</td></tr>`).join('')}
+    </tbody></table>`:`<div style="font-size:13px;color:var(--ink-soft)">${VPO_COMMITTED.includes(o.status)?'No bills booked against this PO yet. Book the vendor\'s bill here the day it arrives — payables ageing starts from the bill date.':'Bills can be booked once the PO is approved.'}</div>`}
+  </div>`;
+}
+function billForm(p,o,total,billed,onDone){
+  openModal(`<div class="modal-h">Book vendor bill · ${esc(o.po_number)}</div>
+    <div class="modal-b">
+      <div class="hint" style="margin-bottom:10px">PO total ${fmt(total)} · already billed ${fmt(billed)} · headroom <b>${fmt(Math.max(0,total-billed))}</b>. A bill above the PO is refused — revise the PO first (commit-before-spend).</div>
+      <div class="grid4">
+        <div class="field"><label>Vendor's bill no.</label><input id="vb_no" placeholder="INV-1042"></div>
+        <div class="field"><label>Bill date</label><input id="vb_date" type="date" value="${todayISO()}"></div>
+        <div class="field"><label>Due date</label><input id="vb_due" type="date" placeholder="from vendor terms"></div>
+        <div class="field"><label>Type</label><select id="vb_kind">${BILL_KINDS.map(k=>`<option value="${k[0]}">${k[1]}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid4">
+        <div class="field"><label>Taxable amount</label><input id="vb_tax" type="number" min="0" step="1"></div>
+        <div class="field"><label>GST %</label><input id="vb_gst" type="number" min="0" step="0.5" value="${Number(o.gst_pct)||0}"></div>
+        <div class="field"><label>TDS %</label><select id="vb_tds">${["0","1","2","5","10"].map(v=>`<option value="${v}">${v}%</option>`).join('')}</select></div>
+        <div class="field"><label>Total (incl. GST)</label><input id="vb_total" class="mono" disabled value="₹0"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Note</label><input id="vb_note" placeholder="e.g. RA-2 for wardrobes, 60% complete"></div>
+        <div class="field"><label>Bill scan (PDF / image, optional)</label><input id="vb_file" type="file" accept="application/pdf,image/*"></div>
+      </div>
+    </div>
+    <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="vb_go">Book bill</button></div>`);
+  const recalc=()=>{ const t=Number($("#vb_tax").value)||0, g=Number($("#vb_gst").value)||0; $("#vb_total").value=fmt(Math.round(t*(1+g/100))); };
+  $("#vb_tax").oninput=recalc; $("#vb_gst").oninput=recalc;
+  $("#vb_go").onclick=async()=>{
+    const no=$("#vb_no").value.trim(), taxable=Number($("#vb_tax").value)||0;
+    if(!no) return toast("Enter the vendor's bill number"); if(!taxable) return toast("Enter the taxable amount");
+    const btn=$("#vb_go"); btn.disabled=true;
+    try{
+      let file_path=null; const f=$("#vb_file").files[0];
+      if(f){ if(f.size>15*1024*1024) throw new Error("Bill file is over 15 MB"); file_path=`${p.id}/vendor_bill/${Date.now()}_${f.name.replace(/[^A-Za-z0-9._-]+/g,'_')}`; const {error:uErr}=await sb.storage.from("project-files").upload(file_path,f,{contentType:f.type||'application/octet-stream'}); if(uErr) throw new Error("Upload failed: "+uErr.message); }
+      const {error}=await sb.from("vendor_bills").insert({po_id:o.id,bill_no:no,bill_date:$("#vb_date").value||todayISO(),due_date:$("#vb_due").value||null,kind:$("#vb_kind").value,taxable,gst_pct:Number($("#vb_gst").value)||0,tds_pct:Number($("#vb_tds").value)||0,note:$("#vb_note").value.trim()||null,file_path,created_by:me.id});
+      if(error) throw new Error(error.message.replace(/^.*BILL_DENIED: /,''));
+      closeModal(); toast("Bill "+no+" booked"); if(onDone) onDone();
+    }catch(e){ toast(String(e.message||e)); btn.disabled=false; }
+  };
+}
+async function billOpenFile(path){ const {data,error}=await sb.storage.from("project-files").createSignedUrl(path,600); if(error||!data) return toast("Couldn't open the bill file"); window.open(data.signedUrl,"_blank"); }
+
+/* ---- Founder dashboard: Cash & payables ---- */
+async function renderCashflow(){
+  const host=$("#dashCashBody"); if(!host) return;
+  const [{data:c,error:e1},{data:pay}]=await Promise.all([sb.rpc("cash_summary"),sb.rpc("payables_summary")]);
+  if(e1||!c){ host.innerHTML=`<div class="empty" style="padding:10px 0">Couldn't load the cash view.</div>`; return; }
+  if(c.denied){ host.innerHTML=`<div class="empty" style="padding:10px 0">Visible to Admin / Sales Head.</div>`; return; }
+  const months=c.months||[], tm=c.this_month||{}, lm=c.last_month||{}, fy=c.fy||{};
+  const payOut=(pay&&!pay.denied)?Number(pay.total_outstanding)||0:0;
+  const max=Math.max(1,...months.map(m=>Math.max(Number(m.cash_in)||0,Number(m.cash_out)||0)));
+  const tile=(label,val,color,sub,id)=>`<div class="kpi" ${id?`id="${id}"`:''} style="--kc:${color};cursor:${id?'pointer':'default'}"><div class="kpi-val" title="${esc(fmt(val))}">${fmtC(val)||"₹0"}</div><div class="kpi-lbl">${esc(label)}${sub?`<div style="font-size:10px;font-weight:400;color:var(--ink-soft)">${sub}</div>`:''}</div></div>`;
+  const net=(Number(fy.in)||0)-(Number(fy.out)||0);
+  const share=(k,label)=>{ const v=Number(fy[k])||0; return v?`<span style="display:inline-flex;gap:6px;align-items:center;padding:3px 9px;border:1px solid var(--line-2);border-radius:999px;font-size:11.5px"><span style="color:var(--ink-soft)">${label}</span><b title="${esc(fmt(v))}">${fmtC(v)}</b></span>`:''; };
+  host.innerHTML=`
+   <div class="dash-kpis" style="margin:0 0 12px">
+     ${tile("In · this month",Number(tm.in)||0,"#4f7d52",`last month ${fmtC(lm.in)||"₹0"}`)}
+     ${tile("Out · this month",Number(tm.out)||0,"#B4453A",`last month ${fmtC(lm.out)||"₹0"}`)}
+     ${tile("Net · FY "+(c.fy_label||""),net,net>=0?"#4f7d52":"#B4453A",`in ${fmtC(fy.in)||"₹0"} · out ${fmtC(fy.out)||"₹0"}`)}
+     ${tile("Payables outstanding",payOut,"#c0692d",(pay&&!pay.denied&&Number(pay.committed_unbilled))?`+ ${fmtC(pay.committed_unbilled)} on POs not yet billed →`:"vendor bills not yet paid →","cashPayTile")}
+   </div>
+   <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 2px 12px">${share('vendors','Vendors')}${share('site_expenses','Site expenses')}${share('payroll','Payroll')}${share('reimbursements','Reimbursements')}<span style="font-size:11px;color:var(--ink-soft);align-self:center">· FY out, by ledger${c.payroll_last_month?` · payroll booked to ${esc(new Date(c.payroll_last_month).toLocaleDateString('en-IN',{month:'short',year:'numeric'}))}`:''}</span></div>
+   <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 8px">By month · <span style="color:#A9821F">in</span> vs <span style="color:#B4453A">out</span></div>
+   <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px">
+     ${months.map(m=>{const i=Number(m.cash_in)||0,o=Number(m.cash_out)||0,n=i-o;return `<div style="display:flex;align-items:center;gap:10px;font-size:12px">
+       <span style="width:64px;flex:0 0 64px;color:var(--ink-soft)">${esc(m.label)}</span>
+       <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+         <div style="background:var(--paper-2);border-radius:4px;overflow:hidden"><div style="height:9px;width:${Math.max(i?2:0,Math.round(i/max*100))}%;background:linear-gradient(90deg,#C9A24B,#A9821F)"></div></div>
+         <div style="background:var(--paper-2);border-radius:4px;overflow:hidden"><div style="height:9px;width:${Math.max(o?2:0,Math.round(o/max*100))}%;background:linear-gradient(90deg,#d98a7f,#B4453A)"></div></div></div>
+       <span style="width:76px;flex:0 0 76px;text-align:right;font-weight:600" title="in ${esc(fmt(i))}">${fmtC(i)||"₹0"}</span>
+       <span style="width:76px;flex:0 0 76px;text-align:right;color:#B4453A" title="out ${esc(fmt(o))}">${fmtC(o)||"₹0"}</span>
+       <span style="width:76px;flex:0 0 76px;text-align:right;color:${n>=0?'#4f7d52':'#B4453A'}" title="net ${esc(fmt(n))}">${n>=0?'+':'−'}${fmtC(Math.abs(n))||"₹0"}</span></div>`;}).join("")}
+   </div>
+   <div class="s2l-hint">Operating cash from the ledgers Lintel OS holds — in: client receipts (Payments tab); out: vendor payments against POs, site expenses, published salary slips (by slip month) and approved reimbursements. Not the bank statement: anything paid outside these ledgers is not here. Tax-invoiced this FY: <b>${fmtC(c.invoiced_fy)||"₹0"}</b> · receivable on active projects: <b>${fmtC(c.receivable_active)||"₹0"}</b>.</div>`;
+  const t=$("#cashPayTile"); if(t) t.onclick=()=>payablesModal(pay);
+}
+function payablesModal(pay){
+  if(!pay||pay.denied) return toast("Payables are visible to Admin / Sales Head");
+  const b=pay.buckets||{}; const bk=[["current","Not due"],["d1_30","1–30 d"],["d31_60","31–60 d"],["d61_90","61–90 d"],["d90p","90+ d"]];
+  const bills=pay.bills||[], vendors=pay.vendors||[];
+  const go=(x)=>{ closeModal(); activeProject=Number(x.project_id); projectTab="finance"; try{projSubSel.finance="procurement";}catch(_){} activeVPO=Number(x.po_id); activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(n=>n.classList.toggle("active",n.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(activeProject),60); };
+  openModal(`<div class="modal-h">Payables · ageing as of ${esc(dShort(pay.as_of))}</div>
+    <div class="modal-b" style="max-height:72vh;overflow:auto">
+      <div class="dash-kpis" style="margin:0 0 12px">${bk.map(k=>`<div class="kpi" style="--kc:${k[0]==='current'?'#4f7d52':k[0]==='d90p'?'#B4453A':'#c0692d'};cursor:default"><div class="kpi-val" title="${esc(fmt(b[k[0]]))}">${fmtC(b[k[0]])||"₹0"}</div><div class="kpi-lbl">${k[1]}</div></div>`).join('')}</div>
+      ${vendors.length?`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 8px">By vendor</div>
+      <table style="font-size:12.5px"><thead><tr><th>Vendor</th><th class="num">Bills</th><th class="num">Outstanding</th><th class="num">Oldest overdue</th><th>Next due</th><th class="num" title="Payments recorded on this vendor's POs without a bill (advances)">Unapplied advances</th></tr></thead><tbody>
+        ${vendors.map(v=>`<tr><td><b>${esc(v.vendor)}</b></td><td class="num">${v.bills}</td><td class="num mono" style="color:#B4453A;font-weight:600">${fmt(v.outstanding)}</td><td class="num">${v.max_overdue>0?v.max_overdue+' d':'—'}</td><td>${dShort(v.next_due)}</td><td class="num mono">${Number(v.unapplied)?fmt(v.unapplied):'—'}</td></tr>`).join('')}
+      </tbody></table>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:14px 2px 8px">Open bills · oldest first</div>
+      <table style="font-size:12.5px"><thead><tr><th>Vendor · bill</th><th>Project</th><th>PO</th><th>Due</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Outstanding</th><th></th></tr></thead><tbody>
+        ${bills.map(x=>`<tr style="cursor:pointer" data-bill="${x.id}"><td><b>${esc(x.vendor)}</b><div style="font-size:11px;color:var(--ink-soft)" class="mono">${esc(x.bill_no)} · ${dShort(x.bill_date)}</div></td><td>${esc(x.project_code||x.project_name||'')}</td><td class="mono" style="font-size:11px">${esc(x.po_number)}</td><td class="${x.days_overdue>0?'overdue':''}">${dShort(x.due_date)}${x.days_overdue>0?`<div style="font-size:10px;color:#B4453A">${x.days_overdue}d</div>`:''}</td><td class="num mono">${fmt(x.total)}</td><td class="num mono">${fmt(x.paid)}</td><td class="num mono" style="color:#B4453A;font-weight:600">${fmt(x.outstanding)}</td><td><button class="linkbtn">Open PO →</button></td></tr>`).join('')}
+      </tbody></table>`:emptyState("Nothing outstanding","Book vendor bills on each approved PO (Procurement → open the PO → + Add bill) and they age here from the bill date.")}
+      <div class="s2l-hint" style="margin-top:10px">Outstanding = bill total − TDS − payments recorded against that bill. Advances paid on a PO before any bill show as unapplied; record the settling payment against the bill to clear it.</div>
+    </div>
+    <div class="modal-f"><button class="ghost" id="payCsv">Export CSV</button><button class="primary" onclick="closeModal()">Close</button></div>`);
+  document.querySelectorAll("[data-bill]").forEach(r=>r.onclick=()=>{ const x=bills.find(y=>String(y.id)===r.dataset.bill); if(x) go(x); });
+  const csv=$("#payCsv"); if(csv) csv.onclick=()=>{
+    const head=["Vendor","Bill no","Bill date","Due","Project","PO","Kind","Total","TDS","Paid","Outstanding","Days overdue"];
+    const rows=[head.join(",")].concat(bills.map(x=>[x.vendor,x.bill_no,x.bill_date,x.due_date||"",x.project_code||"",x.po_number,x.kind,x.total,x.tds,x.paid,x.outstanding,x.days_overdue].map(v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`).join(",")));
+    const blob=new Blob([rows.join("\n")],{type:"text/csv"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="payables.csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  };
 }
 
 /* ---- Direct expense quick-add (non-PO spend). One-ledger rule: if it belongs to a
@@ -12133,6 +12596,12 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b107",date:"24 Oct 2026",title:"Finance hub — GST tax invoices, vendor bills & payables, cash view",points:[
+    "Project → Finance now has a <b>Tax Invoices</b> tab. Press <b>+ New tax invoice</b> (or <b>Tax invoice</b> next to a milestone on Payments) to draft a GST invoice: bill-to name, GSTIN, state and place of supply, SAC lines, CGST/SGST or IGST worked out for you, amount in words. Press <b>Issue</b> to reserve the number from the company series (LSA/TI/26-27/001) — an issued invoice is final; cancel it with a reason to raise a fresh one. Proforma invoices stay on Payments for advances.",
+    "Open any approved vendor PO (Finance → Procurement) and press <b>+ Add bill</b> the day the vendor's bill arrives — bill no., date, taxable, GST, TDS, optional scan. Bills above the PO total are refused (revise the PO first). When you record a payment, pick <b>Against bill</b> so the bill clears.",
+    "Admin / Sales Head: the Dashboard has a new <b>Cash &amp; payables</b> card — money in (client receipts) vs money out (vendor payments, site expenses, payroll, reimbursements) by month, net for the FY, and a <b>Payables outstanding</b> tile. Click it for the ageing (not due / 1–30 / 31–60 / 61–90 / 90+ days), by vendor and by bill, with Export CSV; click a bill to open its PO.",
+    "Admins: fill the company GSTIN and PAN once in <span class=\"mono\">app_flags → company</span> — invoices print \"GSTIN: —\" until then.",
+  ]},
   {build:"b100",date:"8 Oct 2026",title:"Scope Matrix picks the right contract BOQ",points:[
     "If a project's Scope Matrix opened empty (LSA-2026-007 did), it was planning against a stray locked BOQ version with no lines. It now uses the <b>highest locked version that actually has lines</b>, and the <b>Contract BOQ</b> box on the matrix shows every version with its line count — pick one to pin it for that project, press <b>unpin</b> to go back to automatic.",
     "The founder dashboard's Production radar uses the same rule, so \"not planned yet\" means a real paid scope with no plan, not an empty version.",
@@ -14267,7 +14736,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b106 · 17 Oct 2026";
+const APP_BUILD = "b107 · 24 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
