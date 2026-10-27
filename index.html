@@ -139,6 +139,14 @@
   .scrim{position:fixed;inset:0;background:rgba(28,26,23,.4);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .scrim.open{display:flex}
   .modal{background:var(--paper);border-radius:16px;width:min(560px,96vw);max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(28,26,23,.3)}
+  /* Standard modals (those with a .modal-b) lay out as a flex column so the header and
+     the footer action bar stay pinned while only the body scrolls. Without this, a long
+     form (e.g. Edit lead) pushed the "Save changes" footer off-screen and field staff —
+     especially on phones with the keyboard open — could not reach it. Scoped to .modal-b
+     so ad-hoc modals that rely on .modal's own overflow:auto are untouched. */
+  .modal:has(> .modal-b){display:flex;flex-direction:column;overflow:hidden}
+  .modal:has(> .modal-b) > .modal-h,.modal:has(> .modal-b) > .modal-f{flex:0 0 auto}
+  .modal:has(> .modal-b) > .modal-b{flex:1 1 auto;min-height:0;overflow:auto}
   .modal-h{padding:20px 24px;border-bottom:1px solid var(--line);font-family:'Bricolage Grotesque';font-weight:600;font-size:20px}
   .modal-b{padding:22px 24px;display:grid;gap:14px}
   .modal-f{padding:16px 24px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
@@ -14736,7 +14744,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b107 · 24 Oct 2026";
+const APP_BUILD = "b108 · 27 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
