@@ -8868,20 +8868,29 @@ function pwClient(p,body){
     ${ro?"":`<div style="margin-top:14px"><button class="primary" id="pcSave">Save changes</button></div>`}
   </div>`;
   if(!ro) $("#pcSave").onclick=async()=>{
-    const sa=readSiteAddr("pcs", p.site_address);
-    const pan=panResolve("pc_pan", p.pan)||null;
-    if(pan && !panValid(pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
-    const row={ client_name:$("#pc_name").value.trim(), client_phone:$("#pc_phone").value.trim(),
-      client_email:$("#pc_email").value.trim(), pan, property_type:$("#pc_ptype").value,
-      site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
-      site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
-      start_date:$("#pc_start").value||null,
-      target_end:$("#pc_end").value||null, contract_value:Number($("#pc_val").value||0),
-      status:$("#pc_status").value, notes:$("#pc_notes").value.trim() };
-    if($("#pc_saledate")) row.sale_date=$("#pc_saledate").value||null;   // admin-only sales-month override
-    const {error}=await sb.from("projects").update(row).eq("id",p.id);
-    if(error) return toast(error.message);
-    toast("Saved"); Object.assign(p,row);
+    const btn=$("#pcSave");
+    // Hardened so Save can never fail silently (reported: button did "nothing").
+    // Any throw, any server error, and the expired-session / RLS case (update
+    // matches 0 rows with no error — the b93 silent-save pattern) all surface a toast.
+    try{
+      const sa=readSiteAddr("pcs", p.site_address);
+      const pan=panResolve("pc_pan", p.pan)||null;
+      if(pan && !panValid(pan)) return toast("PAN looks invalid — expected format ABCDE1234F");
+      const row={ client_name:$("#pc_name").value.trim(), client_phone:$("#pc_phone").value.trim(),
+        client_email:$("#pc_email").value.trim(), pan, property_type:$("#pc_ptype").value,
+        site_address:sa.site_address, site_door_no:sa.site_door_no, site_society:sa.site_society, site_area:sa.site_area,
+        site_city:sa.site_city, site_pincode:sa.site_pincode, site_map_url:sa.site_map_url, site_lat:sa.site_lat, site_lng:sa.site_lng,
+        start_date:$("#pc_start").value||null,
+        target_end:$("#pc_end").value||null, contract_value:Number($("#pc_val").value||0),
+        status:$("#pc_status").value, notes:$("#pc_notes").value.trim() };
+      if($("#pc_saledate")) row.sale_date=$("#pc_saledate").value||null;   // admin-only sales-month override
+      const _label=btn?btn.textContent:""; if(btn){btn.disabled=true;btn.textContent="Saving…";}
+      const {data,error}=await sb.from("projects").update(row).eq("id",p.id).select("id");
+      if(btn){btn.disabled=false;btn.textContent=_label;}
+      if(error) return toast(error.message);
+      if(!data||!data.length) return toast("Couldn’t save — your session may have expired. Please refresh the page and sign in again.");
+      toast("Saved"); Object.assign(p,row);
+    }catch(e){ if(btn){btn.disabled=false;btn.textContent="Save changes";} toast("Save failed: "+((e&&e.message)||e)); }
   };
 }
 
@@ -14744,7 +14753,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b108 · 27 Oct 2026";
+const APP_BUILD = "b109 · 27 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
