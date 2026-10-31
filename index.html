@@ -10916,7 +10916,9 @@ async function gBoqList(p, body, versions){
     const nm=(v.title&&v.title.trim())?v.title.trim():(v.version_label||("v"+v.version));
     const isContract=String(v.id)===String(contractId);
     const badges=[
-      v.locked_at?`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">🔒 Locked</span>`:"",
+      v.locked_at?(v.locked_reason==='finalised'
+        ?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">★ Final · locked</span>`
+        :`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">🔒 Locked</span>`):"",
       isContract?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">Contract</span>`:"",
       (isContract&&paid)?`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✓ Paid</span>`:"",
       (gIsPartnerBoq(v)&&!v.locked_at)?({submitted:`<span class="s2l-chip s2l-amber" style="animation:none;padding:1px 7px;font-size:10px">⏳ Awaiting approval</span>`,approved:`<span class="s2l-chip s2l-green" style="animation:none;padding:1px 7px;font-size:10px">✅ Approved</span>`,returned:`<span class="s2l-chip s2l-red" style="animation:none;padding:1px 7px;font-size:10px">↩ Sent back</span>`}[gReviewStatus(v)]||`<span class="s2l-chip s2l-queued" style="animation:none;padding:1px 7px;font-size:10px">✍ Partner draft</span>`):""
@@ -10925,7 +10927,7 @@ async function gBoqList(p, body, versions){
       <td style="padding:9px 10px;color:var(--ink-soft)">${i+1}</td>
       <td style="padding:9px 10px">
         <a data-open="${v.id}" style="color:var(--brass);font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${esc(nm)}</a>${(canWrite()||gPartnerCanEdit(v))?` <button class="linkbtn" data-rename="${v.id}" title="Rename this BOQ" style="font-size:11px">✎</button>`:""}
-        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(v.version_label||("v"+v.version))}${badges?" · "+badges:""}</div>
+        <div style="font-size:11px;color:var(--ink-soft);margin-top:2px">${esc(v.version_label||("v"+v.version))}${badges?" · "+badges:""}${(canWrite()&&!v.locked_at)?` · <button class="linkbtn" data-final="${v.id}" title="Mark this BOQ as the Final quote — it locks immediately and only Amit can change it afterwards" style="font-size:11px;color:#3C7A4E;font-weight:700">★ Mark Final</button>`:""}</div>
       </td>
       <td style="padding:9px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${v.total!=null?fmt(Number(v.total)):"—"}</td>
       <td style="padding:9px 10px">${esc(who(v.created_by))}<div style="font-size:11px;color:var(--ink-soft)">${dt(v.created_at)}</div></td>
@@ -10954,6 +10956,7 @@ async function gBoqList(p, body, versions){
     if(error) return toast(error.message);
     v.title=nm.trim(); toast("Renamed"); gBoqList(p,body,versions);
   });
+  body.querySelectorAll("[data-final]").forEach(b=>b.onclick=()=>gListMarkFinal(p,b.dataset.final,versions,body));
   if($("#boqNew")) $("#boqNew").onclick=async()=>{
     const id=await newBoqFor({project_id:p.id,title:"Design / Execution BOQ"});
     if(!id) return;
@@ -12559,6 +12562,11 @@ async function gSendProposal(p, body){
 async function gFinaliseLock(p, body){
   if(!canWrite()||!G.boqId||gLocked()) return;
   const v=G.ver||{};
+  // One Final per project: block if another project BOQ is already finalised (admin must unlock it first).
+  if(G.projectId){
+    const {data:ef}=await sb.from("boq_versions").select("id,version,version_label,title").eq("project_id",G.projectId).eq("locked_reason","finalised").not("locked_at","is",null).neq("id",G.boqId).limit(1);
+    if(ef&&ef.length){ const e=ef[0]; return toast("“"+((e.title&&e.title.trim())||e.version_label||("v"+e.version))+"” is already the Final BOQ for this project. Ask Amit to unlock it before finalising a different one."); }
+  }
   if(!confirm("Finalise & lock this BOQ?\n\nIt freezes "+(v.version_label||"this version")+" exactly as it is — the sheet stops changing and only Amit can edit it afterwards. Use ＋ New option to quote a different finish alongside it.")) return;
   await gSave(p, true);                     // commit pending edits BEFORE the freeze
   const now=new Date().toISOString();
@@ -12570,6 +12578,34 @@ async function gFinaliseLock(p, body){
   gLogActivity(p,"BOQ finalised & locked · "+(v.version_label||("v"+v.version)));
   toast("BOQ finalised — frozen for everyone except Amit");
   gRender(p,body);
+}
+
+/* Mark a BOQ as the project's Final quote straight from the BOQ list (designer /
+   sales). Marking Final locks it (same freeze as Finalise & lock): only Amit can
+   edit or unlock afterwards. One Final per project — if another is already Final,
+   the existing one must be unlocked by Amit first. Reuses locked_at + locked_reason
+   so there is no schema change. */
+async function gListMarkFinal(p, versionId, versions, body){
+  if(!canWrite()) return;                         // staff only (designer/sales/presales/admin)
+  const v=(versions||[]).find(x=>String(x.id)===String(versionId)); if(!v) return;
+  if(v.locked_at){ toast("This BOQ is already locked."); return; }
+  const nameOf=x=>(x.title&&x.title.trim())||x.version_label||("v"+x.version);
+  const existingFinal=(versions||[]).find(x=>x.locked_at&&x.locked_reason==='finalised');
+  if(existingFinal){
+    toast("“"+nameOf(existingFinal)+"” is already the Final BOQ. Ask Amit to unlock it before marking a different one Final.");
+    return;
+  }
+  const nm=nameOf(v);
+  if(!confirm("Mark “"+nm+"” as the FINAL BOQ for this project?\n\nIt locks immediately — the sheet is frozen and only Amit can change it afterwards. Other BOQs stay as options.")) return;
+  const now=new Date().toISOString();
+  const {data,error}=await sb.from("boq_versions").update({locked_at:now,locked_reason:'finalised'}).eq("id",v.id).is("locked_at",null).select("id");
+  if(error) return toast("Could not mark Final: "+error.message);
+  if(!data||!data.length){ toast("Couldn’t mark Final — it may have just been locked by someone else. Refresh and check."); return; }
+  v.locked_at=now; v.locked_reason='finalised';
+  try{ await sb.from("lead_activities").insert({ project_id:p.id, lead_id:p.lead_id||null, type:"Note",
+    text:"★ BOQ marked Final & locked · "+nm, by_user:(me&&me.id)||null }); }catch(_){}
+  toast("Marked Final — locked for everyone except Amit");
+  gBoqList(p,body,versions);
 }
 
 /* Copy the current BOQ into a fresh, unlocked option/revision (lead or project). */
@@ -14753,7 +14789,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b109 · 27 Oct 2026";
+const APP_BUILD = "b110 · 31 Oct 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
