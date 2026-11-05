@@ -5117,10 +5117,10 @@ const TICKET_PRIOS=["low","normal","high","urgent"];
 const TICKET_PRIO_COLOR={low:"#6B6560",normal:"#5b86b3",high:"#c0692d",urgent:"#B4453A"};
 function warrantyExpiry(startISO,years){ if(!startISO) return null; const d=new Date(startISO); if(isNaN(d.getTime())) return null; d.setFullYear(d.getFullYear()+years); return d.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
 const PROJ_GROUPS={
-  finance:[["payments","Payments"],["invoices","Tax Invoices"],["packages","Packages"],["scope","Scope Matrix"],["orders","Work Orders"],["procurement","Procurement"],["changes","Change Orders"]],
+  finance:[["payments","Payments"],["invoices","Tax Invoices"],["packages","Packages"],["scope","Scope Matrix"],["orders","Work Orders"],["margin","On-site Margin"],["procurement","Procurement"],["changes","Change Orders"]],
   studio:[["design","Design"],["moodboard","Moodboard"],["canvas","Canvas"],["vastu","Vastu"]],
   site:[["kom","Kick-off"],["progress","Progress"],["execution","Execution"],["snags","Snagging"],["documents","Documents"],["team","Team"]]};
-const PROJ_SUB2GROUP={payments:"finance",invoices:"finance",packages:"finance",scope:"finance",orders:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
+const PROJ_SUB2GROUP={payments:"finance",invoices:"finance",packages:"finance",scope:"finance",orders:"finance",margin:"finance",procurement:"finance",changes:"finance",design:"studio",moodboard:"studio",canvas:"studio",vastu:"studio",kom:"site",progress:"site",execution:"site",snags:"site",documents:"site",team:"site"};
 let projSubSel={finance:"payments",studio:"design",site:"progress"};
 // Design partners: no Client / Payments / Work Orders (RLS blocks the data anyway).
 // BOQ appears only on projects where the partner is the assigned designer (canBoqProject).
@@ -5183,6 +5183,7 @@ function drawProjectSub(p,sub,body){
   if(sub==="packages")   return pwPackages(p,body);
   if(sub==="scope")      return pwScope(p,body);
   if(sub==="orders")     return pwOrders(p,body);
+  if(sub==="margin")     return pwOnsiteMargin(p,body);
   if(sub==="procurement")return pwProcurement(p,body);
   if(sub==="changes")    return pwChanges(p,body);
   if(sub==="design")     return pwDesign(p,body);
@@ -7088,6 +7089,108 @@ async function opsRollup(p){
   // Projected cost per division = the worse of budget vs committed (conservative).
   const projCost=DIVISIONS.reduce((s,dv)=>s+Math.max(D[dv.key].budget,D[dv.key].committed),0);
   return {ver,D,budget:sum('budget'),committed:sum('committed'),paid:sum('paid'),noCost:sum('noCost'),projCost,coverPct};
+}
+
+/* ---- On-site Margin: per-trade client value (final & locked BOQ) vs a typed vendor PO ----
+   Reads the finalised, locked BOQ only (locked_reason='finalised'). On-site trades = BOQ
+   packages whose division is 'onsite' (civil/electrical/plumbing/tiling/stone/false-ceiling/
+   painting/on-site carpentry). Client value = rate x qty (same sell basis as opsRollup).
+   The awarded vendor PO value is typed per trade and stored in onsite_po_tracker; margin =
+   client value - PO. Cost-sensitive -> gated by canSeeOps (admin-level OR this project's PM),
+   same as Procurement. */
+async function pwOnsiteMargin(p,body){
+  await ensureStaff();
+  if(!canSeeOps(p)){
+    body.innerHTML=`<div class="pw-card">${emptyState("On-site margin is restricted","Client value, vendor cost and margin are visible to admins and this project's PM only.")}</div>`;
+    return;
+  }
+  // Only the finalised, locked BOQ feeds this view.
+  const {data:vers}=await sb.from("boq_versions").select("id,version,version_label,locked_at,locked_reason")
+    .eq("project_id",p.id).eq("locked_reason","finalised").order("version",{ascending:false}).order("id",{ascending:false}).limit(1);
+  const ver=(vers||[])[0]||null;
+  if(!ver){
+    body.innerHTML=`<div class="pw-card">${emptyState("No final BOQ yet","Mark a BOQ as ★ Final & locked in the BOQ tab. On-site work and margin appear here only once a final version is locked.")}</div>`;
+    return;
+  }
+  await schedLoadMaster();
+  const [{data:items},{data:saved}]=await Promise.all([
+    sb.from("boq_items").select("category,item_name,description,stream,rate,qty,scope").eq("boq_version_id",ver.id),
+    sb.from("onsite_po_tracker").select("trade_code,po_value,note").eq("boq_version_id",ver.id)
+  ]);
+  const poBy={}; (saved||[]).forEach(r=>poBy[r.trade_code]={po:Number(r.po_value)||0,note:r.note||""});
+  const onsitePkgs=PACKAGES.filter(x=>x.div==='onsite');
+  const T={}; onsitePkgs.forEach(x=>T[x.code]={client:0,lines:0});
+  (items||[]).filter(r=>r.scope!=='excluded'&&r.scope!=='optional').forEach(r=>{
+    const code=packageOf(r); if(divOfPackage(code)!=='onsite') return;
+    if(!T[code]) T[code]={client:0,lines:0};
+    T[code].client+=Math.round((Number(r.rate)||0)*(Number(r.qty)||0)); T[code].lines++;
+  });
+  const rows=onsitePkgs.filter(x=>T[x.code].lines>0||poBy[x.code]);
+  const ro=!canWrite();
+  let totClient=0,totPo=0;
+  rows.forEach(x=>{ totClient+=T[x.code].client; totPo+=(poBy[x.code]?poBy[x.code].po:0); });
+  const totMargin=totClient-totPo, totPct=totClient>0?Math.round(totMargin/totClient*100):null;
+  body.innerHTML=`
+    <div class="wallet">
+      <div class="wcell"><div class="wl">On-site client value</div><div class="wv mono">${fmt(totClient)}</div></div>
+      <div class="wcell"><div class="wl">Vendor PO total</div><div class="wv mono" id="omPoTot">${fmt(totPo)}</div></div>
+      <div class="wcell ${totPct!=null?(totMargin<0?'wdue':'wgood'):''}"><div class="wl">Margin</div><div class="wv mono" id="omMgTot">${fmt(totMargin)}</div><div style="font-size:10px;color:var(--ink-soft)" id="omMgPct">${totPct!=null?totPct+'%':'—'}</div></div>
+    </div>
+    <div class="pw-card">
+      <div class="ov-head"><div class="sec-label" style="border:none;padding:0">On-site work · BOQ ${esc(ver.version_label||('v'+ver.version))} <span class="pill done" style="margin-left:6px">★ Final · locked</span></div>
+        <div class="gact">${ro?'':`<button class="primary" id="omSave">Save PO values</button>`}</div></div>
+      ${rows.length?`<table><thead><tr><th>Trade</th><th class="num">Lines</th><th class="num">Client value</th><th class="num">Vendor PO ₹</th><th class="num">Margin ₹</th><th class="num">Margin %</th><th>Note</th></tr></thead>
+      <tbody>
+        ${rows.map(x=>{const cv=T[x.code].client; const pv=poBy[x.code]?poBy[x.code].po:0; const nt=poBy[x.code]?poBy[x.code].note:"";
+          return `<tr>
+            <td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${x.color};margin-right:7px;vertical-align:middle"></span>${esc(x.label)}</td>
+            <td class="num mono">${T[x.code].lines}</td>
+            <td class="num mono">${fmt(cv)}</td>
+            <td class="num">${ro?`<span class="mono">${fmt(pv)}</span>`:`<input type="number" min="0" step="1" class="om-po mono" data-c="${x.code}" value="${pv||''}" placeholder="0" style="width:120px;text-align:right">`}</td>
+            <td class="num mono om-mg" data-c="${x.code}">${fmt(cv-pv)}</td>
+            <td class="num mono om-pct" data-c="${x.code}">${cv>0?Math.round((cv-pv)/cv*100)+'%':'—'}</td>
+            <td>${ro?esc(nt):`<input type="text" class="om-note" data-c="${x.code}" value="${esc(nt)}" placeholder="vendor / remark" style="width:170px">`}</td>
+          </tr>`;}).join("")}
+      </tbody>
+      <tfoot><tr style="font-weight:700;background:#F5EDD8"><td>Total</td><td class="num mono">${rows.reduce((s,x)=>s+T[x.code].lines,0)}</td><td class="num mono">${fmt(totClient)}</td><td class="num mono" id="omPoFoot">${fmt(totPo)}</td><td class="num mono" id="omMgFoot">${fmt(totMargin)}</td><td class="num mono" id="omPctFoot">${totPct!=null?totPct+'%':'—'}</td><td></td></tr></tfoot>
+      </table>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:10px">Client value is the on-site portion of the locked final BOQ (rate × qty). Type the vendor PO value you award per trade; margin = client value − vendor PO. Internal only — never shown to the client.</div>`
+      :emptyState("No on-site work in this BOQ","This final BOQ has no included on-site lines (civil, electrical, plumbing, tiling, stone, false ceiling, painting, on-site carpentry).")}
+    </div>`;
+  if(ro) return;
+  const recompute=()=>{
+    let tp=0,tc=0;
+    rows.forEach(x=>{
+      const cv=T[x.code].client;
+      const inp=body.querySelector(`.om-po[data-c="${x.code}"]`);
+      const pv=inp?(Number(inp.value)||0):0;
+      tp+=pv; tc+=cv;
+      const mg=cv-pv;
+      const mgEl=body.querySelector(`.om-mg[data-c="${x.code}"]`); if(mgEl) mgEl.textContent=fmt(mg);
+      const pctEl=body.querySelector(`.om-pct[data-c="${x.code}"]`); if(pctEl) pctEl.textContent=cv>0?Math.round(mg/cv*100)+'%':'—';
+    });
+    const tm=tc-tp, tpct=tc>0?Math.round(tm/tc*100):null;
+    ["omPoTot","omPoFoot"].forEach(id=>{const e=document.getElementById(id); if(e) e.textContent=fmt(tp);});
+    ["omMgTot","omMgFoot"].forEach(id=>{const e=document.getElementById(id); if(e) e.textContent=fmt(tm);});
+    ["omMgPct","omPctFoot"].forEach(id=>{const e=document.getElementById(id); if(e) e.textContent=tpct!=null?tpct+'%':'—';});
+  };
+  body.querySelectorAll(".om-po").forEach(i=>i.oninput=recompute);
+  if($("#omSave")) $("#omSave").onclick=async()=>{
+    const btn=$("#omSave"); if(btn.disabled) return; btn.disabled=true; const lbl=btn.textContent; btn.textContent="Saving…";
+    try{
+      const payload=rows.map(x=>{
+        const inp=body.querySelector(`.om-po[data-c="${x.code}"]`);
+        const noteEl=body.querySelector(`.om-note[data-c="${x.code}"]`);
+        return { project_id:p.id, boq_version_id:ver.id, trade_code:x.code,
+          po_value:inp?Math.max(0,Math.round(Number(inp.value)||0)):0,
+          note:noteEl?((noteEl.value||"").trim()||null):null, updated_by:me.id, updated_at:new Date().toISOString() };
+      });
+      const {error}=await sb.from("onsite_po_tracker").upsert(payload,{onConflict:"boq_version_id,trade_code"});
+      if(error){ toast("Save failed: "+error.message); btn.textContent=lbl; return; }
+      toast("On-site PO values saved"); pwOnsiteMargin(p,body);
+    }catch(e){ toast("Save failed: "+(e&&e.message?e.message:e)); btn.textContent=lbl; }
+    finally{ btn.disabled=false; }
+  };
 }
 
 async function pwProcurement(p,body){
@@ -14789,7 +14892,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b110 · 31 Oct 2026";
+const APP_BUILD = "b111 · 5 Nov 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
