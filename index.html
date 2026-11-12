@@ -3172,8 +3172,19 @@ function mapsSearchUrl(q){ return "https://www.google.com/maps/search/?api=1&que
 /* Pull lat,lng out of a pasted Google Maps URL (long links only; short goo.gl links carry no coords). */
 function parseMapLatLng(url){
   url=String(url||"");
-  const m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/[?&](?:query|q)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i) || url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-  return m ? {lat:parseFloat(m[1]), lng:parseFloat(m[2])} : {lat:null, lng:null};
+  // Prefer an explicit DESTINATION marker over the map viewport (@lat,lng), which on a
+  // Google "directions" URL (/maps/dir/) is the viewport centre, NOT the site — that bug
+  // pinned site geofences kilometres away. Place URLs encode the place as !3d<lat>!4d<lng>;
+  // directions URLs encode the destination as !1d<lng>!2d<lat> (1d=lng, 2d=lat, reversed).
+  let m = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if(m) return {lat:parseFloat(m[1]), lng:parseFloat(m[2])};
+  const dirs=[...url.matchAll(/!1d(-?\d+\.\d+)!2d(-?\d+\.\d+)/g)];
+  if(dirs.length){ const g=dirs[dirs.length-1]; return {lat:parseFloat(g[2]), lng:parseFloat(g[1])}; } // last leg = destination
+  m = url.match(/[?&](?:query|q)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i);
+  if(m) return {lat:parseFloat(m[1]), lng:parseFloat(m[2])};
+  m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);   // map viewport — last resort only
+  if(m) return {lat:parseFloat(m[1]), lng:parseFloat(m[2])};
+  return {lat:null, lng:null};
 }
 /* Open Google Maps pre-searched with whatever address parts are typed in a given field group. */
 function openSiteMap(prefix){
@@ -14892,7 +14903,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b111 · 5 Nov 2026";
+const APP_BUILD = "b112 · 12 Nov 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
