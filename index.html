@@ -2051,6 +2051,10 @@ async function renderDashboard(){
       <div class="sec-label">Production radar <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— every active project's Scope Matrix: lines late, to order this week, no vendor</span></div>
       <div id="dashRadarBody">${skel(2,120)}</div>
     </section>`:""}
+    ${isAdminLevel()?`<section class="pw-card" id="dashSupply" style="margin-bottom:14px">
+      <div class="sec-label">Supply desk <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— vendor quotes read by the agent, POs waiting for approval, budget flags</span></div>
+      <div id="dashSupplyBody">${skel(2,120)}</div>
+    </section>`:""}
     ${isAdminLevel()?`<section class="pw-card" id="dashRoi" style="margin-bottom:14px">
       <div class="sec-label">Source ROI <span style="font-weight:400;color:var(--ink-soft);font-size:12px">— this financial year · won value ex-GST · spend from the weekly campaign entry</span></div>
       <div id="dashRoiBody">${skel(3,40)}</div>
@@ -2112,6 +2116,7 @@ async function renderDashboard(){
   if(isAdminLevel()) renderCollections();
   if(isAdminLevel()) renderCashflow();
   if(isAdminLevel()){ radarCache=null; renderProductionRadar(); }
+  if(isAdminLevel()) renderSupplyDesk();
   if(typeof chatRefreshInbox==="function") chatRefreshInbox();
   if(myRole==="admin") renderFounderIntel();
   dashAttnSync(); setTimeout(dashAttnSync,1200); setTimeout(dashAttnSync,3500);
@@ -7228,6 +7233,7 @@ async function pwProcurement(p,body){
       <div class="wcell ${marginKnown?(marginPct<0?'wdue':'wgood'):''}"><div class="wl">Projected margin</div><div class="wv">${marginKnown?marginPct+'%':'—'}</div><div style="font-size:10px;color:var(--ink-soft)">${marginKnown?fmt(Math.max(cv-R.projCost,0)):(cv?`${cover==null?0:cover}% of value costed`:'no contract value')}</div></div>
     </div>
     ${(cover!=null&&cover<MARGIN_MIN_COVER)?`<div class="hint" style="margin:2px 0 10px;border-color:#D4B06A;background:#FBF5E6">⚠ <b>Margin not measurable yet.</b> Only ${cover}% of this BOQ's quoted value carries a cost rate${R.noCost?` — ${R.noCost} included line${R.noCost===1?'':'s'} are priced to the client with no cost against them`:''}, so budget, variance and margin are all understated and stay blank. Fix it once in <b>BOQ → Rate library</b> (the <b>Cost ₹</b> column, or <b>Paste cost rates</b>) and every future quote inherits the cost.</div>`:(R.noCost?`<div class="hint" style="margin:2px 0 10px">⚠ ${R.noCost} included BOQ line(s) have no cost rate — those budgets are understated. Fill them in the rate library.</div>`:'')}
+    <div id="scAgentHost"></div>
     <div class="gbar"><div style="font-size:12px;color:var(--ink-soft)">Commit-before-spend: vendors are paid only against approved POs. Approval is admin-only.</div>
       <div class="gact">${isAdminLevel()?`<button class="ghost" id="vpVendors">Vendors</button>`:''}</div></div>
     ${DIVISIONS.map(dv=>{
@@ -7252,6 +7258,7 @@ async function pwProcurement(p,body){
   if($("#vpVendors")) $("#vpVendors").onclick=()=>{ procVendors=true; vendorsView(p,body); };
   body.querySelectorAll("[data-vpo]").forEach(b=>b.onclick=()=>{ activeVPO=Number(b.dataset.vpo); vpoDetail(p,body,activeVPO); });
   body.querySelectorAll("[data-newpo]").forEach(b=>b.onclick=()=>newVendorPO(p,body,b.dataset.newpo,R.ver));
+  scAgentCard(p,$("#scAgentHost"));
 }
 
 async function newVendorPO(p,body,divKey,ver,prefilter){
@@ -7368,6 +7375,7 @@ async function vpoDetail(p,body,id){
   if(o.status==='draft') actions+=`<button class="primary" id="vpoSubmit">Submit for approval</button>`;
   if(o.status==='pending_approval'&&isBoqAdmin()) actions+=`<button class="primary" id="vpoApprove">Approve</button><button class="ghost" id="vpoReject">Back to draft</button>`;
   if(o.status==='pending_approval'&&!isBoqAdmin()) actions+=`<span style="font-size:12px;color:var(--ink-soft);align-self:center">Awaiting admin approval</span>`;
+  if(o.status==='pending_approval') actions+=`<button class="ghost" id="vpoPing" title="WhatsApp the approvers a one-tap Approve / Hold / Reject">📲 Ping approvers</button>`;
   if(o.status==='approved') actions+=`<button class="primary" id="vpoSend">Send to vendor</button>`;
   if(o.status==='sent') actions+=`<button class="ghost" id="vpoProg">Mark in progress</button>`;
   if(o.status==='sent'||o.status==='in_progress') actions+=`<button class="primary" id="vpoDeliver">Mark delivered</button>`;
@@ -7378,6 +7386,7 @@ async function vpoDetail(p,body,id){
   body.innerHTML=`
     <div class="gbar"><button class="ghost" id="vpoBack">← Procurement</button>
       <div class="gact">${actions}${canWrite()?`<button class="ghost" id="vpoStudio" title="Send this purchase order to the Canon printer in the studio">🖨 Print at studio</button>`:''}<button class="ghost" id="vpoPrint">Print / PDF</button></div></div>
+    ${scPoBanner(o)}
     <div class="pw-card">
       <div class="grid4">
         <div><div class="cpl">Status</div><div class="cpv">${vpoStatusPill(o.status)}</div></div>
@@ -7496,6 +7505,7 @@ async function vpoDetail(p,body,id){
   if($("#vpoDeliver")) $("#vpoDeliver").onclick=()=>{ if(confirm("Mark this PO as delivered / work completed?")) setStatus({status:'delivered'},"Marked delivered"); };
   if($("#vpoClose")) $("#vpoClose").onclick=()=>{ if(confirm("Close this PO? Payments stay recorded.")) setStatus({status:'closed'},"PO closed"); };
   if($("#vpoCancel")) $("#vpoCancel").onclick=()=>{ if(confirm("Cancel this PO?")) setStatus({status:'cancelled'},"PO cancelled"); };
+  if($("#vpoPing")) $("#vpoPing").onclick=async()=>{ const b=$("#vpoPing"); b.disabled=true; try{ const r=await scCall({action:'notify_approvers',po_id:o.id}); toast(r.wa?`Pinged ${r.sent} approver${r.sent===1?'':'s'} on WhatsApp`:"WhatsApp is not configured on the agent yet"); }catch(e){ toast(e.message); } finally{ b.disabled=false; } };
   if($("#vpoPingPM")) $("#vpoPingPM").onclick=()=>{ const pm=(STAFF||[]).find(s=>String(s.id)===String(p.pm_id)); if(!pm||!pm.phone) return toast("No PM phone on file"); const pkg=o.package_code?(' · '+PKG_LABEL(o.package_code)):''; waOpen(pm.phone,`Hi ${pm.full_name||'PM'}, PO ${o.po_number} has been released to ${v.name} for ${p.name}${pkg} — value ${fmt(total)}. Please track delivery and site readiness against the schedule.`); };
   if($("#vpo_edel")) $("#vpo_edel").onchange=async()=>{ await sb.from("vendor_pos").update({expected_delivery:$("#vpo_edel").value||null}).eq("id",o.id); toast("Delivery date saved"); };
   if($("#vpoSaveItems")) $("#vpoSaveItems").onclick=async()=>{
@@ -7529,6 +7539,13 @@ async function vpoDetail(p,body,id){
 async function sendVendorPO(p,body,o,v,total){
   if(!v.email&&!v.phone) return toast("This vendor has no email or phone on file — add one under Vendors");
   const btn=$("#vpoSend"); if(btn) btn.disabled=true;
+  // SUPPLY-01: the agent builds the branded PDF and delivers it on WhatsApp (+ email copy).
+  // If the agent is unreachable we fall through to the original email-only path below.
+  try{
+    const r=await scCall({action:'send',po_id:o.id});
+    if(r&&r.ok){ toast(`${o.po_number} ${r.how}`,3500); vpoDetail(p,body,o.id); if(btn) btn.disabled=false; return; }
+    if(r&&r.messages&&r.messages.length){ toast(r.messages.map(m=>m.body).join(' ').slice(0,200),5000); if(btn) btn.disabled=false; return; }
+  }catch(e){ console.warn("supply-agent send fallback:",e.message); }
   try{
     if(v.email){
       const {data,error}=await sb.functions.invoke("send-po",{body:{po_id:o.id}});
@@ -7542,6 +7559,161 @@ async function sendVendorPO(p,body,o,v,total){
     }
     vpoDetail(p,body,o.id);
   }finally{ if(btn) btn.disabled=false; }
+}
+
+/* ===================== SUPPLY-CHAIN AGENT (SUPPLY-01) =====================
+   WhatsApp + in-app agent: vendor quote → budget check (sc_budget) → vendor PO draft
+   (pending_approval) → approver decides (WhatsApp one-tap or here) → PO PDF to the vendor.
+   Server side = edge function `supply-agent` (service role, own auth) + RPCs
+   sc_budget() / sc_desk_summary() (RLS: can_see_project_costs / admin-level). The app
+   only ever calls the function with the user's JWT; the function re-checks visibility. */
+const SC_FLAG={over:['🔴','Over budget','#B4453A'],warn:['🟠','Near limit','#c0692d'],ok:['✅','Within budget','#4f7d52'],unknown:['⚪','No budget set','#9A9490']};
+const scBasis=b=>b==='manual'?'manual budget':b==='boq_cost'?'BOQ cost basis':b==='indicative'?'indicative · sell − target margin':'no BOQ lines';
+async function scCall(body){
+  const {data,error}=await sb.functions.invoke("supply-agent",{body});
+  if(error) throw new Error((error&&error.message)||"Supply agent unavailable");
+  if(data&&data.error) throw new Error(data.error);
+  return data||{};
+}
+function scPoBanner(o){
+  const c=o.budget_check; if(!c&&o.source!=='agent') return '';
+  const f=SC_FLAG[c&&c.flag]||SC_FLAG.unknown;
+  return `<div class="hint" style="margin:0 0 10px;border-color:${f[2]}66;background:${f[2]}14">
+    ${o.source==='agent'?`🤖 Drafted by the supply-chain agent${o.quote_id?` from quote #${o.quote_id}`:''}${o.sent_via?` · sent by ${esc(o.sent_via.replace('+',' and '))}`:''}. `:''}
+    ${c?`${f[0]} <b>${f[1]}</b> — ${esc(c.label||PKG_LABEL(o.package_code||''))}: after this PO ${fmt(c.after)} of ${fmt(c.budget)}${c.pct_after==null?'':` (${c.pct_after}%)`} · ${esc(scBasis(c.basis))}${Number(c.project_budget)>0?` · project ${fmt(c.project_after)} of ${fmt(c.project_budget)}`:''}`:''}
+  </div>`;
+}
+function scQuotePill(st){ const cls=st==='po_drafted'?'done':st==='parsed'?'in_progress':'todo'; return `<span class="ex-st ${cls}">${esc(String(st||'').replace(/_/g,' '))}</span>`; }
+// WhatsApp-style markup from the agent → safe HTML (*bold*, _italic_, line breaks)
+function scMd(s){ return esc(String(s||'')).replace(/\*([^*\n]+)\*/g,'<b>$1</b>').replace(/_([^_\n]+)_/g,'<i>$1</i>').replace(/\n/g,'<br>'); }
+/* Render the agent's collected replies (app mode) with its buttons mapped to in-app actions. */
+function scRenderMsgs(host,msgs,ctx){
+  host.innerHTML=(msgs||[]).map((m,i)=>{
+    if(m.type==='buttons') return `<div class="pw-card" style="margin:8px 0"><div style="font-size:13px;line-height:1.55">${scMd(m.body)}</div>
+      <div class="gact" style="margin-top:10px">${(m.buttons||[]).filter(b=>!/^sc:(approve|hold|reject):/.test(b.id)).map(b=>`<button class="${/^sc:po:/.test(b.id)?'primary':'ghost'}" data-scbtn="${esc(b.id)}">${esc(b.title)}</button>`).join('')}</div></div>`;
+    if(m.type==='list') return `<div class="pw-card" style="margin:8px 0"><div style="font-size:13px;line-height:1.55">${scMd(m.body)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">${(m.rows||[]).map(r=>`<button class="ghost" data-scbtn="${esc(r.id)}" title="${esc(r.description||'')}">${esc(r.title)}</button>`).join('')}</div></div>`;
+    return `<div style="font-size:13px;line-height:1.55;padding:6px 2px;color:var(--ink-soft)">${scMd(m.body)}</div>`;
+  }).join('');
+  host.querySelectorAll("[data-scbtn]").forEach(b=>b.onclick=()=>scAction(b.dataset.scbtn,ctx));
+}
+async function scAction(id,ctx){
+  const [,act,a,b]=id.split(':'); const qid=Number(a);
+  try{
+    if(act==='po'){ const r=await scCall({action:'create_po',quote_id:qid}); if(r.po){ toast(`${r.po.po_number} drafted — pending approval`); if(ctx.onPO) ctx.onPO(r.po); } else scRenderMsgs(ctx.host,r.messages,ctx); return; }
+    if(act==='drop'){ await scCall({action:'discard',quote_id:qid}); toast("Quote discarded"); if(ctx.onDone) ctx.onDone(); return; }
+    if(act==='pick'){ const r=await scCall({action:'set_project',quote_id:qid,project_id:Number(b)}); scRenderMsgs(ctx.host,r.messages,ctx); return; }
+    if(act==='proj'){
+      const {data:projs}=await sb.from("projects").select("id,code,name,client_name").eq("status","active").order("id",{ascending:false});
+      scRenderMsgs(ctx.host,[{type:'list',body:'Which project is this quote for?',rows:(projs||[]).map(p=>({id:`sc:pick:${qid}:${p.id}`,title:p.code||p.name,description:p.client_name||p.name}))}],ctx); return;
+    }
+    toast("Use the PO page to approve or reject");
+  }catch(e){ toast(e.message); }
+}
+/* Procurement tab card: budget by package (agent basis), upload / paste a quote, recent quotes. */
+async function scAgentCard(p,host){
+  if(!host) return;
+  const short=String(p.code||'').slice(-3);
+  host.innerHTML=`<div class="pw-card">
+    <div class="ov-head"><div class="sec-label" style="border:none;padding:0">🤖 Supply-chain agent <span style="font-weight:400;font-size:11px;color:var(--ink-soft);margin-left:8px">quote → budget check → PO draft → approval → PO to vendor</span></div>
+      <div class="gact"><input type="file" id="scFile" accept="application/pdf,image/jpeg,image/png,image/webp" style="display:none"><button class="primary" id="scUpload">⬆ Upload quote</button><button class="ghost" id="scPaste">Type a quote</button></div></div>
+    <div id="scBudget" class="empty" style="padding:8px 0">Loading budget by package…</div>
+    <div id="scOut"></div>
+    <div id="scQuotes"></div>
+    <div class="hint" style="margin-top:8px">On WhatsApp: send the vendor's quote (photo / PDF) to the Lintel number with the caption <b>quote ${esc(short)} &lt;package&gt;</b> — the agent reads it, checks the budget, drafts the PO and asks Amit / Akshay to approve with one tap. Also: <b>budget ${esc(short)}</b> · <b>po ${esc(short)}</b> · <b>help</b>.</div>
+  </div>`;
+  const outHost=$("#scOut");
+  const ctx={host:outHost,onPO:po=>{ activeVPO=po.id; const body=host.closest("#pwSubBody")||host.parentElement; vpoDetail(p,body,po.id); },onDone:()=>scAgentCard(p,host)};
+  // budget strip
+  try{
+    const B=await scCall({action:'budget',project_id:p.id});
+    const rows=(B.packages||[]).filter(x=>Number(x.budget)>0||Number(x.committed)>0||Number(x.pending)>0);
+    const t=B.totals||{};
+    const flagOf=x=>{ const used=Number(x.committed)+Number(x.pending); return Number(x.budget)>0?(used>Number(x.budget)?'over':used>=Number(x.budget)*(Number((B.settings||{}).warn_pct)||90)/100?'warn':'ok'):'unknown'; };
+    $("#scBudget").className=""; $("#scBudget").style.padding="0";
+    $("#scBudget").innerHTML=rows.length?`
+      <div style="font-size:11px;color:var(--ink-soft);margin:4px 0 6px">Cost budget <b>${fmt(t.budget)}</b> · committed <b>${fmt(t.committed)}</b>${Number(t.pending)?` · pending <b>${fmt(t.pending)}</b>`:''} · paid <b>${fmt(t.paid)}</b> · headroom <b>${fmt(t.headroom)}</b>${B.boq_version?` · BOQ v${B.boq_version.version}${B.boq_version.locked?' 🔒':''} · ${B.cover_pct==null?0:B.cover_pct}% of value costed`:' · no BOQ'} · ex-GST</div>
+      <table><thead><tr><th>Package</th><th>Basis</th><th class="num">Budget</th><th class="num">Committed</th><th class="num">Pending</th><th class="num">Headroom</th><th></th></tr></thead><tbody>
+      ${rows.map(x=>{ const f=SC_FLAG[flagOf(x)]; return `<tr><td>${esc(x.label)}</td><td style="font-size:11px;color:var(--ink-soft)">${esc(scBasis(x.basis))}${x.basis==='indicative'?` (${x.cover_pct==null?0:x.cover_pct}% costed)`:''}</td><td class="num mono">${fmt(x.budget)}</td><td class="num mono">${fmt(x.committed)}</td><td class="num mono">${Number(x.pending)?fmt(x.pending):'—'}</td><td class="num mono" style="color:${f[2]}">${fmt(x.headroom)}</td><td title="${esc(f[1])}">${f[0]}</td></tr>`; }).join('')}
+      </tbody></table>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:6px">Basis: BOQ cost rates when ≥ ${esc(String((B.settings||{}).min_cover_pct||80))}% of a package's quoted value is costed; otherwise indicative = sell − ${esc(String((B.settings||{}).target_margin_pct||35))}% target margin. ${isAdminLevel()?'Override per package in <span class="mono">project_budgets</span> (admin).':''}</div>`
+      :`<div class="empty" style="padding:8px 0">No BOQ lines, POs or expenses yet — nothing to budget.</div>`;
+  }catch(e){ $("#scBudget").innerHTML=`<div class="empty" style="padding:8px 0">Budget unavailable: ${esc(e.message)}</div>`; }
+  // recent quotes
+  const {data:qs}=await sb.from("vendor_quotes").select("id,status,vendor_name_raw,package_code,parsed,issues,po_id,created_at,source,from_phone,media_path").eq("project_id",p.id).order("created_at",{ascending:false}).limit(10);
+  $("#scQuotes").innerHTML=(qs&&qs.length)?`<div class="sec-label" style="border:none;padding:10px 0 4px">Quotes received</div>
+    <table><thead><tr><th>When</th><th>Vendor</th><th>Package</th><th class="num">Ex-GST</th><th>Status</th><th></th></tr></thead><tbody>
+    ${qs.map(q=>`<tr><td style="font-size:11px;color:var(--ink-soft)">${dShort(q.created_at)} · ${q.source==='wa'?'WhatsApp':'app'}</td><td>${esc(q.vendor_name_raw||'—')}</td><td>${esc(PKG_LABEL(q.package_code||'')||'—')}</td><td class="num mono">${q.parsed&&q.parsed.totals?fmt(q.parsed.totals.subtotal):'—'}</td><td>${scQuotePill(q.status)}${(q.issues||[]).length?` <span title="${esc((q.issues||[]).join(' · '))}">⚠️</span>`:''}</td>
+      <td>${q.po_id?`<button class="linkbtn" data-scpo="${q.po_id}">PO</button>`:''}${q.media_path?` <button class="linkbtn" data-scfile="${q.id}">File</button>`:''}${(q.status==='parsed'||q.status==='needs_info')&&canWrite()?` <button class="linkbtn" data-scdraft="${q.id}">Draft PO</button>`:''}</td></tr>`).join('')}
+    </tbody></table>`:'';
+  host.querySelectorAll("[data-scpo]").forEach(b=>b.onclick=()=>{ activeVPO=Number(b.dataset.scpo); const body=host.closest("#pwSubBody")||host.parentElement; vpoDetail(p,body,activeVPO); });
+  host.querySelectorAll("[data-scfile]").forEach(b=>b.onclick=async()=>{ try{ const r=await scCall({action:'quote_file',quote_id:Number(b.dataset.scfile)}); if(r.url) window.open(r.url,'_blank'); }catch(e){ toast(e.message); } });
+  host.querySelectorAll("[data-scdraft]").forEach(b=>b.onclick=()=>scAction(`sc:po:${b.dataset.scdraft}`,ctx));
+  const busy=(on,msg)=>{ const u=$("#scUpload"); if(u){ u.disabled=on; u.textContent=on?(msg||'Reading…'):'⬆ Upload quote'; } };
+  $("#scUpload").onclick=()=>$("#scFile").click();
+  $("#scFile").onchange=async()=>{
+    const f=$("#scFile").files[0]; if(!f) return;
+    if(f.size>12*1024*1024) return toast("Keep the quote under 12 MB");
+    busy(true,"Reading the quote…");
+    try{
+      const b64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=rej; r.readAsDataURL(f); });
+      const r=await scCall({action:'submit_quote',project_id:p.id,file_b64:b64,mime:f.type||'application/pdf',filename:f.name});
+      scRenderMsgs(outHost,r.messages,ctx);
+    }catch(e){ toast(e.message); }
+    finally{ busy(false); $("#scFile").value=''; }
+  };
+  $("#scPaste").onclick=()=>{
+    openModal(`<div class="modal-h">Type or paste a vendor quote</div><div class="modal-b">
+      <div class="field"><label>Quote text</label><textarea id="scTxt" rows="9" placeholder="Sharma Electricals, 9876543210\nElectrical for ${esc(p.code||'')}:\nWiring 2.5 sq mm 1200 m @ 45\nSwitch boards 40 nos @ 180\nGST 18%, delivery 10 days, 50% advance"></textarea></div>
+      <div class="hint">The agent reads it like a WhatsApp message: vendor, lines (qty × rate), GST, terms.</div></div>
+      <div class="modal-f"><button class="ghost" onclick="closeModal()">Cancel</button><button class="primary" id="scTxtGo">Read quote</button></div>`);
+    $("#scTxtGo").onclick=async()=>{ const t=$("#scTxt").value.trim(); if(!t) return toast("Paste the quote first"); const btn=$("#scTxtGo"); btn.disabled=true; btn.textContent="Reading…";
+      try{ const r=await scCall({action:'submit_quote',project_id:p.id,text:t}); closeModal(); scRenderMsgs(outHost,r.messages,ctx); }catch(e){ toast(e.message); btn.disabled=false; btn.textContent="Read quote"; } };
+  };
+}
+/* Founder dashboard card: POs awaiting approval, over-budget flags, quotes received, agent activity. */
+async function renderSupplyDesk(){
+  const host=$("#dashSupplyBody"); if(!host) return;
+  const {data:d,error}=await sb.rpc("sc_desk_summary");
+  if(error||!d||d.denied){ host.innerHTML=`<div class="empty" style="padding:10px 0">${d&&d.denied?'Visible to Admin / Sales Head.':"Couldn't load the supply desk."}</div>`; return; }
+  const pos=d.pos||[], quotes=d.quotes||[], events=d.events||[];
+  const pending=pos.filter(x=>x.status==='pending_approval');
+  const over=pending.filter(x=>x.budget_check&&x.budget_check.flag==='over');
+  const agentVal=pos.filter(x=>x.source==='agent'&&VPO_COMMITTED.includes(x.status)).reduce((s,x)=>s+vpoTotal(x),0);
+  const tile=(label,val,color,sub)=>`<div class="kpi" style="--kc:${color}"><div class="kpi-val">${val}</div><div class="kpi-lbl">${esc(label)}${sub?`<div style="font-size:10px;font-weight:400;color:var(--ink-soft)">${sub}</div>`:''}</div></div>`;
+  const go=(x)=>{ activeProject=Number(x.project_id); projectTab="finance"; try{projSubSel.finance="procurement";}catch(_){ } activeVPO=x.po_id?Number(x.po_id):null; activeLead=null; render("projects"); document.querySelectorAll("nav.tabs button").forEach(n=>n.classList.toggle("active",n.dataset.view==="projects")); setTimeout(()=>renderProjectWorkspace(activeProject),60); };
+  host.innerHTML=`
+   <div class="dash-kpis" style="margin:0 0 12px">
+     ${tile("Awaiting approval",pending.length,"#c0692d",pending.length?fmtC(pending.reduce((s,x)=>s+vpoTotal(x),0))+" incl GST":"nothing pending")}
+     ${tile("Over budget",over.length,"#B4453A",over.length?"approve only with a reason":"all within budget")}
+     ${tile("Quotes · 30 d",quotes.length,"#5b86b3",quotes.filter(q=>q.status==='po_drafted').length+" became POs")}
+     ${tile("Agent POs · 30 d",fmtC(agentVal)||"₹0","#4f7d52","committed via the agent")}
+   </div>
+   ${pending.length?`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:0 2px 6px">Pending approval</div>
+   <table><thead><tr><th>PO</th><th>Vendor</th><th>Project</th><th>Package</th><th class="num">Total</th><th>Budget</th><th></th></tr></thead><tbody>
+   ${pending.map(x=>{ const c=x.budget_check; const f=SC_FLAG[c&&c.flag]||SC_FLAG.unknown; return `<tr>
+     <td class="mono">${esc(x.po_number)}<div style="font-size:10px;color:var(--ink-soft)">${x.source==='agent'?'🤖 agent':'app'} · ${dShort(x.created_at)}</div></td>
+     <td>${esc(x.vendor||'—')}</td><td>${esc(x.project_code||'')} <span style="color:var(--ink-soft)">${esc(x.project_name||'')}</span></td><td>${esc(PKG_LABEL(x.package_code||'')||x.division)}</td>
+     <td class="num mono">${fmt(vpoTotal(x))}</td>
+     <td title="${c?esc(scBasis(c.basis)):''}">${f[0]} ${c&&c.budget>0?`${c.pct_after==null?'':c.pct_after+'%'} <span style="font-size:10px;color:var(--ink-soft)">of ${fmtC(c.budget)}</span>`:`<span style="font-size:10px;color:var(--ink-soft)">${f[1]}</span>`}</td>
+     <td style="white-space:nowrap"><button class="linkbtn" data-scgo="${x.po_id}">Open</button>${isBoqAdmin()?` <button class="linkbtn" data-scok="${x.po_id}" style="color:#4f7d52">Approve</button> <button class="linkbtn" data-scno="${x.po_id}" style="color:#B4453A">Reject</button>`:''}</td></tr>`; }).join('')}
+   </tbody></table>`:`<div class="empty" style="padding:6px 0 10px">No purchase orders waiting for approval.</div>`}
+   ${quotes.length?`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;margin:12px 2px 6px">Quotes received · last 30 days</div>
+   <table><thead><tr><th>When</th><th>By</th><th>Vendor</th><th>Project</th><th class="num">Incl GST</th><th>Status</th></tr></thead><tbody>
+   ${quotes.slice(0,8).map(q=>`<tr><td style="font-size:11px;color:var(--ink-soft)">${dShort(q.created_at)}</td><td>${esc(q.submitted_by||q.from_phone||'—')}</td><td>${esc(q.vendor_name_raw||'—')}</td><td>${q.project_id?`<button class="linkbtn" data-scq="${q.project_id}" data-scqpo="${q.po_id||''}">${esc(q.project_code||q.project_name||'open')}</button>`:'—'}</td><td class="num mono">${q.total?fmt(q.total):'—'}</td><td>${scQuotePill(q.status)}${(q.issues||[]).length?` <span title="${esc((q.issues||[]).join(' · '))}">⚠️</span>`:''}</td></tr>`).join('')}
+   </tbody></table>`:''}
+   ${events.length?`<details style="margin-top:10px"><summary style="font-size:12px;color:var(--ink-soft);cursor:pointer">Agent activity · last ${events.length}</summary><div style="font-size:12px;line-height:1.7;margin-top:6px">${events.slice(0,20).map(e=>`<div><span class="mono" style="color:var(--ink-soft)">${esc(new Date(e.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}))}</span> · <b>${esc(e.kind.replace(/_/g,' '))}</b>${e.payload&&e.payload.po_number?' · '+esc(e.payload.po_number):''}${e.payload&&e.payload.flag?' · budget '+esc(e.payload.flag):''}${e.payload&&e.payload.error?' · '+esc(String(e.payload.error).slice(0,80)):''}</div>`).join('')}</div></details>`:''}
+   <div class="s2l-hint">Staff WhatsApp a vendor quote to the Lintel number (caption: <b>quote 028 electrical</b>); the agent reads it, checks the package budget, drafts the PO and pings the approvers with one-tap Approve / Hold / Reject. Approved POs go to the vendor as a PDF on WhatsApp and email, and the PM is told. Commands: <b>budget 028</b> · <b>po 028</b> · <b>paid 50000 LSA-PO-S-2026-003 UTR</b> · <b>help</b>.</div>`;
+  host.querySelectorAll("[data-scgo]").forEach(b=>b.onclick=()=>go(pos.find(x=>String(x.po_id)===b.dataset.scgo)));
+  host.querySelectorAll("[data-scq]").forEach(b=>b.onclick=()=>go({project_id:b.dataset.scq,po_id:b.dataset.scqpo||null}));
+  host.querySelectorAll("[data-scok]").forEach(b=>b.onclick=async()=>{ const x=pos.find(y=>String(y.po_id)===b.dataset.scok); if(!x) return;
+    const c=x.budget_check; if(!confirm(`Approve ${x.po_number} — ${fmt(vpoTotal(x))} to ${x.vendor||'vendor'}?${c&&c.flag==='over'?`\n\n🔴 This takes ${c.label} OVER budget by ${fmt(-c.headroom_after)}.`:''}\n\nThis commits the cost and sends the PO to the vendor.`)) return;
+    const {error}=await sb.from("vendor_pos").update({status:'approved'}).eq("id",x.po_id); if(error) return toast(error.message);
+    toast("Approved — sending to the vendor…");
+    try{ const r=await scCall({action:'send',po_id:x.po_id}); toast(r.ok?`${x.po_number} ${r.how}`:((r.messages||[]).map(m=>m.body).join(' ').slice(0,160)||"PO approved; not sent"),5000); }catch(e){ toast("Approved; send failed: "+e.message,4000); }
+    renderSupplyDesk(); });
+  host.querySelectorAll("[data-scno]").forEach(b=>b.onclick=async()=>{ const x=pos.find(y=>String(y.po_id)===b.dataset.scno); if(!x) return; if(!confirm(`Reject and cancel ${x.po_number}?`)) return;
+    const {error}=await sb.from("vendor_pos").update({status:'cancelled'}).eq("id",x.po_id); if(error) return toast(error.message); toast("PO rejected"); renderSupplyDesk(); });
 }
 
 /* ===================== PACKAGE SCHEDULER (trade-wise budget vs spend vs progress) =====================
@@ -12763,6 +12935,13 @@ function $$(s){ return Array.from(document.querySelectorAll(s)); }
    as an instruction ("do X to get Y"), not a changelog line. */
 const WN_KEY="lsa_seen_build";
 const WHATS_NEW=[
+  {build:"b113",date:"19 Nov 2026",title:"Supply-chain agent — WhatsApp a vendor quote, get a PO",points:[
+    "WhatsApp the vendor's quotation (photo, PDF or typed lines) to the Lintel number with the caption <b>quote 028 electrical</b> (project + package). The agent reads every line, matches the vendor, runs the <b>budget check</b> for that trade package and replies with a summary and <b>Draft PO</b> / <b>Change project</b> / <b>Discard</b> buttons. Reply <b>package plumbing</b>, <b>project 028</b> or <b>GST 12</b> to correct it.",
+    "<b>Draft PO</b> creates the vendor PO (pending approval) and pings Amit and Akshay with one-tap <b>Approve / Hold / Reject</b>. Approving commits the cost to the project's package and sends the branded PO PDF to the vendor on WhatsApp (and email), then tells the PM. 🔴 <b>Over budget</b> is shown before anyone approves — the button reads <b>Approve (over)</b>.",
+    "Inside Lintel OS: Project → Finance → <b>Procurement</b> now opens with the <b>Supply-chain agent</b> card — budget by package (BOQ cost basis, or an indicative sell − 35% margin when the BOQ isn't costed), <b>⬆ Upload quote</b> / <b>Type a quote</b>, and the quotes received. Every agent-drafted PO carries a budget banner, and <b>Send to vendor</b> now delivers the PDF on WhatsApp.",
+    "Admin / Sales Head: the Dashboard has a <b>Supply desk</b> card — POs awaiting approval with their budget flag (Approve / Reject right there), quotes received in the last 30 days, and the agent's activity log.",
+    "WhatsApp commands: <b>budget 028</b> (packages vs committed), <b>po 028</b> (orders on a project), <b>paid 50000 LSA-PO-S-2026-003 UTR123</b> (record a vendor payment — approvers), <b>send LSA-PO-…</b>, <b>vendor &lt;name&gt; &lt;phone&gt;</b>, <b>help</b>.",
+  ]},
   {build:"b107",date:"24 Oct 2026",title:"Finance hub — GST tax invoices, vendor bills & payables, cash view",points:[
     "Project → Finance now has a <b>Tax Invoices</b> tab. Press <b>+ New tax invoice</b> (or <b>Tax invoice</b> next to a milestone on Payments) to draft a GST invoice: bill-to name, GSTIN, state and place of supply, SAC lines, CGST/SGST or IGST worked out for you, amount in words. Press <b>Issue</b> to reserve the number from the company series (LSA/TI/26-27/001) — an issued invoice is final; cancel it with a reason to raise a fresh one. Proforma invoices stay on Payments for advances.",
     "Open any approved vendor PO (Finance → Procurement) and press <b>+ Add bill</b> the day the vendor's bill arrives — bill no., date, taxable, GST, TDS, optional scan. Bills above the PO total are refused (revise the PO first). When you record a payment, pick <b>Against bill</b> so the bill clears.",
@@ -14903,7 +15082,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b112 · 12 Nov 2026";
+const APP_BUILD = "b113 · 19 Nov 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
