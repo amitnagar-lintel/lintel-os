@@ -6069,6 +6069,8 @@ async function pwReview(p,body){
 async function pwPayments(p,body){
   const {data:pays}=await sb.from("project_payments").select("*").eq("project_id",p.id).order("paid_on",{ascending:false});
   const {data:miles}=await sb.from("payment_milestones").select("*").eq("project_id",p.id).order("sort_idx").order("id");
+  const {data:clinks}=await sb.from("custom_payment_links").select("*").eq("project_id",p.id).order("created_at",{ascending:false});
+  const clist=clinks||[];
   const list=pays||[];
   // received-so-far against each milestone (links from PAYCAP-01)
   const recByMile={}; list.forEach(r=>{ if(r.milestone_id!=null) recByMile[r.milestone_id]=(recByMile[r.milestone_id]||0)+Number(r.amount||0); });
@@ -6118,7 +6120,21 @@ async function pwPayments(p,body){
       ${list.length?`<table><thead><tr><th>Date</th><th>Stage</th><th>Mode</th><th>Reference</th><th class="num">Amount</th>${ro?'':'<th></th>'}</tr></thead><tbody>
         ${list.map(r=>`<tr><td>${r.paid_on}</td><td>${esc(r.stage||'—')}</td><td>${esc(r.mode||'—')}</td><td class="mono">${esc(r.reference||'—')}</td><td class="num mono">${fmt(r.amount)}</td>${ro?'':`<td style="white-space:nowrap"><button class="linkbtn" data-rcpt="${r.id}">Receipt</button> <button class="linkbtn del" data-pid="${r.id}" style="margin-left:6px">Delete</button></td>`}</tr>`).join("")}
       </tbody></table>`:emptyState("No payments recorded yet",ro?"":"Record the first receipt with + Record payment.")}
-    </div>`;
+    </div>
+
+    ${clist.length?`<div class="pw-card">
+      <div class="ov-head"><div class="sec-label" style="border:none;padding:0">Custom payment links</div></div>
+      <table><thead><tr><th>Date</th><th>Purpose</th><th class="num">Amount</th><th>Status</th>${ro?'':'<th></th>'}</tr></thead><tbody>
+        ${clist.map(c=>`<tr>
+          <td>${new Date(c.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}</td>
+          <td>${esc(c.label||'Custom payment')}</td>
+          <td class="num mono">${fmt(c.amount)}</td>
+          <td>${c.status==='paid'?'<span class="ex-st done">Paid</span>':c.status==='cancelled'?'<span class="ex-st todo">Cancelled</span>':'<span class="ex-st in_progress">Link sent</span>'}</td>
+          ${ro?'':`<td style="white-space:nowrap">${(c.razorpay_link&&c.status!=='cancelled')?`<button class="linkbtn" data-clcopy="${c.id}">Copy link</button>${p.client_phone?` · <button class="linkbtn" data-clwa="${c.id}">WhatsApp</button>`:''}`:''}${c.status==='link_sent'?` · <button class="linkbtn del" data-clx="${c.id}">Cancel</button>`:''}</td>`}
+        </tr>`).join("")}
+      </tbody></table>
+      <div class="hint">A custom link flips to <b>Paid</b> automatically when the client pays, and the amount posts to the ledger above.</div>
+    </div>`:''}`;
 
   // share payment details -> prefilled email
   $("#payShare").onclick=()=>sharePaymentDetails(p,balance);
@@ -6131,6 +6147,22 @@ async function pwPayments(p,body){
   if(!ro){
     $("#payAdd").onclick=()=>paymentForm(p);
     if($("#payCustomLink")) $("#payCustomLink").onclick=()=>customPaymentLink(p);
+    body.querySelectorAll("[data-clcopy]").forEach(b=>b.onclick=()=>{
+      const c=clist.find(x=>String(x.id)===String(b.dataset.clcopy)); if(!c||!c.razorpay_link) return;
+      navigator.clipboard?.writeText(c.razorpay_link); toast("Payment link copied");
+    });
+    body.querySelectorAll("[data-clwa]").forEach(b=>b.onclick=()=>{
+      const c=clist.find(x=>String(x.id)===String(b.dataset.clwa)); if(!c||!c.razorpay_link||!p.client_phone) return;
+      const msg=`Dear ${p.client_name||'Client'},\n\n${c.label||'Custom payment'}:\n${c.razorpay_link}\n\nAmount: ₹${Number(c.amount).toLocaleString('en-IN')}\n\n— Team Lintel`;
+      waOpen(p.client_phone,msg);
+    });
+    body.querySelectorAll("[data-clx]").forEach(b=>b.onclick=async()=>{
+      const c=clist.find(x=>String(x.id)===String(b.dataset.clx)); if(!c) return;
+      if(!confirm("Cancel this custom payment link? It stops showing as pending. (The Razorpay link itself stays valid until it expires — share a new one if needed.)")) return;
+      const {error}=await sb.from("custom_payment_links").update({status:"cancelled"}).eq("id",c.id);
+      if(error) return toast(error.message);
+      toast("Custom link cancelled"); pwPayments(p,$("#pwBody"));
+    });
     $("#payInv").onclick=()=>invoicedForm(p);
     if($("#mileSetup")) $("#mileSetup").onclick=()=>milestoneSetup(p,mlist);
     body.querySelectorAll("[data-pi]").forEach(b=>b.onclick=()=>{
@@ -6335,7 +6367,7 @@ async function customPaymentLink(p){
       const r=await fetch(PRIYA_SERVER+"/payment/create-link",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          projectId:p.id, amount, label,
+          projectId:p.id, amount, label, createdBy:(me&&me.id)||null,
           clientName:p.client_name||p.name, clientPhone:p.client_phone, clientEmail:p.client_email,
           boqRef:`BOQ/${p.code||'LSA'}`
         })
@@ -6346,6 +6378,7 @@ async function customPaymentLink(p){
         navigator.clipboard?.writeText(data.short_url);
         closeModal();
         toast("Payment link created & copied");
+        pwPayments(p,$("#pwBody"));
         if(p.client_phone){
           const msg=`Dear ${p.client_name||'Client'},\n\n${label}:\n${data.short_url}\n\nAmount: ₹${amount.toLocaleString('en-IN')}\n\n— Team Lintel`;
           if(confirm("Link copied. Send to client on WhatsApp now?")) waOpen(p.client_phone,msg);
@@ -14946,7 +14979,7 @@ async function assistClear(){
    Bump APP_BUILD on every deploy. Shown in the header so "is my browser on the
    current build?" is answerable without guesswork — a stale service worker once
    hid a whole feature and cost an afternoon of hunting. */
-const APP_BUILD = "b113 · 21 Nov 2026";
+const APP_BUILD = "b114 · 21 Nov 2026";
 (function(){
   const t=document.getElementById("buildTag");
   if(t) t.textContent=APP_BUILD;
